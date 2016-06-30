@@ -19,6 +19,7 @@
 #include <map>
 
 #include <boost/optional.hpp>
+#include <boost/utility/in_place_factory.hpp>
 
 #include "common/armor.h"
 #include "common/mime.h"
@@ -199,13 +200,6 @@ public:
   virtual RGWOpType get_type() { return RGW_OP_GET_OBJ; }
   virtual uint32_t op_mask() { return RGW_OP_TYPE_READ; }
   virtual bool need_object_expiration() { return false; }
-  /**
-   * calculates filter used to decrypt RGW objects data
-   */
-  virtual int get_decrypt_filter(RGWGetDataCB** filter, RGWGetDataCB& cb) {
-    *filter = NULL;
-    return 0;
-  }
 };
 
 class RGWGetObj_CB : public RGWGetDataCB
@@ -223,30 +217,30 @@ public:
 class RGWGetObj_Filter : public RGWGetDataCB
 {
 protected:
-  RGWGetDataCB& next;
+  RGWGetDataCB* next;
 public:
-  RGWGetObj_Filter(RGWGetDataCB& next): next(next) {}
+  RGWGetObj_Filter(RGWGetDataCB* next): next(next) {}
   virtual ~RGWGetObj_Filter() {}
   /**
    * Passes data through filter.
    * Filter can modify content of bl.
    * When bl_len == 0 , it means 'flush
    */
-  virtual int handle_data(bufferlist& bl, off_t bl_ofs, off_t bl_len) {
-    return next.handle_data(bl, bl_ofs, bl_len);
+  virtual int handle_data(bufferlist& bl, off_t bl_ofs, off_t bl_len) override {
+    return next->handle_data(bl, bl_ofs, bl_len);
   }
   /**
    * Flushes any cached data. Used by RGWGetObjFilter.
    * Return logic same as handle_data.
    */
-  virtual int flush() {
-    return next.flush();
+  virtual int flush() override {
+    return next->flush();
   }
   /**
    * Allows filter to extend range required for successful filtering
    */
-  virtual void fixup_range(off_t& bl_ofs, off_t& bl_len) {
-    next.fixup_range(bl_ofs, bl_len);
+  virtual void fixup_range(off_t& ofs, off_t& end) override {
+    next->fixup_range(ofs, end);
   }
 };
 
@@ -743,7 +737,7 @@ public:
   }
 
   virtual RGWPutObjProcessor *select_processor(RGWObjectCtx& obj_ctx, bool *is_multipart);
-  void dispose_processor(RGWPutObjProcessor *processor);
+  void dispose_processor(RGWPutObjDataProcessor *processor);
 
   int verify_permission();
   void pre_exec();
@@ -760,16 +754,16 @@ public:
 class RGWPutObj_Filter : public RGWPutObjDataProcessor
 {
 protected:
-  RGWPutObjDataProcessor& next;
+  RGWPutObjDataProcessor* next;
 public:
-  RGWPutObj_Filter(RGWPutObjDataProcessor& next) :
+  RGWPutObj_Filter(RGWPutObjDataProcessor* next) :
   next(next){}
-  virtual ~RGWPutObj_Filter(){}
-  virtual int handle_data(bufferlist& bl, off_t ofs, void **phandle, bool *again) {
-    return next.handle_data(bl, ofs, phandle, again);
+  virtual ~RGWPutObj_Filter() {}
+  virtual int handle_data(bufferlist& bl, off_t ofs, void **phandle, rgw_obj *pobj, bool *again) override {
+    return next->handle_data(bl, ofs, phandle, pobj, again);
   }
-  virtual int throttle_data(void *handle, bool need_to_wait) {
-    return next.throttle_data(handle, need_to_wait);
+  virtual int throttle_data(void *handle, const rgw_obj& obj, bool need_to_wait) override {
+    return next->throttle_data(handle, obj, need_to_wait);
   }
 }; /* RGWPutObj_Filter */
 
@@ -811,7 +805,7 @@ public:
   void execute();
 
   RGWPutObjProcessor *select_processor(RGWObjectCtx& obj_ctx);
-  void dispose_processor(RGWPutObjProcessor *processor);
+  void dispose_processor(RGWPutObjDataProcessor *processor);
 
   virtual int get_params() = 0;
   virtual int get_data(bufferlist& bl) = 0;
