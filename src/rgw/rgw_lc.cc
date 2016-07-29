@@ -54,7 +54,7 @@ void *RGWLC::LCWorker::entry() {
       }
       dout(5) << "life cycle: stop" << dendl;
     }
-    if (lc->going_down())
+    if (going_down)
       break;
 
     utime_t end = ceph_clock_now(cct);
@@ -67,7 +67,7 @@ void *RGWLC::LCWorker::entry() {
     lock.Lock();
     cond.WaitInterval(cct, lock, utime_t(secs, 0));
     lock.Unlock();
-  } while (!lc->going_down());
+  } while (!going_down);
 
   return NULL;
 }
@@ -485,12 +485,8 @@ void RGWLC::stop_processor()
 void RGWLC::LCWorker::stop()
 {
   Mutex::Locker l(lock);
+  going_down = true;
   cond.Signal();
-}
-
-bool RGWLC::going_down()
-{
-  return false;
 }
 
 bool RGWLC::LCWorker::should_work(utime_t& now)

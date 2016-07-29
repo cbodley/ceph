@@ -185,6 +185,7 @@ class RGWLC {
     RGWLC *lc;
     Mutex lock;
     Cond cond;
+    bool going_down{false};
 
   public:
     LCWorker(CephContext *_cct, RGWLC *_lc) : cct(_cct), lc(_lc), lock("LCWorker") {}
@@ -214,7 +215,6 @@ public:
   int bucket_lc_process(string& shard_id);
   int bucket_lc_post(int index, int max_lock_sec, cls_rgw_lc_obj_head& head, 
                                                               pair<string, int >& entry, int& result);
-  bool going_down();
   void start_processor();
   void stop_processor();
 };
