@@ -2050,7 +2050,8 @@ int RGWCloneMetaLogCoroutine::state_read_shard_status()
 {
   const bool add_ref = false; // default constructs with refs=1
 
-  completion.reset(new RGWMetadataLogInfoCompletion(
+  using CompletionRef = boost::intrusive_ptr<RGWMetadataLogInfoCompletion>;
+  completion = CompletionRef(new RGWMetadataLogInfoCompletion(
     [this](int ret, const cls_log_header& header) {
       if (ret < 0) {
         ldout(cct, 1) << "ERROR: failed to read mdlog info with "
