@@ -353,6 +353,8 @@ if(WITH_BLKIN)
   include_directories(SYSTEM src/blkin/blkin-lib)
 endif(WITH_BLKIN)
 
+option(WITH_LIBRADOS_ASIO "Enable asio interfaces to librados" ON)
+
 #option for RGW
 option(WITH_RADOSGW "Rados Gateway is enabled" ON)
 option(WITH_RADOSGW_FCGI_FRONTEND "Rados Gateway's FCGI frontend is enabled" OFF)
@@ -532,6 +534,9 @@ set(BOOST_HEADER_COMPONENTS container)
 
 if(WITH_MGR)
 	list(APPEND BOOST_COMPONENTS python)
+endif()
+if(WITH_LIBRADOS_ASIO)
+  list(APPEND BOOST_COMPONENTS context coroutine)
 endif()
 
 set(Boost_USE_MULTITHREADED ON)

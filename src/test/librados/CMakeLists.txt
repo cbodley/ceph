@@ -182,3 +182,9 @@ target_link_libraries(unittest_librados_config
   ${BLKID_LIBRARIES}
   )
 
+if(WITH_LIBRADOS_ASIO)
+  # unittest_librados_asio
+  add_executable(unittest_librados_asio asio.cc)
+  add_ceph_unittest(unittest_librados_asio ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/unittest_librados_asio)
+  target_link_libraries(unittest_librados_asio global librados Boost::coroutine Boost::context Boost::system)
+endif()
