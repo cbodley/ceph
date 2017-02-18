@@ -12,7 +12,6 @@
 #include <beast/core/placeholders.hpp>
 #include <beast/core/streambuf.hpp>
 #include <beast/http/empty_body.hpp>
-#include <beast/http/parse_error.hpp>
 #include <beast/http/read.hpp>
 #include <beast/http/write.hpp>
 
@@ -77,17 +76,13 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
   tcp::socket socket;
   tcp::endpoint endpoint;
   beast::streambuf buf;
-  beast::http::request_v1<RGWBufferlistBody> request;
+  beast::http::request<RGWBufferlistBody> request;
 
  public:
   void on_read(boost::system::error_code ec) {
     auto cct = env.store->ctx();
     if (ec) {
-      if (ec.category() == beast::http::get_parse_error_category()) {
-        ldout(cct, 1) << "parse failed: " << ec.message() << dendl;
-      } else {
-        ldout(cct, 1) << "read failed: " << ec.message() << dendl;
-      }
+      ldout(cct, 1) << "read failed: " << ec.message() << dendl;
       write_bad_request();
       return;
     }
@@ -104,12 +99,12 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
   }
 
   void write_bad_request() {
-    beast::http::response_v1<beast::http::empty_body> response;
+    beast::http::response<beast::http::empty_body> response;
     response.status = 400;
     response.reason = "Bad Request";
     /* If the request is so terribly malformed that we can't extract even
      * the protocol version, we will use HTTP/1.1 as a fallback. */
-    response.version = request.version ? request.version : 11;
+    response.version = request.version == 10 ? 10 : 11;
     beast::http::prepare(response);
     beast::http::async_write(socket, std::move(response),
                              std::bind(&AsioConnection::on_write,

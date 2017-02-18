@@ -4,14 +4,16 @@
 #define RGW_ASIO_CLIENT_H
 
 #include <boost/asio/ip/tcp.hpp>
-#include <beast/http/body_type.hpp>
-#include <beast/http/concepts.hpp>
-#include <beast/http/message_v1.hpp>
+#include <beast/http/message.hpp>
 #include "include/assert.h"
 
 #include "rgw_client_io.h"
 
 // bufferlist to represent the message body
+// XXX: beast::http::async_read() currently has to read the entire body into
+// memory before completing.  we need the ability to parse only the headers,
+// then read/parse the body as needed by RGWAsioClientIO::read_data()
+// see https://github.com/vinniefalco/Beast/issues/154
 class RGWBufferlistBody {
  public:
   using value_type = ceph::bufferlist;
@@ -30,7 +32,7 @@ class RGWAsioClientIO : public rgw::io::RestfulClient,
   tcp::socket socket;
 
   using body_type = RGWBufferlistBody;
-  using request_type = beast::http::request_v1<body_type>;
+  using request_type = beast::http::request<body_type>;
   request_type request;
 
   bufferlist::const_iterator body_iter;
@@ -76,10 +78,13 @@ class RGWBufferlistBody::reader {
   value_type& bl;
  public:
   template<bool isRequest, typename Headers>
-  explicit reader(message_type<isRequest, Headers>& m) : bl(m.body) {}
+  explicit reader(message_type<isRequest, Headers>& m) noexcept
+    : bl(m.body) {}
 
-  void write(const char* data, size_t size, boost::system::error_code&) {
-    bl.append(data, size);
+  void init(boost::system::error_code& ec) noexcept {}
+
+  void write(const void* data, size_t size, boost::system::error_code&) {
+    bl.append(reinterpret_cast<const char*>(data), size);
   }
 };
 
@@ -91,7 +96,7 @@ class RGWBufferlistBody::writer {
   explicit writer(const message_type<isRequest, Headers>& msg)
     : bl(msg.body) {}
 
-  void init(boost::system::error_code& ec) {}
+  void init(boost::system::error_code& ec) noexcept {}
   uint64_t content_length() const { return bl.length(); }
 
   template<typename Write>
@@ -107,9 +112,5 @@ class RGWBufferlistBody::writer {
     return true;
   }
 };
-static_assert(beast::http::is_ReadableBody<RGWBufferlistBody>{},
-              "RGWBufferlistBody does not satisfy ReadableBody");
-static_assert(beast::http::is_WritableBody<RGWBufferlistBody>{},
-              "RGWBufferlistBody does not satisfy WritableBody");
 
 #endif // RGW_ASIO_CLIENT_H

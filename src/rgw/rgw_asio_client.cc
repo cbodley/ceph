@@ -27,7 +27,7 @@ void RGWAsioClientIO::init_env(CephContext *cct)
   env.init(cct);
   body_iter = request.body.begin();
 
-  const auto& headers = request.headers;
+  const auto& headers = request.fields;
   for (auto header = headers.begin(); header != headers.end(); ++header) {
     const auto& name = header->name();
     const auto& value = header->value();
