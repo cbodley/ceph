@@ -1148,6 +1148,12 @@ int RGWMetaSyncSingleEntryCR::operate() {
       if (sync_status < 0) {
         ldout(sync_env->cct, 10) << *this << ": failed to send read remote metadata entry: section=" << section << " key=" << key << " status=" << sync_status << dendl;
         log_error() << "failed to send read remote metadata entry: section=" << section << " key=" << key << " status=" << sync_status << std::endl;
+        if (last_error_key) {
+          if (*last_error_key == raw_key) {
+            return set_cr_error(sync_status);
+          }
+          *last_error_key = raw_key;
+        }
         yield call(sync_env->error_logger->log_error_cr(sync_env->conn->get_remote_id(), section, key, -sync_status,
                                                         string("failed to read remote metadata entry: ") + cpp_strerror(-sync_status)));
         return set_cr_error(sync_status);
@@ -1272,6 +1278,7 @@ class RGWMetaSyncShardCR : public RGWCoroutine {
   bool lost_lock = false;
 
   bool *reset_backoff;
+  std::string *last_error_key; //< avoid duplicate error log entries
 
   // hold a reference to the cr stack while it's in the map
   using StackRef = boost::intrusive_ptr<RGWCoroutinesStack>;
@@ -1287,11 +1294,12 @@ public:
   RGWMetaSyncShardCR(RGWMetaSyncEnv *_sync_env, const rgw_bucket& _pool,
                      const std::string& period, RGWMetadataLog* mdlog,
                      uint32_t _shard_id, rgw_meta_sync_marker& _marker,
-                     const std::string& period_marker, bool *_reset_backoff)
+                     const std::string& period_marker, bool *_reset_backoff,
+                     std::string *last_error_key)
     : RGWCoroutine(_sync_env->cct), sync_env(_sync_env), pool(_pool),
       period(period), mdlog(mdlog), shard_id(_shard_id), sync_marker(_marker),
       period_marker(period_marker), inc_lock("RGWMetaSyncShardCR::inc_lock"),
-      reset_backoff(_reset_backoff) {
+      reset_backoff(_reset_backoff), last_error_key(last_error_key) {
     *reset_backoff = false;
   }
 
@@ -1446,7 +1454,10 @@ public:
           } else {
             // fetch remote and write locally
             yield {
-              RGWCoroutinesStack *stack = spawn(new RGWMetaSyncSingleEntryCR(sync_env, iter->first, iter->first, MDLOG_STATUS_COMPLETE, marker_tracker), false);
+              RGWCoroutinesStack *stack = spawn(new RGWMetaSyncSingleEntryCR(
+                      sync_env, iter->first, iter->first, MDLOG_STATUS_COMPLETE,
+                      marker_tracker, last_error_key),
+                  false);
               // stack_to_pos holds a reference to the stack
               stack_to_pos[stack] = iter->first;
               pos_to_prev[iter->first] = marker;
@@ -1602,7 +1613,10 @@ public:
             } else {
               raw_key = log_iter->section + ":" + log_iter->name;
               yield {
-                RGWCoroutinesStack *stack = spawn(new RGWMetaSyncSingleEntryCR(sync_env, raw_key, log_iter->id, mdlog_entry.log_data.status, marker_tracker), false);
+                RGWCoroutinesStack *stack = spawn(new RGWMetaSyncSingleEntryCR(
+                        sync_env, raw_key, log_iter->id, mdlog_entry.log_data.status,
+                        marker_tracker, last_error_key),
+                    false);
                 assert(stack);
                 // stack_to_pos holds a reference to the stack
                 stack_to_pos[stack] = log_iter->id;
@@ -1656,6 +1670,7 @@ class RGWMetaSyncShardControlCR : public RGWBackoffControlCR
   uint32_t shard_id;
   rgw_meta_sync_marker sync_marker;
   const std::string period_marker;
+  std::string last_error_key; //< avoid duplicate error log entries
 
 public:
   RGWMetaSyncShardControlCR(RGWMetaSyncEnv *_sync_env, const rgw_bucket& _pool,
@@ -1668,7 +1683,8 @@ public:
 
   RGWCoroutine *alloc_cr() override {
     return new RGWMetaSyncShardCR(sync_env, pool, period, mdlog, shard_id,
-                                  sync_marker, period_marker, backoff_ptr());
+                                  sync_marker, period_marker, backoff_ptr(),
+                                  &last_error_key);
   }
 
   RGWCoroutine *alloc_finisher_cr() override {

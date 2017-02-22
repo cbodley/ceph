@@ -418,6 +418,7 @@ class RGWMetaSyncSingleEntryCR : public RGWCoroutine {
   bufferlist md_bl;
 
   RGWMetaSyncShardMarkerTrack *marker_tracker;
+  std::string *last_error_key;
 
   int tries;
 
@@ -425,14 +426,15 @@ class RGWMetaSyncSingleEntryCR : public RGWCoroutine {
 
 public:
   RGWMetaSyncSingleEntryCR(RGWMetaSyncEnv *_sync_env,
-		           const string& _raw_key, const string& _entry_marker,
+                           const string& _raw_key, const string& _entry_marker,
                            const RGWMDLogStatus& _op_status,
-                           RGWMetaSyncShardMarkerTrack *_marker_tracker) : RGWCoroutine(_sync_env->cct),
-                                                      sync_env(_sync_env),
-						      raw_key(_raw_key), entry_marker(_entry_marker),
-                                                      op_status(_op_status),
-                                                      pos(0), sync_status(0),
-                                                      marker_tracker(_marker_tracker), tries(0) {
+                           RGWMetaSyncShardMarkerTrack *_marker_tracker,
+                           std::string *last_error_key = nullptr)
+    : RGWCoroutine(_sync_env->cct), sync_env(_sync_env), raw_key(_raw_key),
+      entry_marker(_entry_marker), op_status(_op_status), pos(0),
+      sync_status(0), marker_tracker(_marker_tracker),
+      last_error_key(last_error_key), tries(0)
+  {
     error_injection = (sync_env->cct->_conf->rgw_sync_meta_inject_err_probability > 0);
   }
 
