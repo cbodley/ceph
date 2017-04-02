@@ -1997,7 +1997,7 @@ void RGWFormPost::get_owner_info(const req_state* const s,
   RGWBucketInfo bucket_info;
   int ret = store->get_bucket_info(*static_cast<RGWObjectCtx *>(s->obj_ctx),
                                    bucket_tenant, bucket_name,
-                                   bucket_info, nullptr);
+                                   bucket_info, s->yield);
   if (ret < 0) {
     throw ret;
   }

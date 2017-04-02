@@ -3153,7 +3153,8 @@ int rgw_bucket_sync_status(RGWRados *store, const std::string& source_zone,
   // read the bucket instance info for num_shards
   RGWObjectCtx ctx(store);
   RGWBucketInfo info;
-  int ret = store->get_bucket_instance_info(ctx, bucket, info, nullptr, nullptr);
+  int ret = store->get_bucket_instance_info(ctx, bucket, info,
+                                            nullptr, nullptr, null_yield);
   if (ret < 0) {
     return ret;
   }

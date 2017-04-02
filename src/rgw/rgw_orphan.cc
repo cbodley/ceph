@@ -471,7 +471,8 @@ int RGWOrphanSearch::build_linked_oids_for_bucket(const string& bucket_instance_
   ldout(store->ctx(), 10) << "building linked oids for bucket instance: " << bucket_instance_id << dendl;
   RGWBucketInfo bucket_info;
   RGWObjectCtx obj_ctx(store);
-  int ret = store->get_bucket_instance_info(obj_ctx, bucket_instance_id, bucket_info, NULL, NULL);
+  int ret = store->get_bucket_instance_info(obj_ctx, bucket_instance_id, bucket_info,
+                                            nullptr, nullptr, null_yield);
   if (ret < 0) {
     if (ret == -ENOENT) {
       /* probably raced with bucket removal */

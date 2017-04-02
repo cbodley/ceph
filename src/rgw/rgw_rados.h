@@ -3411,36 +3411,45 @@ public:
   int put_bucket_instance_info(RGWBucketInfo& info, bool exclusive, ceph::real_time mtime, map<string, bufferlist> *pattrs);
   int get_bucket_entrypoint_info(RGWObjectCtx& obj_ctx, const string& tenant_name, const string& bucket_name,
                                  RGWBucketEntryPoint& entry_point, RGWObjVersionTracker *objv_tracker,
-                                 ceph::real_time *pmtime, map<string, bufferlist> *pattrs, rgw_cache_entry_info *cache_info = NULL);
-  int get_bucket_instance_info(RGWObjectCtx& obj_ctx, const string& meta_key, RGWBucketInfo& info, ceph::real_time *pmtime, map<string, bufferlist> *pattrs);
-  int get_bucket_instance_info(RGWObjectCtx& obj_ctx, const rgw_bucket& bucket, RGWBucketInfo& info, ceph::real_time *pmtime, map<string, bufferlist> *pattrs);
-  int get_bucket_instance_from_oid(RGWObjectCtx& obj_ctx, const string& oid, RGWBucketInfo& info, ceph::real_time *pmtime, map<string, bufferlist> *pattrs,
+                                 ceph::real_time *pmtime, map<string, bufferlist> *pattrs,
+                                 optional_yield_context y,
+                                 rgw_cache_entry_info *cache_info = NULL);
+  int get_bucket_instance_info(RGWObjectCtx& obj_ctx, const string& meta_key,
+                               RGWBucketInfo& info, ceph::real_time *pmtime,
+                               map<string, bufferlist> *pattrs,
+                               optional_yield_context y);
+  int get_bucket_instance_info(RGWObjectCtx& obj_ctx, const rgw_bucket& bucket,
+                               RGWBucketInfo& info, ceph::real_time *pmtime,
+                               map<string, bufferlist> *pattrs,
+                               optional_yield_context y);
+  int get_bucket_instance_from_oid(RGWObjectCtx& obj_ctx, const string& oid,
+                                   RGWBucketInfo& info, ceph::real_time *pmtime,
+                                   map<string, bufferlist> *pattrs,
+                                   optional_yield_context y,
                                    rgw_cache_entry_info *cache_info = NULL);
 
   int convert_old_bucket_info(RGWObjectCtx& obj_ctx, const string& tenant_name, const string& bucket_name);
   static void make_bucket_entry_name(const string& tenant_name, const string& bucket_name, string& bucket_entry);
 
-
 private:
   int _get_bucket_info(RGWObjectCtx& obj_ctx, const string& tenant,
 		       const string& bucket_name, RGWBucketInfo& info,
-		       real_time *pmtime,
+		       optional_yield_context y, real_time *pmtime,
 		       map<string, bufferlist> *pattrs,
 		       boost::optional<obj_version> refresh_version);
 public:
-
-
   int get_bucket_info(RGWObjectCtx& obj_ctx,
 		      const string& tenant_name, const string& bucket_name,
-		      RGWBucketInfo& info,
-		      ceph::real_time *pmtime, map<string, bufferlist> *pattrs = NULL);
+		      RGWBucketInfo& info, optional_yield_context y,
+		      ceph::real_time *pmtime = nullptr,
+		      map<string, bufferlist> *pattrs = NULL);
 
   // Returns true on successful refresh. Returns false if there was an
   // error or the version stored on the OSD is the same as that
   // presented in the BucketInfo structure.
   //
-  int try_refresh_bucket_info(RGWBucketInfo& info,
-			      ceph::real_time *pmtime,
+  int try_refresh_bucket_info(RGWBucketInfo& info, optional_yield_context y,
+			      ceph::real_time *pmtime = nullptr,
 			      map<string, bufferlist> *pattrs = nullptr);
 
   int put_linked_bucket_info(RGWBucketInfo& info, bool exclusive, ceph::real_time mtime, obj_version *pep_objv,
