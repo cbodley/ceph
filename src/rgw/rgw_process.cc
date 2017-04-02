@@ -115,7 +115,8 @@ int process_request(RGWRados* const store,
                     const std::string& frontend_prefix,
                     const rgw_auth_registry_t& auth_registry,
                     RGWRestfulIO* const client_io,
-                    OpsLogSocket* const olog)
+                    OpsLogSocket* const olog,
+                    optional_yield_context yield)
 {
   int ret = 0;
 
@@ -140,6 +141,7 @@ int process_request(RGWRados* const store,
   s->req_id = store->unique_id(req->id);
   s->trans_id = store->unique_trans_id(req->id);
   s->host_id = store->host_id;
+  s->yield = yield;
 
   req->log_format(s, "initializing for trans_id = %s", s->trans_id.c_str());
 

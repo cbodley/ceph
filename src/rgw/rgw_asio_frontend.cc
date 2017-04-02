@@ -167,7 +167,8 @@ class Connection {
                                   &real_client))));
     RGWRestfulIO client(ctx(), &real_client_io);
     process_request(env.store, env.rest, &req, env.uri_prefix,
-                    *env.auth_registry, &client, env.olog);
+                    *env.auth_registry, &client, env.olog,
+                    null_yield);
 
     if (parser->is_keep_alive()) {
       // parse any unread bytes from the previous message (in case we replied
