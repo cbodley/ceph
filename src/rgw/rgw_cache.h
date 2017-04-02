@@ -238,7 +238,8 @@ public:
                      RGWObjVersionTracker *objv_tracker, rgw_raw_obj& obj,
                      bufferlist& bl, off_t ofs, off_t end,
                      map<string, bufferlist> *attrs,
-                     rgw_cache_entry_info *cache_info) override;
+                     rgw_cache_entry_info *cache_info,
+                     optional_yield_context y) override;
 
   int raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime, uint64_t *epoch, map<string, bufferlist> *attrs,
                    bufferlist *first_chunk, RGWObjVersionTracker *objv_tracker) override;
@@ -283,13 +284,15 @@ int RGWCache<T>::get_system_obj(RGWObjectCtx& obj_ctx, RGWRados::SystemObject::R
                      RGWObjVersionTracker *objv_tracker, rgw_raw_obj& obj,
                      bufferlist& obl, off_t ofs, off_t end,
                      map<string, bufferlist> *attrs,
-                     rgw_cache_entry_info *cache_info)
+                     rgw_cache_entry_info *cache_info,
+                     optional_yield_context y)
 {
   rgw_pool pool;
   string oid;
   normalize_pool_and_obj(obj.pool, obj.oid, pool, oid);
   if (ofs != 0)
-    return T::get_system_obj(obj_ctx, read_state, objv_tracker, obj, obl, ofs, end, attrs, cache_info);
+    return T::get_system_obj(obj_ctx, read_state, objv_tracker, obj, obl,
+                             ofs, end, attrs, cache_info, y);
 
   string name = normal_name(obj.pool, oid);
 
@@ -318,7 +321,8 @@ int RGWCache<T>::get_system_obj(RGWObjectCtx& obj_ctx, RGWRados::SystemObject::R
       *attrs = info.xattrs;
     return bl.length();
   }
-  int r = T::get_system_obj(obj_ctx, read_state, objv_tracker, obj, obl, ofs, end, attrs, cache_info);
+  int r = T::get_system_obj(obj_ctx, read_state, objv_tracker, obj, obl,
+                            ofs, end, attrs, cache_info, y);
   if (r < 0) {
     if (r == -ENOENT) { // only update ENOENT, we'd rather retry other errors
       info.status = r;

@@ -360,7 +360,8 @@ int read_history(RGWRados *store, RGWMetadataLogHistory *state,
   auto& pool = store->get_zone_params().log_pool;
   const auto& oid = RGWMetadataLogHistory::oid;
   bufferlist bl;
-  int ret = rgw_get_system_obj(store, ctx, pool, oid, bl, objv_tracker, nullptr);
+  int ret = rgw_get_system_obj(store, ctx, pool, oid, bl,
+                               null_yield, objv_tracker);
   if (ret < 0) {
     return ret;
   }
