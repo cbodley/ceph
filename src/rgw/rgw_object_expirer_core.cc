@@ -55,7 +55,7 @@ int RGWObjectExpirer::init_bucket_info(const string& tenant_name,
    */
   const string bucket_instance_id = bucket_name + ":" + bucket_id;
   int ret = store->get_bucket_instance_info(obj_ctx, bucket_instance_id,
-          bucket_info, NULL, NULL);
+          bucket_info, nullptr, nullptr, null_yield);
   return ret;
 }
 

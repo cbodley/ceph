@@ -420,9 +420,11 @@ int rgw_build_bucket_policies(RGWRados* store, struct req_state* s)
     RGWBucketInfo source_info;
 
     if (s->bucket_instance_id.empty()) {
-      ret = store->get_bucket_info(obj_ctx, s->src_tenant_name, s->src_bucket_name, source_info, NULL);
+      ret = store->get_bucket_info(obj_ctx, s->src_tenant_name, s->src_bucket_name,
+                                   source_info, s->yield);
     } else {
-      ret = store->get_bucket_instance_info(obj_ctx, s->bucket_instance_id, source_info, NULL, NULL);
+      ret = store->get_bucket_instance_info(obj_ctx, s->bucket_instance_id, source_info,
+                                            nullptr, nullptr, s->yield);
     }
     if (ret == 0) {
       string& zonegroup = source_info.zonegroup;
@@ -441,9 +443,13 @@ int rgw_build_bucket_policies(RGWRados* store, struct req_state* s)
   if (!s->bucket_name.empty()) {
     s->bucket_exists = true;
     if (s->bucket_instance_id.empty()) {
-      ret = store->get_bucket_info(obj_ctx, s->bucket_tenant, s->bucket_name, s->bucket_info, NULL, &s->bucket_attrs);
+      ret = store->get_bucket_info(obj_ctx, s->bucket_tenant, s->bucket_name,
+                                   s->bucket_info, s->yield, nullptr,
+                                   &s->bucket_attrs);
     } else {
-      ret = store->get_bucket_instance_info(obj_ctx, s->bucket_instance_id, s->bucket_info, NULL, &s->bucket_attrs);
+      ret = store->get_bucket_instance_info(obj_ctx, s->bucket_instance_id,
+                                            s->bucket_info, nullptr,
+                                            &s->bucket_attrs, s->yield);
     }
     if (ret < 0) {
       if (ret != -ENOENT) {
@@ -1314,8 +1320,8 @@ int RGWGetObj::handle_user_manifest(const char *prefix)
     map<string, bufferlist> bucket_attrs;
     RGWObjectCtx obj_ctx(store);
     int r = store->get_bucket_info(obj_ctx, s->user->user_id.tenant,
-				  bucket_name, bucket_info, NULL,
-				  &bucket_attrs);
+                                   bucket_name, bucket_info, s->yield,
+                                   nullptr, &bucket_attrs);
     if (r < 0) {
       ldout(s->cct, 0) << "could not get bucket info for bucket="
 		       << bucket_name << dendl;
@@ -1448,8 +1454,8 @@ int RGWGetObj::handle_slo_manifest(bufferlist& bl)
         map<string, bufferlist> bucket_attrs;
         RGWObjectCtx obj_ctx(store);
         int r = store->get_bucket_info(obj_ctx, s->user->user_id.tenant,
-                                       bucket_name, bucket_info, nullptr,
-                                       &bucket_attrs);
+                                       bucket_name, bucket_info, s->yield,
+                                       nullptr, &bucket_attrs);
         if (r < 0) {
           ldout(s->cct, 0) << "could not get bucket info for bucket="
 			   << bucket_name << dendl;
@@ -2573,7 +2579,8 @@ void RGWCreateBucket::execute()
    * specific request */
   RGWObjectCtx& obj_ctx = *static_cast<RGWObjectCtx *>(s->obj_ctx);
   op_ret = store->get_bucket_info(obj_ctx, s->bucket_tenant, s->bucket_name,
-				  s->bucket_info, NULL, &s->bucket_attrs);
+                                  s->bucket_info, s->yield, nullptr,
+                                  &s->bucket_attrs);
   if (op_ret < 0 && op_ret != -ENOENT)
     return;
   s->bucket_exists = (op_ret != -ENOENT);
@@ -2740,7 +2747,7 @@ void RGWCreateBucket::execute()
       map<string, bufferlist> battrs;
 
       op_ret = store->get_bucket_info(obj_ctx, s->bucket_tenant, s->bucket_name,
-                                      binfo, nullptr, &battrs);
+                                      binfo, s->yield, nullptr, &battrs);
       if (op_ret < 0) {
         return;
       } else if (binfo.owner.compare(s->user->user_id) != 0) {
@@ -4321,10 +4328,14 @@ int RGWCopyObj::verify_permission()
   RGWObjectCtx& obj_ctx = *static_cast<RGWObjectCtx *>(s->obj_ctx);
 
   if (s->bucket_instance_id.empty()) {
-    op_ret = store->get_bucket_info(obj_ctx, src_tenant_name, src_bucket_name, src_bucket_info, NULL, &src_attrs);
+    op_ret = store->get_bucket_info(obj_ctx, src_tenant_name, src_bucket_name,
+                                    src_bucket_info, s->yield,
+                                    nullptr, &src_attrs);
   } else {
     /* will only happen in intra region sync where the source and dest bucket is the same */
-    op_ret = store->get_bucket_instance_info(obj_ctx, s->bucket_instance_id, src_bucket_info, NULL, &src_attrs);
+    op_ret = store->get_bucket_instance_info(obj_ctx, s->bucket_instance_id,
+                                             src_bucket_info, nullptr,
+                                             &src_attrs, s->yield);
   }
   if (op_ret < 0) {
     if (op_ret == -ENOENT) {
@@ -4380,7 +4391,7 @@ int RGWCopyObj::verify_permission()
     dest_attrs = src_attrs;
   } else {
     op_ret = store->get_bucket_info(obj_ctx, dest_tenant_name, dest_bucket_name,
-                                    dest_bucket_info, nullptr, &dest_attrs);
+                                    dest_bucket_info, s->yield, nullptr, &dest_attrs);
     if (op_ret < 0) {
       if (op_ret == -ENOENT) {
         op_ret = -ERR_NO_SUCH_BUCKET;
@@ -5850,8 +5861,8 @@ bool RGWBulkDelete::Deleter::delete_single(const acct_path_t& path)
   ACLOwner bowner;
 
   int ret = store->get_bucket_info(obj_ctx, s->user->user_id.tenant,
-                                   path.bucket_name, binfo, nullptr,
-                                   &battrs);
+                                   path.bucket_name, binfo, s->yield,
+                                   nullptr, &battrs);
   if (ret < 0) {
     goto binfo_fail;
   }
@@ -6131,7 +6142,7 @@ int RGWBulkUploadOp::handle_dir(const boost::string_ref path)
   RGWBucketInfo binfo;
   std::map<std::string, ceph::bufferlist> battrs;
   op_ret = store->get_bucket_info(*dir_ctx, s->bucket_tenant, bucket_name,
-                                  binfo, NULL, &battrs);
+                                  binfo, s->yield, nullptr, &battrs);
   if (op_ret < 0 && op_ret != -ENOENT) {
     return op_ret;
   }
@@ -6326,7 +6337,8 @@ int RGWBulkUploadOp::handle_file(const boost::string_ref path,
   std::map<std::string, ceph::bufferlist> battrs;
   ACLOwner bowner;
   op_ret = store->get_bucket_info(obj_ctx, s->user->user_id.tenant,
-                                  bucket_name, binfo, nullptr, &battrs);
+                                  bucket_name, binfo, s->yield,
+                                  nullptr, &battrs);
   if (op_ret == -ENOENT) {
     ldout(s->cct, 20) << "bulk upload: non existent directory=" << bucket_name
                       << dendl;

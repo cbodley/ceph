@@ -147,12 +147,14 @@ void RGWOp_OBJLog_DeleteBounds::execute() {
   http_ret = rl.delete_bound(shard, daemon_id, purge_all);
 }
 
-static int bucket_instance_to_bucket(RGWRados *store, const string& bucket_instance, rgw_bucket& bucket) {
+static int bucket_instance_to_bucket(RGWRados *store, const string& bucket_instance,
+                                     rgw_bucket& bucket, optional_yield_context y) {
   RGWBucketInfo bucket_info;
   real_time mtime;
   
   RGWObjectCtx obj_ctx(store);
-  int r = store->get_bucket_instance_info(obj_ctx, bucket_instance, bucket_info, &mtime, NULL);
+  int r = store->get_bucket_instance_info(obj_ctx, bucket_instance, bucket_info,
+                                          &mtime, nullptr, y);
   if (r < 0) {
     dout(5) << "could not get bucket instance info for bucket=" << bucket_instance << ": " << cpp_strerror(r) << dendl;
     if (r == -ENOENT)
@@ -194,7 +196,8 @@ void RGWOp_BILog_SetBounds::execute() {
 
   rgw_bucket bucket;
 
-  if ((http_ret = bucket_instance_to_bucket(store, bucket_instance, bucket)) < 0) {
+  if ((http_ret = bucket_instance_to_bucket(store, bucket_instance,
+                                            bucket, s->yield)) < 0) {
     return;
   }
   
@@ -222,7 +225,8 @@ void RGWOp_BILog_GetBounds::execute() {
     return;
   }
 
-  if ((http_ret = bucket_instance_to_bucket(store, bucket_instance, bucket)) < 0) 
+  if ((http_ret = bucket_instance_to_bucket(store, bucket_instance,
+                                            bucket, s->yield)) < 0) 
     return;
 
   RGWReplicaBucketLogger rl(store);
@@ -263,7 +267,8 @@ void RGWOp_BILog_DeleteBounds::execute() {
 
   rgw_bucket bucket;
 
-  if ((http_ret = bucket_instance_to_bucket(store, bucket_instance, bucket)) < 0) {
+  if ((http_ret = bucket_instance_to_bucket(store, bucket_instance,
+                                            bucket, s->yield)) < 0) {
     return;
   }
 

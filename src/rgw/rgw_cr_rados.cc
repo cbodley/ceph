@@ -482,7 +482,8 @@ bool RGWOmapAppend::finish() {
 int RGWAsyncGetBucketInstanceInfo::_send_request()
 {
   RGWObjectCtx obj_ctx(store);
-  int r = store->get_bucket_instance_info(obj_ctx, bucket, *bucket_info, NULL, NULL);
+  int r = store->get_bucket_instance_info(obj_ctx, bucket, *bucket_info,
+                                          nullptr, nullptr, null_yield);
   if (r < 0) {
     ldout(store->ctx(), 0) << "ERROR: failed to get bucket instance info for "
         << bucket << dendl;

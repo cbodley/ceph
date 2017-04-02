@@ -1050,10 +1050,12 @@ static int init_bucket(const string& tenant_name, const string& bucket_name, con
     RGWObjectCtx obj_ctx(store);
     int r;
     if (bucket_id.empty()) {
-      r = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info, nullptr, pattrs);
+      r = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info,
+                                null_yield,  nullptr, pattrs);
     } else {
       string bucket_instance_id = bucket_name + ":" + bucket_id;
-      r = store->get_bucket_instance_info(obj_ctx, bucket_instance_id, bucket_info, NULL, pattrs);
+      r = store->get_bucket_instance_info(obj_ctx, bucket_instance_id, bucket_info,
+                                          nullptr, pattrs, null_yield);
     }
     if (r < 0) {
       cerr << "could not get bucket info for bucket=" << bucket_name << std::endl;
@@ -1237,7 +1239,8 @@ int set_bucket_quota(RGWRados *store, int opt_cmd,
   RGWBucketInfo bucket_info;
   map<string, bufferlist> attrs;
   RGWObjectCtx obj_ctx(store);
-  int r = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info, NULL, &attrs);
+  int r = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info,
+                                 null_yield, nullptr, &attrs);
   if (r < 0) {
     cerr << "could not get bucket info for bucket=" << bucket_name << ": " << cpp_strerror(-r) << std::endl;
     return -r;
@@ -1505,7 +1508,8 @@ int set_bucket_sync_enabled(RGWRados *store, int opt_cmd, const string& tenant_n
   map<string, bufferlist> attrs;
   RGWObjectCtx obj_ctx(store);
 
-  int r = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info, NULL, &attrs);
+  int r = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info,
+                                 null_yield, nullptr, &attrs);
   if (r < 0) {
     cerr << "could not get bucket info for bucket=" << bucket_name << ": " << cpp_strerror(-r) << std::endl;
     return -r;

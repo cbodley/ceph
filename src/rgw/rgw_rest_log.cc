@@ -387,13 +387,15 @@ void RGWOp_BILog_List::execute() {
   }
 
   if (!bucket_instance.empty()) {
-    http_ret = store->get_bucket_instance_info(obj_ctx, bucket_instance, bucket_info, NULL, NULL);
+    http_ret = store->get_bucket_instance_info(obj_ctx, bucket_instance, bucket_info,
+                                               nullptr, nullptr, s->yield);
     if (http_ret < 0) {
       dout(5) << "could not get bucket instance info for bucket instance id=" << bucket_instance << dendl;
       return;
     }
   } else { /* !bucket_name.empty() */
-    http_ret = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info, NULL, NULL);
+    http_ret = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info,
+                                      s->yield);
     if (http_ret < 0) {
       dout(5) << "could not get bucket info for bucket=" << bucket_name << dendl;
       return;
@@ -480,13 +482,15 @@ void RGWOp_BILog_Info::execute() {
   }
 
   if (!bucket_instance.empty()) {
-    http_ret = store->get_bucket_instance_info(obj_ctx, bucket_instance, bucket_info, NULL, NULL);
+    http_ret = store->get_bucket_instance_info(obj_ctx, bucket_instance, bucket_info,
+                                               nullptr, nullptr, s->yield);
     if (http_ret < 0) {
       dout(5) << "could not get bucket instance info for bucket instance id=" << bucket_instance << dendl;
       return;
     }
   } else { /* !bucket_name.empty() */
-    http_ret = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info, NULL, NULL);
+    http_ret = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info,
+                                      s->yield);
     if (http_ret < 0) {
       dout(5) << "could not get bucket info for bucket=" << bucket_name << dendl;
       return;
@@ -544,13 +548,15 @@ void RGWOp_BILog_Delete::execute() {
   }
 
   if (!bucket_instance.empty()) {
-    http_ret = store->get_bucket_instance_info(obj_ctx, bucket_instance, bucket_info, NULL, NULL);
+    http_ret = store->get_bucket_instance_info(obj_ctx, bucket_instance, bucket_info,
+                                               nullptr, nullptr, s->yield);
     if (http_ret < 0) {
       dout(5) << "could not get bucket instance info for bucket instance id=" << bucket_instance << dendl;
       return;
     }
   } else { /* !bucket_name.empty() */
-    http_ret = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info, NULL, NULL);
+    http_ret = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info,
+                                      s->yield);
     if (http_ret < 0) {
       dout(5) << "could not get bucket info for bucket=" << bucket_name << dendl;
       return;

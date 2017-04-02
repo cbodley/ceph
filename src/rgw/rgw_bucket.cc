@@ -165,7 +165,8 @@ int rgw_bucket_sync_user_stats(RGWRados *store, const string& tenant_name, const
 {
   RGWBucketInfo bucket_info;
   RGWObjectCtx obj_ctx(store);
-  int ret = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info, NULL);
+  int ret = store->get_bucket_info(obj_ctx, tenant_name, bucket_name,
+                                   bucket_info, null_yield);
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: could not fetch bucket info: ret=" << ret << dendl;
     return ret;
@@ -206,7 +207,8 @@ int rgw_link_bucket(RGWRados* const store,
   RGWObjectCtx obj_ctx(store);
 
   if (update_entrypoint) {
-    ret = store->get_bucket_entrypoint_info(obj_ctx, tenant_name, bucket_name, ep, &ot, NULL, &attrs);
+    ret = store->get_bucket_entrypoint_info(obj_ctx, tenant_name, bucket_name,
+                                            ep, &ot, nullptr, &attrs, null_yield);
     if (ret < 0 && ret != -ENOENT) {
       ldout(store->ctx(), 0) << "ERROR: store->get_bucket_entrypoint_info() returned: "
                              << cpp_strerror(-ret) << dendl;
@@ -267,7 +269,8 @@ int rgw_unlink_bucket(RGWRados *store, const rgw_user& user_id, const string& te
   RGWObjVersionTracker ot;
   map<string, bufferlist> attrs;
   RGWObjectCtx obj_ctx(store);
-  ret = store->get_bucket_entrypoint_info(obj_ctx, tenant_name, bucket_name, ep, &ot, NULL, &attrs);
+  ret = store->get_bucket_entrypoint_info(obj_ctx, tenant_name, bucket_name,
+                                          ep, &ot, nullptr, &attrs, null_yield);
   if (ret == -ENOENT)
     return 0;
   if (ret < 0)
@@ -467,7 +470,8 @@ void check_bad_user_bucket_mapping(RGWRados *store, const rgw_user& user_id,
       RGWBucketInfo bucket_info;
       real_time mtime;
       RGWObjectCtx obj_ctx(store);
-      int r = store->get_bucket_info(obj_ctx, user_id.tenant, bucket.name, bucket_info, &mtime);
+      int r = store->get_bucket_info(obj_ctx, user_id.tenant, bucket.name,
+                                     bucket_info, null_yield, &mtime);
       if (r < 0) {
         ldout(store->ctx(), 0) << "could not get bucket info for bucket=" << bucket << dendl;
         continue;
@@ -524,7 +528,8 @@ int rgw_remove_bucket(RGWRados *store, rgw_bucket& bucket, bool delete_children)
 
   string bucket_ver, master_ver;
 
-  ret = store->get_bucket_info(obj_ctx, bucket.tenant, bucket.name, info, NULL);
+  ret = store->get_bucket_info(obj_ctx, bucket.tenant, bucket.name,
+                               info, null_yield);
   if (ret < 0)
     return ret;
 
@@ -624,7 +629,8 @@ int rgw_remove_bucket_bypass_gc(RGWRados *store, rgw_bucket& bucket,
 
   string bucket_ver, master_ver;
 
-  ret = store->get_bucket_info(obj_ctx, bucket.tenant, bucket.name, info, NULL);
+  ret = store->get_bucket_info(obj_ctx, bucket.tenant, bucket.name,
+                               info, null_yield);
   if (ret < 0)
     return ret;
 
@@ -793,7 +799,8 @@ int RGWBucket::init(RGWRados *storage, RGWBucketAdminOpState& op_state)
     return -EINVAL;
 
   if (!bucket_name.empty()) {
-    int r = store->get_bucket_info(obj_ctx, tenant, bucket_name, bucket_info, NULL);
+    int r = store->get_bucket_info(obj_ctx, tenant, bucket_name,
+                                   bucket_info, null_yield);
     if (r < 0) {
       ldout(store->ctx(), 0) << "could not get bucket info for bucket=" << bucket_name << dendl;
       return r;
@@ -839,7 +846,8 @@ int RGWBucket::link(RGWBucketAdminOpState& op_state, std::string *err_msg)
 
   string key = bucket.name + ":" + bucket_id;
   RGWObjectCtx obj_ctx(store);
-  int r = store->get_bucket_instance_info(obj_ctx, key, bucket_info, NULL, &attrs);
+  int r = store->get_bucket_instance_info(obj_ctx, key, bucket_info,
+                                          nullptr, &attrs, null_yield);
   if (r < 0) {
     return r;
   }
@@ -1022,7 +1030,8 @@ int RGWBucket::check_bad_index_multipart(RGWBucketAdminOpState& op_state,
 
   RGWBucketInfo bucket_info;
   RGWObjectCtx obj_ctx(store);
-  int r = store->get_bucket_instance_info(obj_ctx, bucket, bucket_info, nullptr, nullptr);
+  int r = store->get_bucket_instance_info(obj_ctx, bucket, bucket_info,
+                                          nullptr, nullptr, null_yield);
   if (r < 0) {
     ldout(store->ctx(), 0) << "ERROR: " << __func__ << "(): get_bucket_instance_info(bucket=" << bucket << ") returned r=" << r << dendl;
     return r;
@@ -1219,7 +1228,8 @@ int RGWBucket::get_policy(RGWBucketAdminOpState& op_state, RGWAccessControlPolic
 
   RGWBucketInfo bucket_info;
   map<string, bufferlist> attrs;
-  int ret = store->get_bucket_info(obj_ctx, bucket.tenant, bucket.name, bucket_info, NULL, &attrs);
+  int ret = store->get_bucket_info(obj_ctx, bucket.tenant, bucket.name,
+                                   bucket_info, null_yield, nullptr, &attrs);
   if (ret < 0) {
     return ret;
   }
@@ -1395,7 +1405,8 @@ static int bucket_stats(RGWRados *store, const std::string& tenant_name, std::st
 
   real_time mtime;
   RGWObjectCtx obj_ctx(store);
-  int r = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info, &mtime);
+  int r = store->get_bucket_info(obj_ctx, tenant_name, bucket_name,
+                                 bucket_info, null_yield, &mtime);
   if (r < 0)
     return r;
 
@@ -1486,7 +1497,7 @@ int RGWBucketAdminOp::limit_check(RGWRados *store,
 			       * the loop body */
 
 	ret = store->get_bucket_info(obj_ctx, bucket.tenant, bucket.name,
-				     info, nullptr);
+				     info, null_yield);
 	if (ret < 0)
 	  continue;
 
@@ -2077,7 +2088,9 @@ public:
 
     string tenant_name, bucket_name;
     parse_bucket(entry, &tenant_name, &bucket_name);
-    int ret = store->get_bucket_entrypoint_info(obj_ctx, tenant_name, bucket_name, be, &ot, &mtime, &attrs);
+    int ret = store->get_bucket_entrypoint_info(obj_ctx, tenant_name,
+                                                bucket_name, be, &ot,
+                                                &mtime, &attrs, null_yield);
     if (ret < 0)
       return ret;
 
@@ -2105,7 +2118,9 @@ public:
 
     string tenant_name, bucket_name;
     parse_bucket(entry, &tenant_name, &bucket_name);
-    int ret = store->get_bucket_entrypoint_info(obj_ctx, tenant_name, bucket_name, old_be, &old_ot, &orig_mtime, &attrs);
+    int ret = store->get_bucket_entrypoint_info(obj_ctx, tenant_name, bucket_name,
+                                                old_be, &old_ot, &orig_mtime,
+                                                &attrs, null_yield);
     if (ret < 0 && ret != -ENOENT)
       return ret;
 
@@ -2144,7 +2159,9 @@ public:
 
     string tenant_name, bucket_name;
     parse_bucket(entry, &tenant_name, &bucket_name);
-    int ret = store->get_bucket_entrypoint_info(obj_ctx, tenant_name, bucket_name, be, &objv_tracker, NULL, NULL);
+    int ret = store->get_bucket_entrypoint_info(obj_ctx, tenant_name, bucket_name,
+                                                be, &objv_tracker, nullptr,
+                                                nullptr, null_yield);
     if (ret < 0)
       return ret;
 
@@ -2242,7 +2259,8 @@ public:
     real_time mtime;
     RGWObjectCtx obj_ctx(store);
 
-    int ret = store->get_bucket_instance_info(obj_ctx, oid, bci.info, &mtime, &bci.attrs);
+    int ret = store->get_bucket_instance_info(obj_ctx, oid, bci.info, &mtime,
+                                              &bci.attrs, null_yield);
     if (ret < 0)
       return ret;
 
@@ -2266,7 +2284,8 @@ public:
     RGWObjectCtx obj_ctx(store);
 
     int ret = store->get_bucket_instance_info(obj_ctx, entry, old_bci.info,
-            &orig_mtime, &old_bci.attrs);
+                                              &orig_mtime, &old_bci.attrs,
+                                              null_yield);
     bool exists = (ret != -ENOENT);
     if (ret < 0 && exists)
       return ret;
@@ -2357,7 +2376,8 @@ public:
     RGWBucketInfo info;
     RGWObjectCtx obj_ctx(store);
 
-    int ret = store->get_bucket_instance_info(obj_ctx, entry, info, NULL, NULL);
+    int ret = store->get_bucket_instance_info(obj_ctx, entry, info, nullptr,
+                                              nullptr, null_yield);
     if (ret < 0 && ret != -ENOENT)
       return ret;
 
