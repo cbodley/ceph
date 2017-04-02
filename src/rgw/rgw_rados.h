@@ -2702,7 +2702,9 @@ public:
       explicit Read(RGWRados::SystemObject *_source) : source(_source) {}
 
       int stat(RGWObjVersionTracker *objv_tracker);
-      int read(int64_t ofs, int64_t end, bufferlist& bl, RGWObjVersionTracker *objv_tracker);
+      int read(int64_t ofs, int64_t end, bufferlist& bl,
+               RGWObjVersionTracker *objv_tracker,
+               optional_yield_context y);
       int get_attr(const char *name, bufferlist& dest);
     };
   };
@@ -3291,7 +3293,8 @@ public:
                              RGWObjVersionTracker *objv_tracker, rgw_raw_obj& obj,
                              bufferlist& bl, off_t ofs, off_t end,
                              map<string, bufferlist> *attrs,
-                             rgw_cache_entry_info *cache_info);
+                             rgw_cache_entry_info *cache_info,
+                             optional_yield_context y);
 
   virtual void register_chained_cache(RGWChainedCache *cache) {}
   virtual bool chain_cache_entry(list<rgw_cache_entry_info *>& cache_info_entries, RGWChainedCache::Entry *chained_entry) { return false; }

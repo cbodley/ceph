@@ -51,6 +51,7 @@
 
 #include "common/Clock.h"
 
+#include "librados/librados_asio.h"
 #include "include/rados/librados.hpp"
 using namespace librados;
 
@@ -553,7 +554,7 @@ int RGWSystemMetaObj::read_default(RGWDefaultSystemMetaObjInfo& default_info, co
   auto pool = get_pool(cct);
   bufferlist bl;
   RGWObjectCtx obj_ctx(store);
-  int ret = rgw_get_system_obj(store, obj_ctx, pool, oid, bl, NULL, NULL);
+  int ret = rgw_get_system_obj(store, obj_ctx, pool, oid, bl, null_yield);
   if (ret < 0)
     return ret;
 
@@ -615,7 +616,7 @@ int RGWSystemMetaObj::read_id(const string& obj_name, string& object_id)
   string oid = get_names_oid_prefix() + obj_name;
 
   RGWObjectCtx obj_ctx(store);
-  int ret = rgw_get_system_obj(store, obj_ctx, pool, oid, bl, NULL, NULL);
+  int ret = rgw_get_system_obj(store, obj_ctx, pool, oid, bl, null_yield);
   if (ret < 0) {
     return ret;
   }
@@ -734,7 +735,7 @@ int RGWSystemMetaObj::read_info(const string& obj_id, bool old_format)
   string oid = get_info_oid_prefix(old_format) + obj_id;
 
   RGWObjectCtx obj_ctx(store);
-  int ret = rgw_get_system_obj(store, obj_ctx, pool, oid, bl, NULL, NULL);
+  int ret = rgw_get_system_obj(store, obj_ctx, pool, oid, bl, null_yield);
   if (ret < 0) {
     ldout(cct, 0) << "failed reading obj info from " << pool << ":" << oid << ": " << cpp_strerror(-ret) << dendl;
     return ret;
@@ -1015,7 +1016,7 @@ int RGWPeriodConfig::read(RGWRados *store, const std::string& realm_id)
   const auto& oid = get_oid(realm_id);
   bufferlist bl;
 
-  int ret = rgw_get_system_obj(store, obj_ctx, pool, oid, bl, nullptr, nullptr);
+  int ret = rgw_get_system_obj(store, obj_ctx, pool, oid, bl, null_yield);
   if (ret < 0) {
     return ret;
   }
@@ -1160,7 +1161,7 @@ int RGWPeriod::read_latest_epoch(RGWPeriodLatestEpochInfo& info,
   rgw_pool pool(get_pool(cct));
   bufferlist bl;
   RGWObjectCtx obj_ctx(store);
-  int ret = rgw_get_system_obj(store, obj_ctx, pool, oid, bl, objv, nullptr);
+  int ret = rgw_get_system_obj(store, obj_ctx, pool, oid, bl, null_yield, objv);
   if (ret < 0) {
     ldout(cct, 1) << "error read_lastest_epoch " << pool << ":" << oid << dendl;
     return ret;
@@ -1297,7 +1298,8 @@ int RGWPeriod::read_info()
   bufferlist bl;
 
   RGWObjectCtx obj_ctx(store);
-  int ret = rgw_get_system_obj(store, obj_ctx, pool, get_period_oid(), bl, NULL, NULL);
+  int ret = rgw_get_system_obj(store, obj_ctx, pool, get_period_oid(), bl,
+                               null_yield);
   if (ret < 0) {
     ldout(cct, 0) << "failed reading obj info from " << pool << ":" << get_period_oid() << ": " << cpp_strerror(-ret) << dendl;
     return ret;
@@ -3844,7 +3846,7 @@ int RGWRados::convert_regionmap()
   rgw_pool pool(pool_name);
   bufferlist bl;
   RGWObjectCtx obj_ctx(this);
-  int ret = rgw_get_system_obj(this, obj_ctx, pool, oid, bl, NULL, NULL);
+  int ret = rgw_get_system_obj(this, obj_ctx, pool, oid, bl, null_yield);
   if (ret < 0 && ret != -ENOENT) {
     return ret;
   } else if (ret == -ENOENT) {
@@ -3914,7 +3916,7 @@ int RGWRados::replace_region_with_zonegroup()
   bufferlist bl;
   RGWObjectCtx obj_ctx(this);
 
-  int ret = rgw_get_system_obj(this, obj_ctx, pool ,oid, bl, NULL,  NULL);
+  int ret = rgw_get_system_obj(this, obj_ctx, pool ,oid, bl, null_yield);
   if (ret < 0 && ret !=  -ENOENT) {
     ldout(cct, 0) << __func__ << " failed to read converted: ret "<< ret << " " << cpp_strerror(-ret)
 		  << dendl;
@@ -6006,7 +6008,8 @@ int RGWRados::select_legacy_bucket_placement(RGWZonePlacementInfo *rule_info)
   rgw_raw_obj obj(get_zone_params().domain_root, avail_pools);
 
   RGWObjectCtx obj_ctx(this);
-  int ret = rgw_get_system_obj(this, obj_ctx, get_zone_params().domain_root, avail_pools, map_bl, NULL, NULL);
+  int ret = rgw_get_system_obj(this, obj_ctx, get_zone_params().domain_root,
+                               avail_pools, map_bl, null_yield);
   if (ret < 0) {
     goto read_omap;
   }
@@ -10227,7 +10230,8 @@ int RGWRados::get_system_obj(RGWObjectCtx& obj_ctx, RGWRados::SystemObject::Read
                              RGWObjVersionTracker *objv_tracker, rgw_raw_obj& obj,
                              bufferlist& bl, off_t ofs, off_t end,
                              map<string, bufferlist> *attrs,
-                             rgw_cache_entry_info *cache_info)
+                             rgw_cache_entry_info *cache_info,
+                             optional_yield_context y)
 {
   uint64_t len;
   ObjectReadOperation op;
@@ -10254,7 +10258,19 @@ int RGWRados::get_system_obj(RGWObjectCtx& obj_ctx, RGWRados::SystemObject::Read
     ldout(cct, 20) << "read_state.get_ref() on obj=" << obj << " returned " << r << dendl;
     return r;
   }
-  r = ref->ioctx.operate(ref->oid, &op, NULL);
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& service = y.get_io_service();
+    auto& yield = y.get_yield_context();
+    boost::system::error_code ec;
+    librados::async_operate(service, ref->ioctx, ref->oid, &op, 0, yield[ec]);
+    r = -ec.value();
+  } else {
+#else
+  {
+#endif
+    r = ref->ioctx.operate(ref->oid, &op, NULL);
+  }
   if (r < 0) {
     ldout(cct, 20) << "rados->read r=" << r << " bl.length=" << bl.length() << dendl;
     return r;
@@ -10274,12 +10290,16 @@ int RGWRados::get_system_obj(RGWObjectCtx& obj_ctx, RGWRados::SystemObject::Read
   return bl.length();
 }
 
-int RGWRados::SystemObject::Read::read(int64_t ofs, int64_t end, bufferlist& bl, RGWObjVersionTracker *objv_tracker)
+int RGWRados::SystemObject::Read::read(int64_t ofs, int64_t end, bufferlist& bl,
+                                       RGWObjVersionTracker *objv_tracker,
+                                       optional_yield_context y)
 {
   RGWRados *store = source->get_store();
   rgw_raw_obj& obj = source->get_obj();
 
-  return store->get_system_obj(source->get_ctx(), state, objv_tracker, obj, bl, ofs, end, read_params.attrs, read_params.cache_info);
+  return store->get_system_obj(source->get_ctx(), state, objv_tracker, obj, bl,
+                               ofs, end, read_params.attrs, read_params.cache_info,
+                               y);
 }
 
 int RGWRados::SystemObject::Read::get_attr(const char *name, bufferlist& dest)
@@ -11819,7 +11839,9 @@ int RGWRados::get_bucket_instance_from_oid(RGWObjectCtx& obj_ctx, const string& 
 
   bufferlist epbl;
 
-  int ret = rgw_get_system_obj(this, obj_ctx, get_zone_params().domain_root, oid, epbl, &info.objv_tracker, pmtime, pattrs, cache_info);
+  int ret = rgw_get_system_obj(this, obj_ctx, get_zone_params().domain_root,
+                               oid, epbl, null_yield, &info.objv_tracker,
+                               pmtime, pattrs, cache_info);
   if (ret < 0) {
     return ret;
   }
@@ -11848,7 +11870,9 @@ int RGWRados::get_bucket_entrypoint_info(RGWObjectCtx& obj_ctx,
   string bucket_entry;
 
   rgw_make_bucket_entry_name(tenant_name, bucket_name, bucket_entry);
-  int ret = rgw_get_system_obj(this, obj_ctx, get_zone_params().domain_root, bucket_entry, bl, objv_tracker, pmtime, pattrs, cache_info);
+  int ret = rgw_get_system_obj(this, obj_ctx, get_zone_params().domain_root,
+                               bucket_entry, bl, null_yield, objv_tracker,
+                               pmtime, pattrs, cache_info);
   if (ret < 0) {
     return ret;
   }

@@ -276,7 +276,8 @@ int rgw_get_user_info_from_index(RGWRados * const store,
   RGWUID uid;
   RGWObjectCtx obj_ctx(store);
 
-  int ret = rgw_get_system_obj(store, obj_ctx, pool, key, bl, NULL, &e.mtime);
+  int ret = rgw_get_system_obj(store, obj_ctx, pool, key, bl,
+                               null_yield, nullptr, &e.mtime);
   if (ret < 0)
     return ret;
 
@@ -325,7 +326,9 @@ int rgw_get_user_info_by_uid(RGWRados *store,
 
   RGWObjectCtx obj_ctx(store);
   string oid = uid.to_str();
-  int ret = rgw_get_system_obj(store, obj_ctx, store->get_zone_params().user_uid_pool, oid, bl, objv_tracker, pmtime, pattrs, cache_info);
+  int ret = rgw_get_system_obj(store, obj_ctx, store->get_zone_params().user_uid_pool,
+                               oid, bl, null_yield, objv_tracker,
+                               pmtime, pattrs, cache_info);
   if (ret < 0) {
     return ret;
   }

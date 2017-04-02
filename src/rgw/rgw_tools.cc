@@ -38,8 +38,10 @@ int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool, const string& o
   return ret;
 }
 
-int rgw_get_system_obj(RGWRados *rgwstore, RGWObjectCtx& obj_ctx, const rgw_pool& pool, const string& key, bufferlist& bl,
-                       RGWObjVersionTracker *objv_tracker, real_time *pmtime, map<string, bufferlist> *pattrs,
+int rgw_get_system_obj(RGWRados *rgwstore, RGWObjectCtx& obj_ctx, const rgw_pool& pool,
+                       const string& key, bufferlist& bl, optional_yield_context y,
+                       RGWObjVersionTracker *objv_tracker, real_time *pmtime,
+                       map<string, bufferlist> *pattrs,
                        rgw_cache_entry_info *cache_info)
 {
   bufferlist::iterator iter;
@@ -64,7 +66,7 @@ int rgw_get_system_obj(RGWRados *rgwstore, RGWObjectCtx& obj_ctx, const rgw_pool
 
     rop.read_params.cache_info = cache_info;
 
-    ret = rop.read(0, request_len - 1, bl, objv_tracker);
+    ret = rop.read(0, request_len - 1, bl, objv_tracker, y);
     if (ret == -ECANCELED) {
       /* raced, restart */
       if (!original_readv.empty()) {
