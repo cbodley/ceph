@@ -48,7 +48,7 @@ class RGWMultisiteTests(Task):
         misc.deep_merge(self.config, overrides.get('rgw-multisite-tests', {}))
 
     def begin(self):
-        argv = ['--capture=no', '--verbose']
+        argv = ['--capture=sys', '--verbose']
         argv += ['--pyargs'] # pass tests as package names
 
         # modules included in test discovery
