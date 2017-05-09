@@ -60,7 +60,9 @@ class RGWMultisiteTests(Task):
 
         # run nose tests in the rgw_multi.tests module
         conf = nose.config.Config(stream=get_log_stream(), verbosity=2)
-        assert nose.run(defaultTest=tests.__name__, argv=argv, config=conf)
+        result = nose.run(defaultTest=tests.__name__, argv=argv, config=conf)
+        if not result:
+            raise RuntimeError('rgw multisite test failures')
 
 def get_log_stream():
     """ return a log stream for nose output """
