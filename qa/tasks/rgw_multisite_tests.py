@@ -55,7 +55,10 @@ class RGWMultisiteTests(Task):
         test_modules = [tests]
         argv += [mod.__name__ for mod in test_modules]
 
-        plugin = loaded_module_plugin(test_modules)
+        plugins = [
+            loaded_module_plugin(test_modules),
+            log_report_plugin(log),
+        ]
 
         # extra arguments can be passed as a string or list
         extra_args = self.config.get('args', [])
@@ -65,7 +68,7 @@ class RGWMultisiteTests(Task):
 
         log.info('running: pytest %s', ' '.join(argv))
 
-        result = pytest.main(argv, [plugin])
+        result = pytest.main(argv, plugins)
         if result != 0:
             raise RuntimeError('rgw multisite test failures [pytest return code=%d]' % result)
 
@@ -101,6 +104,47 @@ def loaded_module_plugin(modules):
             return pytest.Module(path, parent)
 
     return LoadedModulePlugin(modules)
+
+def log_report_plugin(log):
+    """ builds a pytest plugin that copies terminal output to the log stream """
+
+    class LogStream(object): # copied from vstart_runner.py
+        """ stream that writes each line to the given logger """
+        def __init__(self, log):
+            self.buffer = ""
+            self.log = log
+
+        def write(self, data):
+            self.buffer += data
+            if "\n" in self.buffer:
+                lines = self.buffer.split("\n")
+                for line in lines[:-1]:
+                    self.log.info(line)
+                self.buffer = lines[-1]
+
+        def flush(self):
+            pass
+
+    class LoggingPlugin: # similar to pytest's pastebin plugin
+        """ adjusts the terminal reporter to copy output into the log stream """
+        def __init__(self, stream):
+            self.stream = stream
+
+        @pytest.mark.trylast
+        def pytest_configure(self, config):
+            """ hook to add another output stream to the terminal reporter """
+            tw = config.get_terminal_writer()
+            if tw is not None:
+                self.orig_file = tw._file
+                tw._file = self.stream
+
+        def pytest_unconfigure(self, config):
+            """ restore terminal reporter to original state """
+            tw = config.get_terminal_writer()
+            if tw is not None:
+                tw._file = self.orig_file
+
+    return LoggingPlugin(LogStream(log))
 
 
 task = RGWMultisiteTests
