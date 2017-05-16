@@ -38,6 +38,8 @@
 #include <type_traits>
 #include <boost/utility/string_ref.hpp>
 
+#include "include/buffer.h"
+
 template <typename char_type, typename Size, Size max_size>
 class basic_sstring;
 
@@ -645,6 +647,53 @@ static String make_sstring(Args&&... args)
 template <typename string_type, typename T>
 inline string_type to_sstring(T value) {
     return sstring::to_sstring<string_type>(value);
+}
+
+
+// encode/decode
+template <typename Char, typename Size, Size Max>
+inline void encode_nohead(const basic_sstring<Char, Size, Max>& s,
+                          bufferlist& bl)
+{
+  auto len = s.size();
+  if (len) {
+    bl.append(reinterpret_cast<const char*>(s.c_str()), len);
+  }
+}
+
+template <typename Char, typename Size, Size Max>
+inline void decode_nohead(int len, basic_sstring<Char, Size, Max>& s,
+                          bufferlist::iterator& p)
+{
+  s.reset();
+  while (len) {
+    // append in buffer segments
+    const char *buf;
+    auto bytes = p.get_ptr_and_advance(len, &buf);
+    if (bytes == 0) {
+      throw buffer::end_of_buffer();
+    }
+    s.append(reinterpret_cast<const Char*>(buf), bytes);
+    len -= bytes;
+  }
+}
+
+template <typename Char, typename Size, Size Max>
+inline void encode(const basic_sstring<Char, Size, Max>& s, bufferlist& bl)
+{
+  Size len = (Size)(s.size());
+  encode(len, bl);
+  if (len) {
+    bl.append(reinterpret_cast<const char*>(s.c_str()), len);
+  }
+}
+
+template <typename Char, typename Size, Size Max>
+inline void decode(basic_sstring<Char, Size, Max>& s, bufferlist::iterator& p)
+{
+  Size len;
+  decode(len, p);
+  decode_nohead(len, s, p);
 }
 
 #if 0 /* XXX conflicts w/Ceph types.h */
