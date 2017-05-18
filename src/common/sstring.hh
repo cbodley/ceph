@@ -39,6 +39,7 @@
 #include <boost/utility/string_ref.hpp>
 
 #include "include/buffer.h"
+#include "include/denc.h"
 
 template <typename char_type, typename Size, Size max_size>
 class basic_sstring;
@@ -652,49 +653,52 @@ inline string_type to_sstring(T value) {
 
 // encode/decode
 template <typename Char, typename Size, Size Max>
-inline void encode_nohead(const basic_sstring<Char, Size, Max>& s,
-                          bufferlist& bl)
-{
-  auto len = s.size();
-  if (len) {
-    bl.append(reinterpret_cast<const char*>(s.c_str()), len);
-  }
-}
+struct denc_traits<basic_sstring<Char, Size, Max>> {
+private:
+  using value_type = basic_sstring<Char, Size, Max>;
+public:
+  static constexpr bool supported = true;
+  static constexpr bool featured = false;
+  static constexpr bool bounded = false;
 
-template <typename Char, typename Size, Size Max>
-inline void decode_nohead(int len, basic_sstring<Char, Size, Max>& s,
-                          bufferlist::iterator& p)
-{
-  s.reset();
-  while (len) {
-    // append in buffer segments
-    const char *buf;
-    auto bytes = p.get_ptr_and_advance(len, &buf);
-    if (bytes == 0) {
-      throw buffer::end_of_buffer();
+  static void encode_nohead(const value_type& s,
+                            buffer::list::contiguous_appender& p)
+  {
+    auto len = s.size();
+    if (len) {
+      p.append(reinterpret_cast<const char*>(s.c_str()), len);
     }
-    s.append(reinterpret_cast<const Char*>(buf), bytes);
-    len -= bytes;
   }
-}
 
-template <typename Char, typename Size, Size Max>
-inline void encode(const basic_sstring<Char, Size, Max>& s, bufferlist& bl)
-{
-  Size len = (Size)(s.size());
-  encode(len, bl);
-  if (len) {
-    bl.append(reinterpret_cast<const char*>(s.c_str()), len);
+  static void decode_nohead(size_t len, value_type& s,
+                            buffer::ptr::iterator& p)
+  {
+    s.reset();
+    if (len) {
+      s.append(reinterpret_cast<const Char*>(p.get_pos_add(len)), len);
+    }
   }
-}
 
-template <typename Char, typename Size, Size Max>
-inline void decode(basic_sstring<Char, Size, Max>& s, bufferlist::iterator& p)
-{
-  Size len;
-  decode(len, p);
-  decode_nohead(len, s, p);
-}
+  static void encode(const value_type& s,
+                     buffer::list::contiguous_appender& p,
+                     uint64_t f=0)
+  {
+    Size len = (Size)(s.size());
+    ::denc(len, p);
+    if (len) {
+      p.append(reinterpret_cast<const char*>(s.c_str()), len);
+    }
+  }
+
+  static void decode(value_type& s,
+                     buffer::ptr::iterator& p,
+                     uint64_t f=0)
+  {
+    Size len;
+    ::denc(len, p);
+    decode_nohead(len, s, p);
+  }
+};
 
 #if 0 /* XXX conflicts w/Ceph types.h */
 template <typename T>
