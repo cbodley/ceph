@@ -18,10 +18,15 @@
 
 #include "common/dout.h"
 
-#include <boost/function.hpp>
+#include <functional>
 #include <list>
-#include <set>
 #include <memory>
+#include <set>
+
+#include <boost/function.hpp>
+#include <boost/system/error_code.hpp>
+
+#include "common/error_code.h"
 
 #include "include/ceph_assert.h"
 #include "common/Mutex.h"
@@ -47,6 +52,23 @@ class GenContext {
   void complete(C &&t) {
     finish(std::forward<C>(t));
     delete this;
+  }
+
+  template <typename C>
+  void operator()(C &&t) noexcept {
+    complete(std::forward<C>(t));
+  }
+
+  template<typename U = T>
+  auto operator()() noexcept
+    -> typename std::enable_if<std::is_default_constructible<U>::value,
+			       void>::type {
+    complete(T{});
+  }
+
+
+  std::reference_wrapper<GenContext> func() {
+    return std::ref(*this);
   }
 };
 
@@ -83,6 +105,20 @@ class Context {
       return true;
     }
     return false;
+  }
+  void complete(boost::system::error_code ec) {
+    complete(ceph::from_error_code(ec));
+  }
+  void operator()(boost::system::error_code ec) noexcept {
+    complete(ec);
+  }
+
+  void operator()() noexcept {
+    complete({});
+  }
+
+  std::reference_wrapper<Context> func() {
+    return std::ref(*this);
   }
 };
 
@@ -125,8 +161,11 @@ template <typename T>
 struct LambdaContext : public Context {
   T t;
   LambdaContext(T &&t) : t(std::forward<T>(t)) {}
-  void finish(int) override {
-    t();
+  void finish(int r) override {
+    if constexpr (std::is_invocable_v<T, int>)
+      t(r);
+    else
+      t();
   }
 };
 template <typename T>
