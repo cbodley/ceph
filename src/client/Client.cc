@@ -5629,22 +5629,21 @@ int Client::authenticate()
 
 int Client::fetch_fsmap(bool user)
 {
-  int r;
   // Retrieve FSMap to enable looking up daemon addresses.  We need FSMap
   // rather than MDSMap because no one MDSMap contains all the daemons, and
   // a `tell` can address any daemon.
   version_t fsmap_latest;
-  do {
-    C_SaferCond cond;
-    monclient->get_version("fsmap", &fsmap_latest, NULL, &cond);
-    client_lock.Unlock();
-    r = cond.wait();
-    client_lock.Lock();
-  } while (r == -EAGAIN);
-
-  if (r < 0) {
-    lderr(cct) << "Failed to learn FSMap version: " << cpp_strerror(r) << dendl;
-    return r;
+retry:
+  try {
+    auto f = monclient->get_version("fsmap", boost::asio::use_future);
+    std::tie(fsmap_latest, std::ignore) = f.get();
+  } catch (const boost::system::system_error& e) {
+    if (boost::system::errc::resource_unavailable_try_again == e.code()) {
+      goto retry;
+    } else {
+      lderr(cct) << "Failed to learn FSMap version: " << e.what() << dendl;
+      return ceph::from_error_code(e.code());
+    }
   }
 
   ldout(cct, 10) << __func__ << " learned FSMap version " << fsmap_latest << dendl;

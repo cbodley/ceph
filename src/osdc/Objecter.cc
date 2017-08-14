@@ -1446,13 +1446,15 @@ void Objecter::emit_blacklist_events(const OSDMap &old_osd_map,
 
 // op pool check
 
-void Objecter::C_Op_Map_Latest::finish(int r)
+void Objecter::CB_Op_Map_Latest::operator()(boost::system::error_code e,
+					    version_t latest, version_t)
 {
-  if (r == -EAGAIN || r == -ECANCELED)
+  if (e == boost::system::errc::resource_unavailable_try_again ||
+      e == boost::system::errc::operation_canceled)
     return;
 
   lgeneric_subdout(objecter->cct, objecter, 10)
-    << "op_map_latest r=" << r << " tid=" << tid
+    << "op_map_latest r=" << e << " tid=" << tid
     << " latest " << latest << dendl;
 
   Objecter::unique_lock wl(objecter->rwlock);
@@ -1593,8 +1595,7 @@ void Objecter::_send_op_map_check(Op *op)
   if (check_latest_map_ops.count(op->tid) == 0) {
     op->get();
     check_latest_map_ops[op->tid] = op;
-    C_Op_Map_Latest *c = new C_Op_Map_Latest(this, op->tid);
-    monc->get_version("osdmap", &c->latest, NULL, c);
+    monc->get_version("osdmap", CB_Op_Map_Latest(this, op->tid));
   }
 }
 
@@ -1612,9 +1613,12 @@ void Objecter::_op_cancel_map_check(Op *op)
 
 // linger pool check
 
-void Objecter::C_Linger_Map_Latest::finish(int r)
+void Objecter::CB_Linger_Map_Latest::operator()(boost::system::error_code e,
+						version_t latest,
+						version_t)
 {
-  if (r == -EAGAIN || r == -ECANCELED) {
+  if (e == boost::system::errc::resource_unavailable_try_again ||
+      e == boost::system::errc::operation_canceled) {
     // ignore callback; we will retry in resend_mon_ops()
     return;
   }
@@ -1684,8 +1688,7 @@ void Objecter::_send_linger_map_check(LingerOp *op)
   if (check_latest_map_lingers.count(op->linger_id) == 0) {
     op->get();
     check_latest_map_lingers[op->linger_id] = op;
-    C_Linger_Map_Latest *c = new C_Linger_Map_Latest(this, op->linger_id);
-    monc->get_version("osdmap", &c->latest, NULL, c);
+    monc->get_version("osdmap", CB_Linger_Map_Latest(this, op->linger_id));
   }
 }
 
@@ -1704,9 +1707,11 @@ void Objecter::_linger_cancel_map_check(LingerOp *op)
 
 // command pool check
 
-void Objecter::C_Command_Map_Latest::finish(int r)
+void Objecter::CB_Command_Map_Latest::operator()(boost::system::error_code e,
+						 version_t latest, version_t)
 {
-  if (r == -EAGAIN || r == -ECANCELED) {
+  if (e == boost::system::errc::resource_unavailable_try_again ||
+      e == boost::system::errc::operation_canceled) {
     // ignore callback; we will retry in resend_mon_ops()
     return;
   }
@@ -1759,8 +1764,7 @@ void Objecter::_send_command_map_check(CommandOp *c)
   if (check_latest_map_commands.count(c->tid) == 0) {
     c->get();
     check_latest_map_commands[c->tid] = c;
-    C_Command_Map_Latest *f = new C_Command_Map_Latest(this, c->tid);
-    monc->get_version("osdmap", &f->latest, NULL, f);
+    monc->get_version("osdmap", CB_Command_Map_Latest(this, c->tid));
   }
 }
 
@@ -1941,16 +1945,15 @@ void Objecter::wait_for_osd_map()
   lock.Unlock();
 }
 
-struct C_Objecter_GetVersion : public Context {
+struct CB_Objecter_GetVersion {
   Objecter *objecter;
-  uint64_t oldest, newest;
   Context *fin;
-  C_Objecter_GetVersion(Objecter *o, Context *c)
-    : objecter(o), oldest(0), newest(0), fin(c) {}
-  void finish(int r) override {
-    if (r >= 0) {
+  CB_Objecter_GetVersion(Objecter *o, Context *c) : objecter(o), fin(c) {}
+  void operator()(boost::system::error_code e, version_t newest, version_t oldest) {
+    if (!e) {
       objecter->get_latest_version(oldest, newest, fin);
-    } else if (r == -EAGAIN) { // try again as instructed
+    } else if (e == boost::system::errc::resource_unavailable_try_again) {
+      // try again as instructed
       objecter->wait_for_latest_osdmap(fin);
     } else {
       // it doesn't return any other error codes!
@@ -1962,8 +1965,7 @@ struct C_Objecter_GetVersion : public Context {
 void Objecter::wait_for_latest_osdmap(Context *fin)
 {
   ldout(cct, 10) << __func__ << dendl;
-  C_Objecter_GetVersion *c = new C_Objecter_GetVersion(this, fin);
-  monc->get_version("osdmap", &c->newest, &c->oldest, c);
+  monc->get_version("osdmap", CB_Objecter_GetVersion(this, fin));
 }
 
 void Objecter::get_latest_version(epoch_t oldest, epoch_t newest, Context *fin)
@@ -2241,24 +2243,20 @@ void Objecter::resend_mon_ops()
   for (map<ceph_tid_t, Op*>::iterator p = check_latest_map_ops.begin();
        p != check_latest_map_ops.end();
        ++p) {
-    C_Op_Map_Latest *c = new C_Op_Map_Latest(this, p->second->tid);
-    monc->get_version("osdmap", &c->latest, NULL, c);
+    monc->get_version("osdmap", CB_Op_Map_Latest(this, p->second->tid));
   }
 
   for (map<uint64_t, LingerOp*>::iterator p = check_latest_map_lingers.begin();
        p != check_latest_map_lingers.end();
        ++p) {
-    C_Linger_Map_Latest *c
-      = new C_Linger_Map_Latest(this, p->second->linger_id);
-    monc->get_version("osdmap", &c->latest, NULL, c);
+    monc->get_version("osdmap", CB_Linger_Map_Latest(this, p->second->linger_id));
   }
 
   for (map<uint64_t, CommandOp*>::iterator p
 	 = check_latest_map_commands.begin();
        p != check_latest_map_commands.end();
        ++p) {
-    C_Command_Map_Latest *c = new C_Command_Map_Latest(this, p->second->tid);
-    monc->get_version("osdmap", &c->latest, NULL, c);
+    monc->get_version("osdmap", CB_Command_Map_Latest(this, p->second->tid));
   }
 }
 

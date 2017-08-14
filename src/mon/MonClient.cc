@@ -26,6 +26,7 @@
 
 #include "messages/MMonGetMap.h"
 #include "messages/MMonGetVersion.h"
+#include "messages/MMonGetMap.h"
 #include "messages/MMonGetVersionReply.h"
 #include "messages/MMonMap.h"
 #include "messages/MConfig.h"
@@ -485,10 +486,9 @@ void MonClient::shutdown()
   monc_lock.Lock();
   stopping = true;
   while (!version_requests.empty()) {
-    version_requests.begin()->second->context->complete(-ECANCELED);
+    ceph::async::defer(std::move(version_requests.begin()->second), monc_errc::shutting_down, 0, 0);
     ldout(cct, 20) << __func__ << " canceling and discarding version request "
-		   << version_requests.begin()->second << dendl;
-    delete version_requests.begin()->second;
+		   << version_requests.begin()->first << dendl;
     version_requests.erase(version_requests.begin());
   }
   while (!mon_commands.empty()) {
@@ -668,11 +668,8 @@ void MonClient::_reopen_session(int rank)
 
   // throw out version check requests
   while (!version_requests.empty()) {
-    boost::asio::defer(finish_strand,
-		       [c=version_requests.begin()->second->context]() {
-			 c->complete(-EAGAIN);
-		       });
-    delete version_requests.begin()->second;
+    ceph::async::defer(std::move(version_requests.begin()->second),
+		       monc_errc::session_reset, 0, 0);
     version_requests.erase(version_requests.begin());
   }
 
@@ -1234,18 +1231,6 @@ void MonClient::start_mon_command(int rank,
 
 // ---------
 
-void MonClient::get_version(string map, version_t *newest, version_t *oldest, Context *onfinish)
-{
-  version_req_d *req = new version_req_d(onfinish, newest, oldest);
-  ldout(cct, 10) << "get_version " << map << " req " << req << dendl;
-  std::lock_guard l(monc_lock);
-  MMonGetVersion *m = new MMonGetVersion();
-  m->what = map;
-  m->handle = ++version_req_id;
-  version_requests[m->handle] = req;
-  _send_mon_message(m);
-}
-
 void MonClient::handle_get_version_reply(MMonGetVersionReply* m)
 {
   ceph_assert(monc_lock.is_locked());
@@ -1254,18 +1239,12 @@ void MonClient::handle_get_version_reply(MMonGetVersionReply* m)
     ldout(cct, 0) << __func__ << " version request with handle " << m->handle
 		  << " not found" << dendl;
   } else {
-    version_req_d *req = iter->second;
-    ldout(cct, 10) << __func__ << " finishing " << req << " version " << m->version << dendl;
+    auto req = std::move(iter->second);
+    ldout(cct, 10) << __func__ << " finishing " << iter->first << " version "
+		   << m->version << dendl;
     version_requests.erase(iter);
-    if (req->newest)
-      *req->newest = m->version;
-    if (req->oldest)
-      *req->oldest = m->oldest_version;
-    boost::asio::defer(finish_strand,
-		       [c=req->context] {
-			 c->complete(0);
-		       });
-    delete req;
+    ceph::async::defer(std::move(req), boost::system::error_code(),
+		       m->version, m->oldest_version);
   }
   m->put();
 }
@@ -1782,4 +1761,64 @@ void MonClient::register_config_callback(md_config_t::config_callback fn) {
 
 md_config_t::config_callback MonClient::get_config_callback() {
   return config_cb;
+}
+
+class monc_error_category : public ceph::converting_category {
+public:
+  monc_error_category(){}
+  const char* name() const noexcept override;
+  std::string message(int ev) const noexcept override;
+  boost::system::error_condition default_error_condition(int ev) const noexcept
+    override;
+  int from_code(int ev) const noexcept override;
+};
+
+const char* monc_error_category::name() const noexcept {
+  return "monc";
+}
+
+std::string monc_error_category::message(int ev) const noexcept {
+  using namespace ::monc_errc;
+
+
+  switch (ev) {
+  case 0:
+    return "No error";
+
+  case shutting_down: // Command failed due to MonClient shutting down
+    return "Command failed due to MonClient shutting down";
+  case session_reset:
+    return "Monitor session was reset";
+  }
+
+  return "Unknown error";
+}
+
+boost::system::error_condition monc_error_category::default_error_condition(int ev) const noexcept {
+  using namespace ::monc_errc;
+  switch (ev) {
+  case shutting_down:
+    return boost::system::errc::operation_canceled;
+  case session_reset:
+    return boost::system::errc::resource_unavailable_try_again;
+  }
+  return { ev, *this };
+}
+
+int monc_error_category::from_code(int ev) const noexcept {
+  using namespace ::monc_errc;
+  switch (ev) {
+  case 0:
+    return 0;
+  case shutting_down:
+    return -ECANCELED;
+  case session_reset:
+    return -EAGAIN;
+  }
+  return -EDOM;
+}
+
+const boost::system::error_category& monc_category() noexcept {
+  static const monc_error_category c;
+  return c;
 }
