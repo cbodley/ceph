@@ -275,3 +275,9 @@ add_ceph_unittest(unittest_iso_8601)
 
 add_executable(unittest_backport14 test_backport14.cc)
 add_ceph_unittest(unittest_backport14)
+
+add_executable(unittest_bounded_key_counter
+  test_bounded_key_counter.cc
+  $<TARGET_OBJECTS:unit-main>)
+target_link_libraries(unittest_bounded_key_counter global)
+add_ceph_unittest(unittest_bounded_key_counter)
