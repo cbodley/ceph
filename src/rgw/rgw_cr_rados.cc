@@ -3,6 +3,7 @@
 #include "rgw_cr_rados.h"
 
 #include "cls/lock/cls_lock_client.h"
+#include "cls/rgw/cls_rgw_client.h"
 
 #include <boost/asio/yield.hpp>
 
@@ -489,6 +490,39 @@ int RGWAsyncGetBucketInstanceInfo::_send_request()
   }
 
   return 0;
+}
+
+RGWRadosBILogTrimCR::RGWRadosBILogTrimCR(RGWRados *store,
+                                         const RGWBucketInfo& bucket_info,
+                                         int shard_id,
+                                         const std::string& start_marker,
+                                         const std::string& end_marker)
+  : RGWSimpleCoroutine(store->ctx()), bs(store),
+    start_marker(start_marker), end_marker(end_marker)
+{
+  bs.init(bucket_info, shard_id);
+}
+
+int RGWRadosBILogTrimCR::send_request()
+{
+  bufferlist in;
+  cls_rgw_bi_log_trim_op call;
+  call.start_marker = std::move(start_marker);
+  call.end_marker = std::move(end_marker);
+  ::encode(call, in);
+
+  librados::ObjectWriteOperation op;
+  op.exec(RGW_CLASS, RGW_BI_LOG_TRIM, in);
+
+  cn = stack->create_completion_notifier();
+  return bs.index_ctx.aio_operate(bs.bucket_obj, cn->completion(), &op);
+}
+
+int RGWRadosBILogTrimCR::request_complete()
+{
+  int r = cn->completion()->get_return_value();
+  set_status() << "request complete; ret=" << r;
+  return r;
 }
 
 int RGWAsyncFetchRemoteObj::_send_request()
