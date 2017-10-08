@@ -33,6 +33,9 @@
 #include "include/spinlock.h"
 #include "include/scope_guard.h"
 
+#ifdef HAVE_SEASTAR
+#include <core/sharded.hh>
+#endif
 #if defined(HAVE_XIO)
 #include "msg/xio/XioMsg.h"
 #endif
@@ -703,6 +706,24 @@ using namespace ceph;
       return new buffer::raw_char(len);
     }
   };
+
+#if defined(HAVE_SEASTAR)
+  class raw_seastar_foreign_ptr : public buffer::raw {
+    // wrap the temporary_buffer in a foreign_ptr to guarantee that the memory
+    // is freed on the same cpu that allocated it
+    seastar::foreign_ptr<seastar::temporary_buffer<char>> ptr;
+   public:
+    raw_seastar_foreign_ptr(seastar::temporary_buffer<char>&& buf)
+      : raw(buf.get_write(), buf.size()), ptr(std::move(buf)) {}
+    raw* clone_empty() override {
+      return new buffer::raw_char(len);
+    }
+  };
+
+  buffer::raw* buffer::create_foreign(seastar::temporary_buffer<char>&& buf) {
+    return new raw_seastar_foreign_ptr(std::move(buf));
+  }
+#endif
 
 #if defined(HAVE_XIO)
   class buffer::xio_msg_buffer : public buffer::raw {

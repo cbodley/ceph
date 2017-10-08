@@ -68,6 +68,11 @@
 struct xio_reg_mem;
 class XioDispatchHook;
 #endif
+#if defined(HAVE_SEASTAR)
+namespace seastar {
+template <typename T> class temporary_buffer;
+}
+#endif
 class deleter;
 
 namespace ceph {
@@ -162,6 +167,9 @@ namespace buffer CEPH_BUFFER_API {
   raw* create_static(unsigned len, char *buf);
   raw* claim_buffer(unsigned len, char *buf, deleter del);
 
+#ifdef HAVE_SEASTAR
+  raw* create_foreign(seastar::temporary_buffer<char>&& buf);
+#endif
 #if defined(HAVE_XIO)
   raw* create_msg(unsigned len, char *buf, XioDispatchHook *m_hook);
 #endif

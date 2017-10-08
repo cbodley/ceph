@@ -416,6 +416,13 @@ endif(HAVE_DPDK)
 
 add_library(common_buffer_obj OBJECT
   common/buffer.cc)
+if(HAVE_SEASTAR)
+  set_target_properties(common_buffer_obj PROPERTIES CXX_STANDARD 14)
+  target_compile_definitions(common_buffer_obj
+    PUBLIC $<TARGET_PROPERTY:Seastar::Seastar,INTERFACE_COMPILE_DEFINITIONS>)
+  target_include_directories(common_buffer_obj
+    PUBLIC $<TARGET_PROPERTY:Seastar::Seastar,INTERFACE_INCLUDE_DIRECTORIES>)
+endif()
 
 add_library(common_texttable_obj OBJECT
   common/TextTable.cc)
@@ -659,6 +666,9 @@ if(HAVE_DPDK)
 endif()
 if(NOT WITH_SYSTEM_BOOST)
   list(APPEND ceph_common_deps ${ZLIB_LIBRARIES})
+endif()
+if(HAVE_SEASTAR)
+  list(APPEND ceph_common_deps Seastar::Seastar)
 endif()
 
 set_source_files_properties(${CMAKE_SOURCE_DIR}/src/ceph_ver.c
