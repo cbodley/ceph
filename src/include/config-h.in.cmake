@@ -327,4 +327,7 @@
 /* Defined if getentropy() is available */
 #cmakedefine HAVE_GETENTROPY
 
+/* Define if seastar is available. */
+#cmakedefine HAVE_SEASTAR
+
 #endif /* CONFIG_H */
