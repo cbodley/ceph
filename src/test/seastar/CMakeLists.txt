@@ -1,0 +1,4 @@
+add_executable(unittest_seastar_buffer test_buffer.cc)
+add_ceph_unittest(unittest_seastar_buffer ${CMAKE_BINARY_OUTPUT_DIR}/unittest_seastar_buffer)
+set_target_properties(unittest_seastar_buffer PROPERTIES CXX_STANDARD 14)
+target_link_libraries(unittest_seastar_buffer common)
