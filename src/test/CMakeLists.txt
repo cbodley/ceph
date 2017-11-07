@@ -670,6 +670,10 @@ add_executable(unittest_str_list
 add_ceph_unittest(unittest_str_list)
 target_link_libraries(unittest_str_list global)
 
+# unittest_str_list
+add_executable(bench_str_list bench_str_list.cc)
+target_link_libraries(bench_str_list global benchmark)
+
 # unittest_log
 add_executable(unittest_log
   ${CMAKE_SOURCE_DIR}/src/log/test.cc
