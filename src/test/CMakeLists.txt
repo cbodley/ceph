@@ -7,6 +7,11 @@ add_library(unit-main OBJECT unit.cc)
 set_source_files_properties(unit.cc PROPERTIES
   COMPILE_FLAGS ${UNITTEST_CXX_FLAGS})
 
+# google benchmark
+set(BENCHMARK_ENABLE_TESTING OFF)
+set(BENCHMARK_ENABLE_INSTALL OFF)
+add_subdirectory(benchmark)
+
 add_subdirectory(bench)
 add_subdirectory(cls_hello)
 add_subdirectory(cls_lock)
