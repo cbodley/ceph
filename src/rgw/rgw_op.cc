@@ -176,7 +176,8 @@ static int get_bucket_instance_policy_from_attr(CephContext *cct,
 						RGWBucketInfo& bucket_info,
 						map<string, bufferlist>& bucket_attrs,
 						RGWAccessControlPolicy *policy,
-						rgw_raw_obj& obj)
+						rgw_raw_obj& obj,
+						optional_yield_context y)
 {
   map<string, bufferlist>::iterator aiter = bucket_attrs.find(RGW_ATTR_ACL);
 
@@ -188,7 +189,7 @@ static int get_bucket_instance_policy_from_attr(CephContext *cct,
     ldout(cct, 0) << "WARNING: couldn't find acl header for bucket, generating default" << dendl;
     RGWUserInfo uinfo;
     /* object exists, but policy is broken */
-    int r = rgw_get_user_info_by_uid(store, bucket_info.owner, uinfo);
+    int r = rgw_get_user_info_by_uid(store, bucket_info.owner, uinfo, y);
     if (r < 0)
       return r;
 
@@ -203,7 +204,8 @@ static int get_obj_policy_from_attr(CephContext *cct,
 				    RGWBucketInfo& bucket_info,
 				    map<string, bufferlist>& bucket_attrs,
 				    RGWAccessControlPolicy *policy,
-				    rgw_obj& obj)
+				    rgw_obj& obj,
+				    optional_yield_context y)
 {
   bufferlist bl;
   int ret = 0;
@@ -220,7 +222,7 @@ static int get_obj_policy_from_attr(CephContext *cct,
     /* object exists, but policy is broken */
     ldout(cct, 0) << "WARNING: couldn't find acl header for object, generating default" << dendl;
     RGWUserInfo uinfo;
-    ret = rgw_get_user_info_by_uid(store, bucket_info.owner, uinfo);
+    ret = rgw_get_user_info_by_uid(store, bucket_info.owner, uinfo, y);
     if (ret < 0)
       return ret;
 
@@ -246,7 +248,7 @@ static int get_bucket_policy_from_attr(CephContext *cct,
   rgw_raw_obj instance_obj;
   store->get_bucket_instance_obj(bucket_info.bucket, instance_obj);
   return get_bucket_instance_policy_from_attr(cct, store, bucket_info, bucket_attrs,
-					      policy, instance_obj);
+					      policy, instance_obj, null_yield);
 }
 
 static optional<Policy> get_iam_policy_from_attr(CephContext* cct,
@@ -356,7 +358,8 @@ static int read_obj_policy(RGWRados *store,
 
   RGWObjectCtx *obj_ctx = static_cast<RGWObjectCtx *>(s->obj_ctx);
   int ret = get_obj_policy_from_attr(s->cct, store, *obj_ctx,
-                                     bucket_info, bucket_attrs, acl, obj);
+                                     bucket_info, bucket_attrs, acl, obj,
+                                     s->yield);
   if (ret == -ENOENT) {
     /* object does not exist checking the bucket's ACL to make sure
        that we send a proper error code */
@@ -829,7 +832,8 @@ int RGWOp::init_quota()
   if (s->user->user_id == s->bucket_owner.get_id()) {
     uinfo = s->user;
   } else {
-    int r = rgw_get_user_info_by_uid(store, s->bucket_info.owner, owner_info);
+    int r = rgw_get_user_info_by_uid(store, s->bucket_info.owner, owner_info,
+                                     s->yield);
     if (r < 0)
       return r;
     uinfo = &owner_info;
@@ -3934,7 +3938,7 @@ void RGWPutMetadataAccount::execute()
   /* Params have been extracted earlier. See init_processing(). */
   RGWUserInfo new_uinfo;
   op_ret = rgw_get_user_info_by_uid(store, s->user->user_id, new_uinfo,
-                                    &acct_op_tracker);
+                                    s->yield, &acct_op_tracker);
   if (op_ret < 0) {
     return;
   }

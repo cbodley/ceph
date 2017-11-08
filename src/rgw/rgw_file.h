@@ -918,7 +918,8 @@ namespace rgw {
     }
 
     int authorize(RGWRados* store) {
-      int ret = rgw_get_user_info_by_access_key(store, key.id, user);
+      int ret = rgw_get_user_info_by_access_key(store, key.id, user,
+                                                null_yield);
       if (ret == 0) {
 	RGWAccessKey* key0 = user.get_key0();
 	if (!key0 ||
@@ -938,7 +939,7 @@ namespace rgw {
 	}
 	if (token.valid() && (ldh->auth(token.id, token.key) == 0)) {
 	  /* try to store user if it doesn't already exist */
-	  if (rgw_get_user_info_by_uid(store, token.id, user) < 0) {
+	  if (rgw_get_user_info_by_uid(store, token.id, user, null_yield) < 0) {
 	    int ret = rgw_store_user_info(store, user, NULL, NULL, real_time(),
 					  true);
 	    if (ret < 0) {

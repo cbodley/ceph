@@ -307,14 +307,14 @@ static int parse_grantee_str(RGWRados *store, string& grantee_str,
   string id_val = rgw_trim_quotes(id_val_quoted);
 
   if (strcasecmp(id_type.c_str(), "emailAddress") == 0) {
-    ret = rgw_get_user_info_by_email(store, id_val, info);
+    ret = rgw_get_user_info_by_email(store, id_val, info, null_yield);
     if (ret < 0)
       return ret;
 
     grant.set_canon(info.user_id, info.display_name, rgw_perm);
   } else if (strcasecmp(id_type.c_str(), "id") == 0) {
     rgw_user user(id_val);
-    ret = rgw_get_user_info_by_uid(store, user, info);
+    ret = rgw_get_user_info_by_uid(store, user, info, null_yield);
     if (ret < 0)
       return ret;
 
@@ -485,7 +485,8 @@ int RGWAccessControlPolicy_S3::rebuild(RGWRados *store, ACLOwner *owner, RGWAcce
   }
 
   RGWUserInfo owner_info;
-  if (rgw_get_user_info_by_uid(store, owner->get_id(), owner_info) < 0) {
+  if (rgw_get_user_info_by_uid(store, owner->get_id(), owner_info,
+                               null_yield) < 0) {
     ldout(cct, 10) << "owner info does not exist" << dendl;
     return -EINVAL;
   }
@@ -518,7 +519,7 @@ int RGWAccessControlPolicy_S3::rebuild(RGWRados *store, ACLOwner *owner, RGWAcce
         }
         email = u.id;
         ldout(cct, 10) << "grant user email=" << email << dendl;
-        if (rgw_get_user_info_by_email(store, email, grant_user) < 0) {
+        if (rgw_get_user_info_by_email(store, email, grant_user, null_yield) < 0) {
           ldout(cct, 10) << "grant user email not found or other error" << dendl;
           return -ERR_UNRESOLVABLE_EMAIL;
         }
@@ -533,7 +534,8 @@ int RGWAccessControlPolicy_S3::rebuild(RGWRados *store, ACLOwner *owner, RGWAcce
           }
         }
     
-        if (grant_user.user_id.empty() && rgw_get_user_info_by_uid(store, uid, grant_user) < 0) {
+        if (grant_user.user_id.empty() &&
+            rgw_get_user_info_by_uid(store, uid, grant_user, null_yield) < 0) {
           ldout(cct, 10) << "grant user does not exist:" << uid << dendl;
           return -EINVAL;
         } else {

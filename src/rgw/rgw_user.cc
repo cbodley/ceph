@@ -167,7 +167,7 @@ int rgw_store_user_info(RGWRados *store,
     RGWAccessKey& k = iter->second;
     /* check if swift mapping exists */
     RGWUserInfo inf;
-    int r = rgw_get_user_info_by_swift(store, k.id, inf);
+    int r = rgw_get_user_info_by_swift(store, k.id, inf, null_yield);
     if (r >= 0 && inf.user_id.compare(info.user_id) != 0) {
       ldout(store->ctx(), 0) << "WARNING: can't store user info, swift id (" << k.id
         << ") already mapped to another user (" << info.user_id << ")" << dendl;
@@ -183,7 +183,7 @@ int rgw_store_user_info(RGWRados *store,
       RGWAccessKey& k = iter->second;
       if (old_info && old_info->access_keys.count(iter->first) != 0)
         continue;
-      int r = rgw_get_user_info_by_access_key(store, k.id, inf);
+      int r = rgw_get_user_info_by_access_key(store, k.id, inf, null_yield);
       if (r >= 0 && inf.user_id.compare(info.user_id) != 0) {
         ldout(store->ctx(), 0) << "WARNING: can't store user info, access key already mapped to another user" << dendl;
         return -EEXIST;
@@ -261,6 +261,7 @@ int rgw_get_user_info_from_index(RGWRados * const store,
                                  const string& key,
                                  rgw_pool& pool,
                                  RGWUserInfo& info,
+                                 optional_yield_context y,
                                  RGWObjVersionTracker * const objv_tracker,
                                  real_time * const pmtime)
 {
@@ -279,7 +280,7 @@ int rgw_get_user_info_from_index(RGWRados * const store,
   RGWObjectCtx obj_ctx(store);
 
   int ret = rgw_get_system_obj(store, obj_ctx, pool, key, bl,
-                               null_yield, nullptr, &e.mtime);
+                               y, nullptr, &e.mtime);
   if (ret < 0)
     return ret;
 
@@ -288,7 +289,8 @@ int rgw_get_user_info_from_index(RGWRados * const store,
   bufferlist::iterator iter = bl.begin();
   try {
     ::decode(uid, iter);
-    int ret = rgw_get_user_info_by_uid(store, uid.user_id, e.info, &e.objv_tracker, NULL, &cache_info);
+    int ret = rgw_get_user_info_by_uid(store, uid.user_id, e.info, y,
+                                       &e.objv_tracker, nullptr, &cache_info);
     if (ret < 0) {
       return ret;
     }
@@ -317,7 +319,7 @@ int rgw_get_user_info_from_index(RGWRados * const store,
  */
 int rgw_get_user_info_by_uid(RGWRados *store,
                              const rgw_user& uid,
-                             RGWUserInfo& info,
+                             RGWUserInfo& info, optional_yield_context y,
                              RGWObjVersionTracker * const objv_tracker,
                              real_time * const pmtime,
                              rgw_cache_entry_info * const cache_info,
@@ -329,7 +331,7 @@ int rgw_get_user_info_by_uid(RGWRados *store,
   RGWObjectCtx obj_ctx(store);
   string oid = uid.to_str();
   int ret = rgw_get_system_obj(store, obj_ctx, store->get_zone_params().user_uid_pool,
-                               oid, bl, null_yield, objv_tracker,
+                               oid, bl, y, objv_tracker,
                                pmtime, pattrs, cache_info);
   if (ret < 0) {
     return ret;
@@ -358,9 +360,12 @@ int rgw_get_user_info_by_uid(RGWRados *store,
  * returns: 0 on success, -ERR# on failure (including nonexistence)
  */
 int rgw_get_user_info_by_email(RGWRados *store, string& email, RGWUserInfo& info,
-                               RGWObjVersionTracker *objv_tracker, real_time *pmtime)
+                               optional_yield_context y,
+                               RGWObjVersionTracker *objv_tracker,
+                               real_time *pmtime)
 {
-  return rgw_get_user_info_from_index(store, email, store->get_zone_params().user_email_pool, info, objv_tracker, pmtime);
+  return rgw_get_user_info_from_index(store, email, store->get_zone_params().user_email_pool,
+                                      info, y, objv_tracker, pmtime);
 }
 
 /**
@@ -370,12 +375,13 @@ int rgw_get_user_info_by_email(RGWRados *store, string& email, RGWUserInfo& info
 extern int rgw_get_user_info_by_swift(RGWRados * const store,
                                       const string& swift_name,
                                       RGWUserInfo& info,        /* out */
+                                      optional_yield_context y,
                                       RGWObjVersionTracker * const objv_tracker,
                                       real_time * const pmtime)
 {
   return rgw_get_user_info_from_index(store, swift_name,
                                       store->get_zone_params().user_swift_pool,
-                                      info, objv_tracker, pmtime);
+                                      info, y, objv_tracker, pmtime);
 }
 
 /**
@@ -385,12 +391,13 @@ extern int rgw_get_user_info_by_swift(RGWRados * const store,
 extern int rgw_get_user_info_by_access_key(RGWRados* store,
                                            const std::string& access_key,
                                            RGWUserInfo& info,
+                                           optional_yield_context y,
                                            RGWObjVersionTracker* objv_tracker,
                                            real_time *pmtime)
 {
   return rgw_get_user_info_from_index(store, access_key,
                                       store->get_zone_params().user_keys_pool,
-                                      info, objv_tracker, pmtime);
+                                      info, y, objv_tracker, pmtime);
 }
 
 int rgw_get_user_attrs_by_uid(RGWRados *store,
@@ -418,7 +425,7 @@ int rgw_remove_uid_index(RGWRados *store, rgw_user& uid)
 {
   RGWObjVersionTracker objv_tracker;
   RGWUserInfo info;
-  int ret = rgw_get_user_info_by_uid(store, uid, info, &objv_tracker, NULL);
+  int ret = rgw_get_user_info_by_uid(store, uid, info, null_yield, &objv_tracker);
   if (ret < 0)
     return ret;
 
@@ -928,13 +935,15 @@ int RGWAccessKeyPool::generate_key(RGWUserAdminOpState& op_state, std::string *e
   if (!id.empty()) {
     switch (key_type) {
     case KEY_TYPE_SWIFT:
-      if (rgw_get_user_info_by_swift(store, id, duplicate_check) >= 0) {
+      if (rgw_get_user_info_by_swift(store, id, duplicate_check,
+                                     null_yield) >= 0) {
         set_err_msg(err_msg, "existing swift key in RGW system:" + id);
         return -ERR_KEY_EXIST;
       }
       break;
     case KEY_TYPE_S3:
-      if (rgw_get_user_info_by_access_key(store, id, duplicate_check) >= 0) {
+      if (rgw_get_user_info_by_access_key(store, id, duplicate_check,
+                                          null_yield) >= 0) {
         set_err_msg(err_msg, "existing S3 key in RGW system:" + id);
         return -ERR_KEY_EXIST;
       }
@@ -974,7 +983,8 @@ int RGWAccessKeyPool::generate_key(RGWUserAdminOpState& op_state, std::string *e
       if (!validate_access_key(id))
         continue;
 
-    } while (!rgw_get_user_info_by_access_key(store, id, duplicate_check));
+    } while (!rgw_get_user_info_by_access_key(store, id, duplicate_check,
+                                              null_yield));
   }
 
   if (key_type == KEY_TYPE_SWIFT) {
@@ -985,7 +995,7 @@ int RGWAccessKeyPool::generate_key(RGWUserAdminOpState& op_state, std::string *e
     }
 
     // check that the access key doesn't exist
-    if (rgw_get_user_info_by_swift(store, id, duplicate_check) >= 0) {
+    if (rgw_get_user_info_by_swift(store, id, duplicate_check, null_yield) >= 0) {
       set_err_msg(err_msg, "cannot create existing swift key");
       return -ERR_KEY_EXIST;
     }
@@ -1767,19 +1777,23 @@ int RGWUser::init(RGWUserAdminOpState& op_state)
   }
 
   if (!user_id.empty() && (user_id.compare(RGW_USER_ANON_ID) != 0)) {
-    found = (rgw_get_user_info_by_uid(store, user_id, user_info, &op_state.objv) >= 0);
+    found = (rgw_get_user_info_by_uid(store, user_id, user_info,
+                                      null_yield, &op_state.objv) >= 0);
     op_state.found_by_uid = found;
   }
   if (!user_email.empty() && !found) {
-    found = (rgw_get_user_info_by_email(store, user_email, user_info, &op_state.objv) >= 0);
+    found = (rgw_get_user_info_by_email(store, user_email, user_info,
+                                        null_yield, &op_state.objv) >= 0);
     op_state.found_by_email = found;
   }
   if (!swift_user.empty() && !found) {
-    found = (rgw_get_user_info_by_swift(store, swift_user, user_info, &op_state.objv) >= 0);
+    found = (rgw_get_user_info_by_swift(store, swift_user, user_info,
+                                        null_yield, &op_state.objv) >= 0);
     op_state.found_by_key = found;
   }
   if (!access_key.empty() && !found) {
-    found = (rgw_get_user_info_by_access_key(store, access_key, user_info, &op_state.objv) >= 0);
+    found = (rgw_get_user_info_by_access_key(store, access_key, user_info,
+                                             null_yield, &op_state.objv) >= 0);
     op_state.found_by_key = found;
   }
   
@@ -2176,7 +2190,8 @@ int RGWUser::execute_modify(RGWUserAdminOpState& op_state, std::string *err_msg)
   if (!op_email.empty()) {
     // make sure we are not adding a duplicate email
     if (old_email.compare(op_email) != 0) {
-      ret = rgw_get_user_info_by_email(store, op_email, duplicate_check);
+      ret = rgw_get_user_info_by_email(store, op_email, duplicate_check,
+                                       null_yield);
       if (ret >= 0 && duplicate_check.user_id.compare(user_id) != 0) {
         set_err_msg(err_msg, "cannot add duplicate email");
         return -ERR_EMAIL_EXIST;
@@ -2693,8 +2708,8 @@ public:
 
     rgw_user uid(entry);
 
-    int ret = rgw_get_user_info_by_uid(store, uid, uci.info, &objv_tracker,
-                                       &mtime, NULL, &uci.attrs);
+    int ret = rgw_get_user_info_by_uid(store, uid, uci.info, null_yield,
+                                       &objv_tracker, &mtime, nullptr, &uci.attrs);
     if (ret < 0) {
       return ret;
     }
@@ -2724,7 +2739,8 @@ public:
 
     RGWUserInfo old_info;
     real_time orig_mtime;
-    int ret = rgw_get_user_info_by_uid(store, uid, old_info, &objv_tracker, &orig_mtime);
+    int ret = rgw_get_user_info_by_uid(store, uid, old_info, null_yield,
+                                       &objv_tracker, &orig_mtime);
     if (ret < 0 && ret != -ENOENT)
       return ret;
 
@@ -2753,7 +2769,7 @@ public:
 
     rgw_user uid(entry);
 
-    int ret = rgw_get_user_info_by_uid(store, uid, info, &objv_tracker);
+    int ret = rgw_get_user_info_by_uid(store, uid, info, null_yield, &objv_tracker);
     if (ret < 0)
       return ret;
 

@@ -74,6 +74,7 @@ extern int rgw_store_user_info(RGWRados *store,
 extern int rgw_get_user_info_by_uid(RGWRados *store,
                                     const rgw_user& user_id,
                                     RGWUserInfo& info,
+                                    optional_yield_context y,
                                     RGWObjVersionTracker *objv_tracker = NULL,
                                     real_time *pmtime                     = NULL,
                                     rgw_cache_entry_info *cache_info   = NULL,
@@ -83,7 +84,9 @@ extern int rgw_get_user_info_by_uid(RGWRados *store,
  * returns: 0 on success, -ERR# on failure (including nonexistence)
  */
 extern int rgw_get_user_info_by_email(RGWRados *store, string& email, RGWUserInfo& info,
-                                      RGWObjVersionTracker *objv_tracker = NULL, real_time *pmtime = NULL);
+                                      optional_yield_context y,
+                                      RGWObjVersionTracker *objv_tracker = NULL,
+                                      real_time *pmtime = NULL);
 /**
  * Given an swift username, finds the user info associated with it.
  * returns: 0 on success, -ERR# on failure (including nonexistence)
@@ -91,6 +94,7 @@ extern int rgw_get_user_info_by_email(RGWRados *store, string& email, RGWUserInf
 extern int rgw_get_user_info_by_swift(RGWRados *store,
                                       const string& swift_name,
                                       RGWUserInfo& info,        /* out */
+                                      optional_yield_context y,
                                       RGWObjVersionTracker *objv_tracker = nullptr,
                                       real_time *pmtime = nullptr);
 /**
@@ -100,6 +104,7 @@ extern int rgw_get_user_info_by_swift(RGWRados *store,
 extern int rgw_get_user_info_by_access_key(RGWRados* store,
                                            const std::string& access_key,
                                            RGWUserInfo& info,
+                                           optional_yield_context y,
                                            RGWObjVersionTracker* objv_tracker = nullptr,
                                            real_time* pmtime = nullptr);
 /**
