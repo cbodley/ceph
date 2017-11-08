@@ -243,12 +243,13 @@ static int get_bucket_policy_from_attr(CephContext *cct,
 				       RGWRados *store,
 				       RGWBucketInfo& bucket_info,
 				       map<string, bufferlist>& bucket_attrs,
-				       RGWAccessControlPolicy *policy)
+				       RGWAccessControlPolicy *policy,
+				       optional_yield_context y)
 {
   rgw_raw_obj instance_obj;
   store->get_bucket_instance_obj(bucket_info.bucket, instance_obj);
   return get_bucket_instance_policy_from_attr(cct, store, bucket_info, bucket_attrs,
-					      policy, instance_obj, null_yield);
+					      policy, instance_obj, y);
 }
 
 static optional<Policy> get_iam_policy_from_attr(CephContext* cct,
@@ -319,7 +320,8 @@ static int read_bucket_policy(RGWRados *store,
     return 0;
   }
 
-  int ret = get_bucket_policy_from_attr(s->cct, store, bucket_info, bucket_attrs, policy);
+  int ret = get_bucket_policy_from_attr(s->cct, store, bucket_info,
+                                        bucket_attrs, policy, s->yield);
   if (ret == -ENOENT) {
       ret = -ERR_NO_SUCH_BUCKET;
   }
@@ -364,7 +366,8 @@ static int read_obj_policy(RGWRados *store,
     /* object does not exist checking the bucket's ACL to make sure
        that we send a proper error code */
     RGWAccessControlPolicy bucket_policy(s->cct);
-    ret = get_bucket_policy_from_attr(s->cct, store, bucket_info, bucket_attrs, &bucket_policy);
+    ret = get_bucket_policy_from_attr(s->cct, store, bucket_info,
+                                      bucket_attrs, &bucket_policy, s->yield);
     if (ret < 0) {
       return ret;
     }
@@ -2593,7 +2596,7 @@ void RGWCreateBucket::execute()
   s->bucket_owner.set_name(s->user->display_name);
   if (s->bucket_exists) {
     int r = get_bucket_policy_from_attr(s->cct, store, s->bucket_info,
-                                        s->bucket_attrs, &old_policy);
+                                        s->bucket_attrs, &old_policy, s->yield);
     if (r >= 0)  {
       if (old_policy.get_owner().get_id().compare(s->user->user_id) != 0) {
         op_ret = -EEXIST;
@@ -6154,8 +6157,8 @@ int RGWBulkUploadOp::handle_dir(const boost::string_ref path)
 
   if (bucket_exists) {
     RGWAccessControlPolicy old_policy(s->cct);
-    int r = get_bucket_policy_from_attr(s->cct, store, binfo,
-                                        battrs, &old_policy);
+    int r = get_bucket_policy_from_attr(s->cct, store, binfo, battrs,
+                                        &old_policy, s->yield);
     if (r >= 0)  {
       if (old_policy.get_owner().get_id().compare(s->user->user_id) != 0) {
         op_ret = -EEXIST;
