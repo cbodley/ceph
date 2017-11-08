@@ -799,7 +799,7 @@ int RGWBucket::init(RGWRados *storage, RGWBucketAdminOpState& op_state)
   }
 
   if (!user_id.empty()) {
-    int r = rgw_get_user_info_by_uid(store, user_id, user_info);
+    int r = rgw_get_user_info_by_uid(store, user_id, user_info, null_yield);
     if (r < 0)
       return r;
 

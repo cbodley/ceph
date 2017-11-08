@@ -120,7 +120,7 @@ static ACLGrant user_to_grant(CephContext* const cct,
   RGWUserInfo grant_user;
   ACLGrant grant;
 
-  if (rgw_get_user_info_by_uid(store, user, grant_user) < 0) {
+  if (rgw_get_user_info_by_uid(store, user, grant_user, null_yield) < 0) {
     ldout(cct, 10) << "grant user does not exist: " << uid << dendl;
     /* skipping silently */
     grant.set_canon(user, std::string(), perm);
@@ -311,7 +311,7 @@ void RGWAccessControlPolicy_SWIFTAcct::add_grants(RGWRados * const store,
     } else  {
       rgw_user user(uid);
 
-      if (rgw_get_user_info_by_uid(store, user, grant_user) < 0) {
+      if (rgw_get_user_info_by_uid(store, user, grant_user, null_yield) < 0) {
         ldout(cct, 10) << "grant user does not exist:" << uid << dendl;
         /* skipping silently */
         grant.set_canon(user, std::string(), perm);

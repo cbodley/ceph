@@ -153,13 +153,15 @@ void ThirdPartyAccountApplier<T>::load_acct_info(RGWUserInfo& user_info) const
     if (acct_user_override.tenant.empty()) {
       const rgw_user tenanted_uid(acct_user_override.id, acct_user_override.id);
 
-      if (rgw_get_user_info_by_uid(store, tenanted_uid, user_info) >= 0) {
+      if (rgw_get_user_info_by_uid(store, tenanted_uid, user_info,
+                                   null_yield) >= 0) {
         /* Succeeded. */
         return;
       }
     }
 
-    const int ret = rgw_get_user_info_by_uid(store, acct_user_override, user_info);
+    const int ret = rgw_get_user_info_by_uid(store, acct_user_override,
+                                             user_info, null_yield);
     if (ret < 0) {
       /* We aren't trying to recover from ENOENT here. It's supposed that creating
        * someone else's account isn't a thing we want to support in this filter. */
@@ -229,7 +231,8 @@ void SysReqApplier<T>::load_acct_info(RGWUserInfo& user_info) const
        * reasons. rgw_get_user_info_by_uid doesn't trigger the operator=() but
        * calls ::decode instead. */
       RGWUserInfo euser_info;
-      if (rgw_get_user_info_by_uid(store, effective_uid, euser_info) < 0) {
+      if (rgw_get_user_info_by_uid(store, effective_uid, euser_info,
+                                   null_yield) < 0) {
         //ldout(s->cct, 0) << "User lookup failed!" << dendl;
         throw -EACCES;
       }

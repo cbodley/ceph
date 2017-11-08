@@ -1979,14 +1979,14 @@ void RGWFormPost::get_owner_info(const req_state* const s,
     if (uid.tenant.empty()) {
       const rgw_user tenanted_uid(uid.id, uid.id);
 
-      if (rgw_get_user_info_by_uid(store, tenanted_uid, uinfo) >= 0) {
+      if (rgw_get_user_info_by_uid(store, tenanted_uid, uinfo, s->yield) >= 0) {
         /* Succeeded. */
         bucket_tenant = uinfo.user_id.tenant;
         found = true;
       }
     }
 
-    if (!found && rgw_get_user_info_by_uid(store, uid, uinfo) < 0) {
+    if (!found && rgw_get_user_info_by_uid(store, uid, uinfo, s->yield) < 0) {
       throw -EPERM;
     } else {
       bucket_tenant = uinfo.user_id.tenant;
@@ -2005,7 +2005,8 @@ void RGWFormPost::get_owner_info(const req_state* const s,
   ldout(s->cct, 20) << "temp url user (bucket owner): " << bucket_info.owner
                  << dendl;
 
-  if (rgw_get_user_info_by_uid(store, bucket_info.owner, owner_info) < 0) {
+  if (rgw_get_user_info_by_uid(store, bucket_info.owner,
+                               owner_info, s->yield) < 0) {
     throw -EPERM;
   }
 }
