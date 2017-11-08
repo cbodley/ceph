@@ -9445,7 +9445,8 @@ int RGWRados::Object::Stat::finish()
  * dest: bufferlist to store the result in
  * Returns: 0 on success, -ERR# otherwise.
  */
-int RGWRados::system_obj_get_attr(rgw_raw_obj& obj, const char *name, bufferlist& dest)
+int RGWRados::system_obj_get_attr(rgw_raw_obj& obj, const char *name, bufferlist& dest,
+                                  optional_yield_context y)
 {
   rgw_rados_ref ref;
   int r = get_system_obj_ref(obj, &ref);
@@ -9457,8 +9458,20 @@ int RGWRados::system_obj_get_attr(rgw_raw_obj& obj, const char *name, bufferlist
 
   int rval;
   op.getxattr(name, &dest, &rval);
-  
-  r = ref.ioctx.operate(ref.oid, &op, NULL);
+
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& service = y.get_io_service();
+    auto& yield = y.get_yield_context();
+    boost::system::error_code ec;
+    librados::async_operate(service, ref.ioctx, ref.oid, &op, 0, yield[ec]);
+    r = -ec.value();
+  } else {
+#else
+  {
+#endif
+    r = ref.ioctx.operate(ref.oid, &op, NULL);
+  }
   if (r < 0)
     return r;
 
@@ -10311,12 +10324,13 @@ int RGWRados::SystemObject::Read::read(int64_t ofs, int64_t end, bufferlist& bl,
                                y);
 }
 
-int RGWRados::SystemObject::Read::get_attr(const char *name, bufferlist& dest)
+int RGWRados::SystemObject::Read::get_attr(const char *name, bufferlist& dest,
+                                           optional_yield_context y)
 {
   RGWRados *store = source->get_store();
   rgw_raw_obj& obj = source->get_obj();
 
-  return store->system_obj_get_attr(obj, name, dest);
+  return store->system_obj_get_attr(obj, name, dest, y);
 }
 
 struct get_obj_data;

@@ -2705,7 +2705,8 @@ public:
       int read(int64_t ofs, int64_t end, bufferlist& bl,
                RGWObjVersionTracker *objv_tracker,
                optional_yield_context y);
-      int get_attr(const char *name, bufferlist& dest);
+      int get_attr(const char *name, bufferlist& dest,
+                   optional_yield_context y);
     };
   };
 
@@ -3251,7 +3252,8 @@ public:
    * dest: bufferlist to store the result in
    * Returns: 0 on success, -ERR# otherwise.
    */
-  virtual int system_obj_get_attr(rgw_raw_obj& obj, const char *name, bufferlist& dest);
+  virtual int system_obj_get_attr(rgw_raw_obj& obj, const char *name, bufferlist& dest,
+                                  optional_yield_context y);
 
   int system_obj_set_attr(void *ctx, rgw_raw_obj& obj, const char *name, bufferlist& bl,
                           RGWObjVersionTracker *objv_tracker);
