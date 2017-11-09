@@ -364,10 +364,10 @@ if(WITH_RADOSGW)
   if(WITH_RADOSGW_FCGI_FRONTEND)
     find_package(fcgi REQUIRED)
   endif()
-endif(WITH_RADOSGW)
+  if (WITH_RADOSGW_BEAST_FRONTEND AND NOT WITH_LIBRADOS_ASIO)
+    message(FATAL_ERROR "WITH_LIBRADOS_ASIO required for WITH_RADOSGW_BEAST_FRONTEND")
+  endif()
 
-
-if (WITH_RADOSGW)
   if (NOT DEFINED OPENSSL_FOUND)
     message(STATUS "Looking for openssl anyways, because radosgw selected")
     find_package(OpenSSL)
