@@ -404,8 +404,8 @@ if(WITH_RADOSGW)
     set(WITH_RADOSGW_BEAST_FRONTEND OFF)
   endif()
 endif(WITH_RADOSGW)
-
-
+ 
+ 
 if (WITH_RADOSGW)
   if (NOT DEFINED OPENSSL_FOUND)
     message(STATUS "Looking for openssl anyways, because radosgw selected")
