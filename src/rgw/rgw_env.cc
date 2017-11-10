@@ -22,6 +22,11 @@ void RGWEnv::set(const boost::string_ref& name, const boost::string_ref& val)
   env_map[name.to_string()] = val.to_string();
 }
 
+void RGWEnv::set(boost::string_view name, boost::string_view val)
+{
+  env_map[name.to_string()] = val.to_string();
+}
+
 void RGWEnv::init(CephContext *cct, char **envp)
 {
   const char *p;
