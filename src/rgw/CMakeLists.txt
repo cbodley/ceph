@@ -182,8 +182,7 @@ if(WITH_CURL_OPENSSL)
   target_link_libraries(rgw_a PRIVATE OpenSSL::Crypto)
 endif()
 
-if(WITH_RADOSGW_BEAST_FRONTEND)
-  target_compile_definitions(rgw_a PUBLIC BOOST_COROUTINES_NO_DEPRECATION_WARNING)
+if(WITH_BOOST_CONTEXT)
   target_link_libraries(rgw_a PRIVATE Boost::coroutine Boost::context)
 endif()
 
