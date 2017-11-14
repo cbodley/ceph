@@ -2305,7 +2305,8 @@ class RGWRados
   uint64_t max_bucket_id;
 
   int get_olh_target_state(RGWObjectCtx& rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj,
-                           RGWObjState *olh_state, RGWObjState **target_state);
+                           RGWObjState *olh_state, RGWObjState **target_state,
+                           optional_yield_context y);
   int get_system_obj_state_impl(RGWObjectCtx *rctx, rgw_raw_obj& obj, RGWRawObjState **state,
                                 RGWObjVersionTracker *objv_tracker,
                                 optional_yield_context y);
@@ -3357,8 +3358,12 @@ public:
                           uint64_t olh_epoch, rgw_zone_set *zones_trace = nullptr);
 
   void check_pending_olh_entries(map<string, bufferlist>& pending_entries, map<string, bufferlist> *rm_pending_entries);
-  int remove_olh_pending_entries(const RGWBucketInfo& bucket_info, RGWObjState& state, const rgw_obj& olh_obj, map<string, bufferlist>& pending_attrs);
-  int follow_olh(const RGWBucketInfo& bucket_info, RGWObjectCtx& ctx, RGWObjState *state, const rgw_obj& olh_obj, rgw_obj *target);
+  int remove_olh_pending_entries(const RGWBucketInfo& bucket_info, RGWObjState& state,
+                                 const rgw_obj& olh_obj, map<string, bufferlist>& pending_attrs,
+                                 optional_yield_context y);
+  int follow_olh(const RGWBucketInfo& bucket_info, RGWObjectCtx& ctx,
+                 RGWObjState *state, const rgw_obj& olh_obj, rgw_obj *target,
+                 optional_yield_context y);
   int get_olh(const RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWOLHInfo *olh);
 
   void gen_rand_obj_instance_name(rgw_obj *target);

@@ -9032,12 +9032,14 @@ static bool has_olh_tag(map<string, bufferlist>& attrs)
 }
 
 int RGWRados::get_olh_target_state(RGWObjectCtx& obj_ctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj,
-                                   RGWObjState *olh_state, RGWObjState **target_state)
+                                   RGWObjState *olh_state, RGWObjState **target_state,
+                                   optional_yield_context y)
 {
   assert(olh_state->is_olh);
 
   rgw_obj target;
-  int r = RGWRados::follow_olh(bucket_info, obj_ctx, olh_state, obj, &target); /* might return -EAGAIN */
+  int r = RGWRados::follow_olh(bucket_info, obj_ctx, olh_state, obj,
+                               &target, y); /* might return -EAGAIN */
   if (r < 0) {
     return r;
   }
@@ -9119,7 +9121,7 @@ int RGWRados::get_obj_state_impl(RGWObjectCtx *rctx, const RGWBucketInfo& bucket
   *state = s;
   if (s->has_attrs) {
     if (s->is_olh && need_follow_olh) {
-      return get_olh_target_state(*rctx, bucket_info, obj, s, state);
+      return get_olh_target_state(*rctx, bucket_info, obj, s, state, null_yield);
     }
     return 0;
   }
@@ -9261,7 +9263,7 @@ int RGWRados::get_obj_state_impl(RGWObjectCtx *rctx, const RGWBucketInfo& bucket
     ldout(cct, 20) << __func__ << ": setting s->olh_tag to " << string(s->olh_tag.c_str(), s->olh_tag.length()) << dendl;
 
     if (need_follow_olh) {
-      return get_olh_target_state(*rctx, bucket_info, obj, s, state);
+      return get_olh_target_state(*rctx, bucket_info, obj, s, state, null_yield);
     }
   }
 
@@ -11468,7 +11470,10 @@ void RGWRados::check_pending_olh_entries(map<string, bufferlist>& pending_entrie
   }
 }
 
-int RGWRados::remove_olh_pending_entries(const RGWBucketInfo& bucket_info, RGWObjState& state, const rgw_obj& olh_obj, map<string, bufferlist>& pending_attrs)
+int RGWRados::remove_olh_pending_entries(const RGWBucketInfo& bucket_info,
+                                         RGWObjState& state, const rgw_obj& olh_obj,
+                                         map<string, bufferlist>& pending_attrs,
+                                         optional_yield_context y)
 {
   ObjectWriteOperation op;
 
@@ -11485,7 +11490,17 @@ int RGWRados::remove_olh_pending_entries(const RGWBucketInfo& bucket_info, RGWOb
   }
 
   /* update olh object */
-  r = ref.ioctx.operate(ref.oid, &op);
+#ifdef WITH_RADOSGW_BEAST_FRONTEND
+  if (y) {
+    boost::system::error_code ec;
+    librados::async_operate(ref.ioctx, ref.oid, &op, 0, (*y)[ec]);
+    r = -ec.value();
+  } else {
+#else
+  {
+#endif
+    r = ref.ioctx.operate(ref.oid, &op);
+  }
   if (r == -ENOENT || r == -ECANCELED) {
     /* raced with some other change, shouldn't sweat about it */
     r = 0;
@@ -11498,7 +11513,9 @@ int RGWRados::remove_olh_pending_entries(const RGWBucketInfo& bucket_info, RGWOb
   return 0;
 }
 
-int RGWRados::follow_olh(const RGWBucketInfo& bucket_info, RGWObjectCtx& obj_ctx, RGWObjState *state, const rgw_obj& olh_obj, rgw_obj *target)
+int RGWRados::follow_olh(const RGWBucketInfo& bucket_info, RGWObjectCtx& obj_ctx,
+                         RGWObjState *state, const rgw_obj& olh_obj,
+                         rgw_obj *target, optional_yield_context y)
 {
   map<string, bufferlist> pending_entries;
   filter_attrset(state->attrset, RGW_ATTR_OLH_PENDING_PREFIX, &pending_entries);
@@ -11507,7 +11524,8 @@ int RGWRados::follow_olh(const RGWBucketInfo& bucket_info, RGWObjectCtx& obj_ctx
   check_pending_olh_entries(pending_entries, &rm_pending_entries);
 
   if (!rm_pending_entries.empty()) {
-    int ret = remove_olh_pending_entries(bucket_info, *state, olh_obj, rm_pending_entries);
+    int ret = remove_olh_pending_entries(bucket_info, *state, olh_obj,
+                                         rm_pending_entries, y);
     if (ret < 0) {
       ldout(cct, 20) << "ERROR: rm_pending_entries returned ret=" << ret << dendl;
       return ret;
