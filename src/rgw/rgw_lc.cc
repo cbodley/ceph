@@ -445,7 +445,8 @@ int RGWLC::bucket_lc_process(string& shard_id)
             is_expired = obj_has_expired(obj_iter->meta.mtime, prefix_iter->second.expiration);
           }
           if (is_expired) {
-            int ret = store->get_obj_state(&rctx, bucket_info, obj, &state, false);
+            int ret = store->get_obj_state(&rctx, bucket_info, obj, &state,
+                                           null_yield, false);
             if (ret < 0) {
               return ret;
             }
@@ -552,7 +553,8 @@ int RGWLC::bucket_lc_process(string& shard_id)
               RGWObjectCtx rctx(store);
               rgw_obj obj(bucket_info.bucket, obj_iter->key);
               RGWObjState *state;
-              int ret = store->get_obj_state(&rctx, bucket_info, obj, &state, false);
+              int ret = store->get_obj_state(&rctx, bucket_info, obj, &state,
+                                             null_yield, false);
               if (ret < 0) {
                 return ret;
               }

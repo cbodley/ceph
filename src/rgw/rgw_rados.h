@@ -2310,7 +2310,9 @@ class RGWRados
   int get_system_obj_state_impl(RGWObjectCtx *rctx, rgw_raw_obj& obj, RGWRawObjState **state,
                                 RGWObjVersionTracker *objv_tracker,
                                 optional_yield_context y);
-  int get_obj_state_impl(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state,
+  int get_obj_state_impl(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info,
+                         const rgw_obj& obj, RGWObjState **state,
+                         optional_yield_context y,
                          bool follow_olh, bool assume_noent = false);
   int append_atomic_test(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj,
                          librados::ObjectOperation& op, RGWObjState **state);
@@ -2733,7 +2735,8 @@ public:
     bool bs_initialized;
 
   protected:
-    int get_state(RGWObjState **pstate, bool follow_olh, bool assume_noent = false);
+    int get_state(RGWObjState **pstate, optional_yield_context y,
+                  bool follow_olh, bool assume_noent = false);
     void invalidate_state();
 
     int prepare_atomic_modification(librados::ObjectWriteOperation& op, bool reset_obj, const string *ptag,
@@ -3278,11 +3281,9 @@ public:
   int get_system_obj_state(RGWObjectCtx *rctx, rgw_raw_obj& obj, RGWRawObjState **state,
                            RGWObjVersionTracker *objv_tracker,
                            optional_yield_context y);
-  int get_obj_state(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state,
-                    bool follow_olh, bool assume_noent = false);
-  int get_obj_state(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state) {
-    return get_obj_state(rctx, bucket_info, obj, state, true);
-  }
+  int get_obj_state(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info,
+                    const rgw_obj& obj, RGWObjState **state, optional_yield_context y,
+                    bool follow_olh = true, bool assume_noent = false);
 
   virtual int stat_system_obj(RGWObjectCtx& obj_ctx,
                               RGWRados::SystemObject::Read::GetObjState& state,

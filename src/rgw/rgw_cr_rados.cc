@@ -597,7 +597,7 @@ int RGWAsyncRemoveObj::_send_request()
 
   RGWObjState *state;
 
-  int ret = store->get_obj_state(&obj_ctx, bucket_info, obj, &state);
+  int ret = store->get_obj_state(&obj_ctx, bucket_info, obj, &state, null_yield);
   if (ret < 0) {
     ldout(store->ctx(), 20) << __func__ << "(): get_obj_state() obj=" << obj << " returned ret=" << ret << dendl;
     return ret;

@@ -5267,7 +5267,9 @@ next:
 
     RGWObjState *state;
 
-    ret = store->get_obj_state(&rctx, bucket_info, obj, &state, false); /* don't follow olh */
+    constexpr bool follow_olh = false;
+    ret = store->get_obj_state(&rctx, bucket_info, obj, &state,
+                               null_yield, follow_olh);
     if (ret < 0) {
       return -ret;
     }
