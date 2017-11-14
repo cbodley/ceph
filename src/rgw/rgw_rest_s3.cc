@@ -3428,7 +3428,8 @@ bool RGWHandler_REST_S3Website::web_dir() const {
   obj_ctx.obj.set_prefetch_data(obj);
 
   RGWObjState* state = nullptr;
-  if (store->get_obj_state(&obj_ctx, s->bucket_info, obj, &state, false) < 0) {
+  if (store->get_obj_state(&obj_ctx, s->bucket_info, obj, &state,
+                           s->yield, false) < 0) {
     return false;
   }
   if (! state->exists) {

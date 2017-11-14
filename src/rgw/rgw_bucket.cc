@@ -663,7 +663,7 @@ int rgw_remove_bucket_bypass_gc(RGWRados *store, rgw_bucket& bucket,
       RGWObjState *astate = NULL;
       rgw_obj obj(bucket, (*it).key);
 
-      ret = store->get_obj_state(&obj_ctx, info, obj, &astate, false);
+      ret = store->get_obj_state(&obj_ctx, info, obj, &astate, null_yield, false);
       if (ret == -ENOENT) {
         dout(1) << "WARNING: cannot find obj state for obj " << obj.get_oid() << dendl;
         continue;
