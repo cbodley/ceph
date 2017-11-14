@@ -115,6 +115,7 @@ extern int rgw_get_user_info_by_access_key(RGWRados* store,
 extern int rgw_get_user_attrs_by_uid(RGWRados *store,
                                      const rgw_user& user_id,
                                      map<string, bufferlist>& attrs,
+                                     optional_yield_context y,
                                      RGWObjVersionTracker *objv_tracker = NULL);
 /**
  * Given an RGWUserInfo, deletes the user and its bucket ACLs.
