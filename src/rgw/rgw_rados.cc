@@ -1758,7 +1758,8 @@ int RGWZoneParams::create(bool exclusive)
 {
   /* check for old pools config */
   rgw_raw_obj obj(domain_root, avail_pools);
-  int r = store->raw_obj_stat(obj, NULL, NULL, NULL, NULL, NULL, NULL);
+  int r = store->raw_obj_stat(obj, nullptr, nullptr, nullptr, nullptr,
+                              nullptr, nullptr, null_yield);
   if (r < 0) {
     ldout(store->ctx(), 10) << "couldn't find old data placement pools config, setting up new ones for the zone" << dendl;
     /* a new system, let's set new placement info */
@@ -9122,7 +9123,9 @@ int RGWRados::get_system_obj_state_impl(RGWObjectCtx *rctx, rgw_raw_obj& obj, RG
 
   s->obj = obj;
 
-  int r = raw_obj_stat(obj, &s->size, &s->mtime, &s->epoch, &s->attrset, (s->prefetch_data ? &s->data : NULL), objv_tracker);
+  int r = raw_obj_stat(obj, &s->size, &s->mtime, &s->epoch, &s->attrset,
+                       (s->prefetch_data ? &s->data : NULL), objv_tracker,
+                       null_yield);
   if (r == -ENOENT) {
     s->exists = false;
     s->has_attrs = true;
@@ -9183,7 +9186,8 @@ int RGWRados::get_obj_state_impl(RGWObjectCtx *rctx, const RGWBucketInfo& bucket
   int r = -ENOENT;
 
   if (!assume_noent) {
-    r = RGWRados::raw_obj_stat(raw_obj, &s->size, &s->mtime, &s->epoch, &s->attrset, (s->prefetch_data ? &s->data : NULL), NULL);
+    r = RGWRados::raw_obj_stat(raw_obj, &s->size, &s->mtime, &s->epoch, &s->attrset,
+                               (s->prefetch_data ? &s->data : NULL), NULL, null_yield);
   }
 
   if (r == -ENOENT) {
@@ -11589,7 +11593,8 @@ int RGWRados::follow_olh(const RGWBucketInfo& bucket_info, RGWObjectCtx& obj_ctx
 
 int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime, uint64_t *epoch,
                            map<string, bufferlist> *attrs, bufferlist *first_chunk,
-                           RGWObjVersionTracker *objv_tracker)
+                           RGWObjVersionTracker *objv_tracker,
+                           optional_yield_context y)
 {
   rgw_rados_ref ref;
   int r = get_raw_obj_ref(obj, &ref);
@@ -11614,8 +11619,19 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
   if (first_chunk) {
     op.read(0, cct->_conf->rgw_max_chunk_size, first_chunk, NULL);
   }
-  bufferlist outbl;
-  r = ref.ioctx.operate(ref.oid, &op, &outbl);
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& service = y.get_io_service();
+    auto& yield = y.get_yield_context();
+    boost::system::error_code ec;
+    librados::async_operate(service, ref.ioctx, ref.oid, &op, 0, yield[ec]);
+    r = -ec.value();
+  } else {
+#else
+  {
+#endif
+    r = ref.ioctx.operate(ref.oid, &op, nullptr);
+  }
 
   if (epoch) {
     *epoch = ref.ioctx.get_last_version();
