@@ -242,7 +242,8 @@ public:
                      optional_yield_context y) override;
 
   int raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime, uint64_t *epoch, map<string, bufferlist> *attrs,
-                   bufferlist *first_chunk, RGWObjVersionTracker *objv_tracker) override;
+                   bufferlist *first_chunk, RGWObjVersionTracker *objv_tracker,
+                   optional_yield_context y) override;
 
   int delete_system_obj(rgw_raw_obj& obj, RGWObjVersionTracker *objv_tracker) override;
 
@@ -465,7 +466,8 @@ int RGWCache<T>::put_system_obj_data(void *ctx, rgw_raw_obj& obj, bufferlist& da
 template <class T>
 int RGWCache<T>::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
                           uint64_t *pepoch, map<string, bufferlist> *attrs,
-                          bufferlist *first_chunk, RGWObjVersionTracker *objv_tracker)
+                          bufferlist *first_chunk, RGWObjVersionTracker *objv_tracker,
+                          optional_yield_context y)
 {
   rgw_pool pool;
   string oid;
@@ -493,7 +495,8 @@ int RGWCache<T>::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmti
       objv_tracker->read_version = info.version;
     goto done;
   }
-  r = T::raw_obj_stat(obj, &size, &mtime, &epoch, &info.xattrs, first_chunk, objv_tracker);
+  r = T::raw_obj_stat(obj, &size, &mtime, &epoch, &info.xattrs, first_chunk,
+                      objv_tracker, y);
   if (r < 0) {
     if (r == -ENOENT) {
       info.status = r;
