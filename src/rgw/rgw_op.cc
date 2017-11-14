@@ -520,7 +520,7 @@ int rgw_build_bucket_policies(RGWRados* store, struct req_state* s)
   if (s->user_acl) {
     map<string, bufferlist> uattrs;
 
-    ret = rgw_get_user_attrs_by_uid(store, acct_acl_user.uid, uattrs);
+    ret = rgw_get_user_attrs_by_uid(store, acct_acl_user.uid, uattrs, s->yield);
     if (!ret) {
       ret = get_user_policy_from_attr(s->cct, store, uattrs, *s->user_acl);
     }
@@ -1831,7 +1831,8 @@ void RGWListBuckets::execute()
   }
 
   if (supports_account_metadata()) {
-    op_ret = rgw_get_user_attrs_by_uid(store, s->user->user_id, attrs);
+    op_ret = rgw_get_user_attrs_by_uid(store, s->user->user_id,
+                                       attrs, s->yield);
     if (op_ret < 0) {
       goto send_end;
     }
@@ -3878,7 +3879,7 @@ int RGWPutMetadataAccount::init_processing()
   }
 
   op_ret = rgw_get_user_attrs_by_uid(store, s->user->user_id, orig_attrs,
-                                     &acct_op_tracker);
+                                     s->yield, &acct_op_tracker);
   if (op_ret < 0) {
     return op_ret;
   }
