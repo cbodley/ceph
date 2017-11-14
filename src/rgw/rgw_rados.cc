@@ -9049,7 +9049,10 @@ int RGWRados::get_olh_target_state(RGWObjectCtx& obj_ctx, const RGWBucketInfo& b
   return 0;
 }
 
-int RGWRados::get_system_obj_state_impl(RGWObjectCtx *rctx, rgw_raw_obj& obj, RGWRawObjState **state, RGWObjVersionTracker *objv_tracker)
+int RGWRados::get_system_obj_state_impl(RGWObjectCtx *rctx, rgw_raw_obj& obj,
+                                        RGWRawObjState **state,
+                                        RGWObjVersionTracker *objv_tracker,
+                                        optional_yield_context y)
 {
   if (obj.empty()) {
     return -EINVAL;
@@ -9065,8 +9068,7 @@ int RGWRados::get_system_obj_state_impl(RGWObjectCtx *rctx, rgw_raw_obj& obj, RG
   s->obj = obj;
 
   int r = raw_obj_stat(obj, &s->size, &s->mtime, &s->epoch, &s->attrset,
-                       (s->prefetch_data ? &s->data : NULL), objv_tracker,
-                       null_yield);
+                       (s->prefetch_data ? &s->data : NULL), objv_tracker, y);
   if (r == -ENOENT) {
     s->exists = false;
     s->has_attrs = true;
@@ -9089,12 +9091,15 @@ int RGWRados::get_system_obj_state_impl(RGWObjectCtx *rctx, rgw_raw_obj& obj, RG
   return 0;
 }
 
-int RGWRados::get_system_obj_state(RGWObjectCtx *rctx, rgw_raw_obj& obj, RGWRawObjState **state, RGWObjVersionTracker *objv_tracker)
+int RGWRados::get_system_obj_state(RGWObjectCtx *rctx, rgw_raw_obj& obj,
+                                   RGWRawObjState **state,
+                                   RGWObjVersionTracker *objv_tracker,
+                                   optional_yield_context y)
 {
   int ret;
 
   do {
-    ret = get_system_obj_state_impl(rctx, obj, state, objv_tracker);
+    ret = get_system_obj_state_impl(rctx, obj, state, objv_tracker, y);
   } while (ret == -EAGAIN);
 
   return ret;
@@ -9853,9 +9858,10 @@ int RGWRados::Object::Read::range_to_ofs(uint64_t obj_size, int64_t &ofs, int64_
   return 0;
 }
 
-int RGWRados::SystemObject::get_state(RGWRawObjState **pstate, RGWObjVersionTracker *objv_tracker)
+int RGWRados::SystemObject::get_state(RGWRawObjState **pstate, RGWObjVersionTracker *objv_tracker,
+                                      optional_yield_context y)
 {
-  return store->get_system_obj_state(&ctx, obj, pstate, objv_tracker);
+  return store->get_system_obj_state(&ctx, obj, pstate, objv_tracker, y);
 }
 
 int RGWRados::stat_system_obj(RGWObjectCtx& obj_ctx,
@@ -9868,7 +9874,7 @@ int RGWRados::stat_system_obj(RGWObjectCtx& obj_ctx,
 {
   RGWRawObjState *astate = NULL;
 
-  int r = get_system_obj_state(&obj_ctx, obj, &astate, objv_tracker);
+  int r = get_system_obj_state(&obj_ctx, obj, &astate, objv_tracker, null_yield);
   if (r < 0)
     return r;
 

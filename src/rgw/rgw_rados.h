@@ -2306,7 +2306,9 @@ class RGWRados
 
   int get_olh_target_state(RGWObjectCtx& rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj,
                            RGWObjState *olh_state, RGWObjState **target_state);
-  int get_system_obj_state_impl(RGWObjectCtx *rctx, rgw_raw_obj& obj, RGWRawObjState **state, RGWObjVersionTracker *objv_tracker);
+  int get_system_obj_state_impl(RGWObjectCtx *rctx, rgw_raw_obj& obj, RGWRawObjState **state,
+                                RGWObjVersionTracker *objv_tracker,
+                                optional_yield_context y);
   int get_obj_state_impl(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state,
                          bool follow_olh, bool assume_noent = false);
   int append_atomic_test(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj,
@@ -2651,7 +2653,8 @@ public:
     RGWObjState *state;
 
   protected:
-    int get_state(RGWRawObjState **pstate, RGWObjVersionTracker *objv_tracker);
+    int get_state(RGWRawObjState **pstate, RGWObjVersionTracker *objv_tracker,
+                  optional_yield_context y);
 
   public:
     SystemObject(RGWRados *_store, RGWObjectCtx& _ctx, rgw_raw_obj& _obj) : store(_store), ctx(_ctx), obj(_obj), state(NULL) {}
@@ -3270,7 +3273,9 @@ public:
                         map<string, bufferlist>& attrs,
                         map<string, bufferlist>* rmattrs);
 
-  int get_system_obj_state(RGWObjectCtx *rctx, rgw_raw_obj& obj, RGWRawObjState **state, RGWObjVersionTracker *objv_tracker);
+  int get_system_obj_state(RGWObjectCtx *rctx, rgw_raw_obj& obj, RGWRawObjState **state,
+                           RGWObjVersionTracker *objv_tracker,
+                           optional_yield_context y);
   int get_obj_state(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state,
                     bool follow_olh, bool assume_noent = false);
   int get_obj_state(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state) {
