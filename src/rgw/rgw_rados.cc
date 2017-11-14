@@ -9925,11 +9925,12 @@ int RGWRados::stat_system_obj(RGWObjectCtx& obj_ctx,
                               map<string, bufferlist> *attrs,
                               real_time *lastmod,
                               uint64_t *obj_size,
-                              RGWObjVersionTracker *objv_tracker)
+                              RGWObjVersionTracker *objv_tracker,
+                              optional_yield_context y)
 {
   RGWRawObjState *astate = NULL;
 
-  int r = get_system_obj_state(&obj_ctx, obj, &astate, objv_tracker, null_yield);
+  int r = get_system_obj_state(&obj_ctx, obj, &astate, objv_tracker, y);
   if (r < 0)
     return r;
 
@@ -10003,13 +10004,15 @@ int RGWRados::Bucket::UpdateIndex::guard_reshard(BucketShard **pbs, std::functio
   return 0;
 }
 
-int RGWRados::SystemObject::Read::stat(RGWObjVersionTracker *objv_tracker)
+int RGWRados::SystemObject::Read::stat(RGWObjVersionTracker *objv_tracker,
+                                       optional_yield_context y)
 {
   RGWRados *store = source->get_store();
   rgw_raw_obj& obj = source->get_obj();
 
   return store->stat_system_obj(source->get_ctx(), state, obj, stat_params.attrs,
-                                stat_params.lastmod, stat_params.obj_size, objv_tracker);
+                                stat_params.lastmod, stat_params.obj_size,
+                                objv_tracker, y);
 }
 
 int RGWRados::Bucket::UpdateIndex::prepare(RGWModifyOp op, const string *write_tag)

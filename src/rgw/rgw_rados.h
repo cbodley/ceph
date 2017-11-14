@@ -2703,7 +2703,8 @@ public:
 
       explicit Read(RGWRados::SystemObject *_source) : source(_source) {}
 
-      int stat(RGWObjVersionTracker *objv_tracker);
+      int stat(RGWObjVersionTracker *objv_tracker,
+               optional_yield_context y);
       int read(int64_t ofs, int64_t end, bufferlist& bl,
                RGWObjVersionTracker *objv_tracker,
                optional_yield_context y);
@@ -3293,7 +3294,8 @@ public:
                               map<string, bufferlist> *attrs,
                               ceph::real_time *lastmod,
                               uint64_t *obj_size,
-                              RGWObjVersionTracker *objv_tracker);
+                              RGWObjVersionTracker *objv_tracker,
+                              optional_yield_context y);
 
   virtual int get_system_obj(RGWObjectCtx& obj_ctx, RGWRados::SystemObject::Read::GetObjState& read_state,
                              RGWObjVersionTracker *objv_tracker, rgw_raw_obj& obj,

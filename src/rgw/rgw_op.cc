@@ -299,8 +299,7 @@ static int get_system_obj_attrs(RGWRados *store, struct req_state *s, rgw_raw_ob
   rop.stat_params.attrs = &attrs;
   rop.stat_params.obj_size = obj_size;
 
-  int ret = rop.stat(objv_tracker);
-  return ret;
+  return rop.stat(objv_tracker, s->yield);
 }
 
 static int read_bucket_policy(RGWRados *store,
