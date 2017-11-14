@@ -411,7 +411,7 @@ int rgw_get_user_attrs_by_uid(RGWRados *store,
   RGWRados::SystemObject::Read rop(&src);
 
   rop.stat_params.attrs = &attrs;
-  return rop.stat(objv_tracker);
+  return rop.stat(objv_tracker, null_yield);
 }
 
 int rgw_remove_key_index(RGWRados *store, RGWAccessKey& access_key)
