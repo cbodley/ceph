@@ -16,8 +16,13 @@ struct RGWObjVersionTracker;
 
 struct obj_version;
 
-int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool, const string& oid, const char *data, size_t size, bool exclusive,
-                       RGWObjVersionTracker *objv_tracker, real_time set_mtime, map<string, bufferlist> *pattrs = NULL);
+// TODO: convert data,size to bufferlist to avoid copying
+int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool,
+                       const string& oid, const char *data, size_t size,
+                       bool exclusive, optional_yield_context y,
+                       RGWObjVersionTracker *objv_tracker = nullptr,
+                       real_time set_mtime = real_time{},
+                       map<string, bufferlist> *pattrs = nullptr);
 int rgw_get_system_obj(RGWRados *rgwstore, RGWObjectCtx& obj_ctx, const rgw_pool& pool,
                        const string& key, bufferlist& bl, optional_yield_context y,
                        RGWObjVersionTracker *objv_tracker = nullptr,

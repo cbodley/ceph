@@ -597,7 +597,7 @@ int RGWSystemMetaObj::set_as_default(bool exclusive)
   ::encode(default_info, bl);
 
   int ret = rgw_put_system_obj(store, pool, oid, bl.c_str(), bl.length(),
-                               exclusive, NULL, real_time(), NULL);
+                               exclusive, null_yield);
   if (ret < 0)
     return ret;
 
@@ -683,7 +683,8 @@ int RGWSystemMetaObj::store_name(bool exclusive)
 
   bufferlist bl;
   ::encode(nameToId, bl);
-  return  rgw_put_system_obj(store, pool, oid, bl.c_str(), bl.length(), exclusive, NULL, real_time(), NULL);
+  return  rgw_put_system_obj(store, pool, oid, bl.c_str(), bl.length(),
+                             exclusive, null_yield);
 }
 
 int RGWSystemMetaObj::rename(const string& new_name)
@@ -798,7 +799,8 @@ int RGWSystemMetaObj::store_info(bool exclusive)
 
   bufferlist bl;
   ::encode(*this, bl);
-  return  rgw_put_system_obj(store, pool, oid, bl.c_str(), bl.length(), exclusive, NULL, real_time(), NULL);
+  return  rgw_put_system_obj(store, pool, oid, bl.c_str(), bl.length(),
+                             exclusive, null_yield);
 }
 
 int RGWSystemMetaObj::write(bool exclusive)
@@ -883,7 +885,7 @@ int RGWRealm::create_control(bool exclusive)
   auto pool = rgw_pool{get_pool(cct)};
   auto oid = get_control_oid();
   return rgw_put_system_obj(store, pool, oid, nullptr, 0, exclusive,
-                            nullptr, real_time(), nullptr);
+                            null_yield);
 }
 
 int RGWRealm::delete_control()
@@ -1032,7 +1034,7 @@ int RGWPeriodConfig::write(RGWRados *store, const std::string& realm_id)
   bufferlist bl;
   ::encode(*this, bl);
   return rgw_put_system_obj(store, pool, oid, bl.c_str(), bl.length(),
-                            false, nullptr, real_time(), nullptr);
+                            false, null_yield);
 }
 
 int RGWPeriod::init(CephContext *_cct, RGWRados *_store, const string& period_realm_id,
@@ -1191,7 +1193,7 @@ int RGWPeriod::set_latest_epoch(epoch_t epoch, bool exclusive,
   ::encode(info, bl);
 
   return rgw_put_system_obj(store, pool, oid, bl.c_str(), bl.length(),
-                            exclusive, objv, real_time(), nullptr);
+                            exclusive, null_yield, objv);
 }
 
 int RGWPeriod::update_latest_epoch(epoch_t epoch)
@@ -1327,7 +1329,7 @@ int RGWPeriod::store_info(bool exclusive)
   ::encode(*this, bl);
 
   return rgw_put_system_obj(store, pool, oid, bl.c_str(), bl.length(),
-                            exclusive, NULL, real_time(), NULL);
+                            exclusive, null_yield);
 }
 
 rgw_pool RGWPeriod::get_pool(CephContext *cct)
@@ -4099,7 +4101,7 @@ int RGWRados::replace_region_with_zonegroup()
 
   /* mark as converted */
   ret = rgw_put_system_obj(this, pool, oid, bl.c_str(), bl.length(),
-			   true, NULL, real_time(), NULL);
+			   true, null_yield);
   if (ret < 0 ) {
     ldout(cct, 0) << __func__ << " failed to mark cluster as converted: ret "<< ret << " " << cpp_strerror(-ret)
 		  << dendl;
@@ -5997,7 +5999,8 @@ read_omap:
   if (write_map) {
     bufferlist new_bl;
     ::encode(m, new_bl);
-    ret = put_system_obj_data(NULL, obj, new_bl, -1, false);
+    ret = put_system_obj_data(NULL, obj, new_bl, -1, false,
+                              null_yield, nullptr);
     if (ret < 0) {
       ldout(cct, 0) << "WARNING: could not save avail pools map info ret=" << ret << dendl;
     }
@@ -6042,7 +6045,7 @@ int RGWRados::update_placement_map()
 
   bufferlist new_bl;
   ::encode(m, new_bl);
-  ret = put_system_obj_data(NULL, obj, new_bl, -1, false);
+  ret = put_system_obj_data(NULL, obj, new_bl, -1, false, null_yield, nullptr);
   if (ret < 0) {
     ldout(cct, 0) << "WARNING: could not save avail pools map info ret=" << ret << dendl;
   }
@@ -7034,7 +7037,7 @@ int RGWRados::Object::Write::write_meta(uint64_t size, uint64_t accounted_size,
 /** Write/overwrite a system object. */
 int RGWRados::put_system_obj_impl(rgw_raw_obj& obj, uint64_t size, real_time *mtime,
               map<std::string, bufferlist>& attrs, int flags,
-              bufferlist& data,
+              bufferlist& data, optional_yield_context y,
               RGWObjVersionTracker *objv_tracker,
               real_time set_mtime /* 0 for don't set */)
 {
@@ -7079,7 +7082,17 @@ int RGWRados::put_system_obj_impl(rgw_raw_obj& obj, uint64_t size, real_time *mt
     op.setxattr(name.c_str(), bl);
   }
 
-  r = ref.ioctx.operate(ref.oid, &op);
+#ifdef WITH_RADOSGW_BEAST_FRONTEND
+  if (y) {
+    boost::system::error_code ec;
+    librados::async_operate(ref.ioctx, ref.oid, &op, 0, (*y)[ec]);
+    r = -ec.value();
+  } else {
+#else
+  {
+#endif
+    r = ref.ioctx.operate(ref.oid, &op);
+  }
   if (r < 0) {
     return r;
   }
@@ -7097,6 +7110,7 @@ int RGWRados::put_system_obj_impl(rgw_raw_obj& obj, uint64_t size, real_time *mt
 
 int RGWRados::put_system_obj_data(void *ctx, rgw_raw_obj& obj, bufferlist& bl,
                                   off_t ofs, bool exclusive,
+                                  optional_yield_context y,
                                   RGWObjVersionTracker *objv_tracker)
 {
   rgw_rados_ref ref;
@@ -7118,7 +7132,17 @@ int RGWRados::put_system_obj_data(void *ctx, rgw_raw_obj& obj, bufferlist& bl,
   } else {
     op.write(ofs, bl);
   }
-  r = ref.ioctx.operate(ref.oid, &op);
+#ifdef WITH_RADOSGW_BEAST_FRONTEND
+  if (y) {
+    boost::system::error_code ec;
+    librados::async_operate(ref.ioctx, ref.oid, &op, 0, (*y)[ec]);
+    r = -ec.value();
+  } else {
+#else
+  {
+#endif
+    r = ref.ioctx.operate(ref.oid, &op);
+  }
   if (r < 0)
     return r;
 
