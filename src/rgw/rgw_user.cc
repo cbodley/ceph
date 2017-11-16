@@ -139,6 +139,7 @@ int rgw_user_get_all_buckets_stats(RGWRados *store, const rgw_user& user_id, map
 int rgw_store_user_info(RGWRados *store,
                         RGWUserInfo& info,
                         RGWUserInfo *old_info,
+                        optional_yield_context y,
                         RGWObjVersionTracker *objv_tracker,
                         real_time mtime,
                         bool exclusive,
@@ -167,7 +168,7 @@ int rgw_store_user_info(RGWRados *store,
     RGWAccessKey& k = iter->second;
     /* check if swift mapping exists */
     RGWUserInfo inf;
-    int r = rgw_get_user_info_by_swift(store, k.id, inf, null_yield);
+    int r = rgw_get_user_info_by_swift(store, k.id, inf, y);
     if (r >= 0 && inf.user_id.compare(info.user_id) != 0) {
       ldout(store->ctx(), 0) << "WARNING: can't store user info, swift id (" << k.id
         << ") already mapped to another user (" << info.user_id << ")" << dendl;
@@ -183,7 +184,7 @@ int rgw_store_user_info(RGWRados *store,
       RGWAccessKey& k = iter->second;
       if (old_info && old_info->access_keys.count(iter->first) != 0)
         continue;
-      int r = rgw_get_user_info_by_access_key(store, k.id, inf, null_yield);
+      int r = rgw_get_user_info_by_access_key(store, k.id, inf, y);
       if (r >= 0 && inf.user_id.compare(info.user_id) != 0) {
         ldout(store->ctx(), 0) << "WARNING: can't store user info, access key already mapped to another user" << dendl;
         return -EEXIST;
@@ -213,7 +214,7 @@ int rgw_store_user_info(RGWRados *store,
         old_info->user_email.compare(info.user_email) != 0) { /* only if new index changed */
       ret = rgw_put_system_obj(store, store->get_zone_params().user_email_pool,
                                info.user_email, link_bl.c_str(), link_bl.length(),
-                               exclusive, null_yield);
+                               exclusive, y);
       if (ret < 0)
         return ret;
     }
@@ -227,8 +228,7 @@ int rgw_store_user_info(RGWRados *store,
 	continue;
 
       ret = rgw_put_system_obj(store, store->get_zone_params().user_keys_pool, k.id,
-                               link_bl.c_str(), link_bl.length(), exclusive,
-                               null_yield);
+                               link_bl.c_str(), link_bl.length(), exclusive, y);
       if (ret < 0)
         return ret;
     }
@@ -241,8 +241,7 @@ int rgw_store_user_info(RGWRados *store,
       continue;
 
     ret = rgw_put_system_obj(store, store->get_zone_params().user_swift_pool, k.id,
-                             link_bl.c_str(), link_bl.length(), exclusive,
-                             null_yield);
+                             link_bl.c_str(), link_bl.length(), exclusive, y);
     if (ret < 0)
       return ret;
   }
@@ -1852,7 +1851,8 @@ int RGWUser::update(RGWUserAdminOpState& op_state, std::string *err_msg)
   }
 
   if (is_populated()) {
-    ret = rgw_store_user_info(store, user_info, &old_info, &op_state.objv, real_time(), false);
+    ret = rgw_store_user_info(store, user_info, &old_info, null_yield,
+                              &op_state.objv, real_time(), false);
     if (ret < 0) {
       set_err_msg(err_msg, "unable to store user info");
       return ret;
@@ -1864,7 +1864,8 @@ int RGWUser::update(RGWUserAdminOpState& op_state, std::string *err_msg)
       return ret;
     }
   } else {
-    ret = rgw_store_user_info(store, user_info, NULL, &op_state.objv, real_time(), false);
+    ret = rgw_store_user_info(store, user_info, NULL, null_yield,
+                              &op_state.objv, real_time(), false);
     if (ret < 0) {
       set_err_msg(err_msg, "unable to store user info");
       return ret;
@@ -2753,7 +2754,8 @@ public:
       return STATUS_NO_APPLY;
     }
 
-    ret = rgw_store_user_info(store, uci.info, &old_info, &objv_tracker, mtime, false, pattrs);
+    ret = rgw_store_user_info(store, uci.info, &old_info, null_yield,
+                              &objv_tracker, mtime, false, pattrs);
     if (ret < 0) {
       return ret;
     }

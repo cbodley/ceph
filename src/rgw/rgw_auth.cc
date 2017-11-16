@@ -404,7 +404,7 @@ void rgw::auth::RemoteApplier::create_account(const rgw_user& acct_user,
   user_info.user_id = new_acct_user;
   user_info.display_name = info.acct_name;
 
-  int ret = rgw_store_user_info(store, user_info, nullptr, nullptr,
+  int ret = rgw_store_user_info(store, user_info, nullptr, null_yield, nullptr,
                                 real_time(), true);
   if (ret < 0) {
     ldout(cct, 0) << "ERROR: failed to store new user info: user="

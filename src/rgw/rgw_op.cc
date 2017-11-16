@@ -3960,7 +3960,7 @@ void RGWPutMetadataAccount::execute()
 
   /* We are passing here the current (old) user info to allow the function
    * optimize-out some operations. */
-  op_ret = rgw_store_user_info(store, new_uinfo, s->user,
+  op_ret = rgw_store_user_info(store, new_uinfo, s->user, s->yield,
                                &acct_op_tracker, real_time(), false, &attrs);
 }
 

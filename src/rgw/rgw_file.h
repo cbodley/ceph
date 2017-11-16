@@ -940,8 +940,8 @@ namespace rgw {
 	if (token.valid() && (ldh->auth(token.id, token.key) == 0)) {
 	  /* try to store user if it doesn't already exist */
 	  if (rgw_get_user_info_by_uid(store, token.id, user, null_yield) < 0) {
-	    int ret = rgw_store_user_info(store, user, NULL, NULL, real_time(),
-					  true);
+	    int ret = rgw_store_user_info(store, user, NULL, null_yield,
+                                          NULL, real_time(), true);
 	    if (ret < 0) {
 	      lsubdout(get_context(), rgw, 10)
 		<< "NOTICE: failed to store new user's info: ret=" << ret

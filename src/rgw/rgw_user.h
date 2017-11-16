@@ -62,6 +62,7 @@ extern void rgw_get_anon_user(RGWUserInfo& info);
 extern int rgw_store_user_info(RGWRados *store,
                                RGWUserInfo& info,
                                RGWUserInfo *old_info,
+                               optional_yield_context y,
                                RGWObjVersionTracker *objv_tracker,
                                real_time mtime,
                                bool exclusive,
