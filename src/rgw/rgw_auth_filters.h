@@ -89,8 +89,9 @@ public:
     get_decoratee().to_str(out);
   }
 
-  void load_acct_info(RGWUserInfo& user_info) const override {  /* out */
-    return get_decoratee().load_acct_info(user_info);
+  void load_acct_info(RGWUserInfo& user_info, /* out */
+                      optional_yield_context y) const override {
+    return get_decoratee().load_acct_info(user_info, y);
   }
 
   void modify_request_state(req_state * s) const override {     /* in/out */
@@ -120,7 +121,8 @@ public:
   }
 
   void to_str(std::ostream& out) const override;
-  void load_acct_info(RGWUserInfo& user_info) const override;   /* out */
+  void load_acct_info(RGWUserInfo& user_info, /* out */
+                      optional_yield_context y) const override;
 };
 
 /* static declaration: UNKNOWN_ACCT will be an empty rgw_user that is a result
@@ -137,31 +139,30 @@ void ThirdPartyAccountApplier<T>::to_str(std::ostream& out) const
 }
 
 template <typename T>
-void ThirdPartyAccountApplier<T>::load_acct_info(RGWUserInfo& user_info) const
+void ThirdPartyAccountApplier<T>::load_acct_info(RGWUserInfo& user_info,
+                                                 optional_yield_context y) const
 {
   if (UNKNOWN_ACCT == acct_user_override) {
     /* There is no override specified by the upper layer. This means that we'll
      * load the account owned by the authenticated identity (aka auth_user). */
-    DecoratedApplier<T>::load_acct_info(user_info);
+    DecoratedApplier<T>::load_acct_info(user_info, y);
   } else if (DecoratedApplier<T>::is_owner_of(acct_user_override)) {
     /* The override has been specified but the account belongs to the authenticated
      * identity. We may safely forward the call to a next stage. */
-    DecoratedApplier<T>::load_acct_info(user_info);
+    DecoratedApplier<T>::load_acct_info(user_info, y);
   } else {
     /* Compatibility mechanism for multi-tenancy. For more details refer to
      * load_acct_info method of rgw::auth::RemoteApplier. */
     if (acct_user_override.tenant.empty()) {
       const rgw_user tenanted_uid(acct_user_override.id, acct_user_override.id);
 
-      if (rgw_get_user_info_by_uid(store, tenanted_uid, user_info,
-                                   null_yield) >= 0) {
+      if (rgw_get_user_info_by_uid(store, tenanted_uid, user_info, y) >= 0) {
         /* Succeeded. */
         return;
       }
     }
 
-    const int ret = rgw_get_user_info_by_uid(store, acct_user_override,
-                                             user_info, null_yield);
+    int ret = rgw_get_user_info_by_uid(store, acct_user_override, user_info, y);
     if (ret < 0) {
       /* We aren't trying to recover from ENOENT here. It's supposed that creating
        * someone else's account isn't a thing we want to support in this filter. */
@@ -205,7 +206,8 @@ public:
   }
 
   void to_str(std::ostream& out) const override;
-  void load_acct_info(RGWUserInfo& user_info) const override;   /* out */
+  void load_acct_info(RGWUserInfo& user_info, /* out */
+                      optional_yield_context y) const override;
   void modify_request_state(req_state* s) const override;       /* in/out */
 };
 
@@ -217,9 +219,10 @@ void SysReqApplier<T>::to_str(std::ostream& out) const
 }
 
 template <typename T>
-void SysReqApplier<T>::load_acct_info(RGWUserInfo& user_info) const
+void SysReqApplier<T>::load_acct_info(RGWUserInfo& user_info,
+                                      optional_yield_context y) const
 {
-  DecoratedApplier<T>::load_acct_info(user_info);
+  DecoratedApplier<T>::load_acct_info(user_info, y);
   is_system = user_info.system;
 
   if (is_system) {
@@ -231,8 +234,7 @@ void SysReqApplier<T>::load_acct_info(RGWUserInfo& user_info) const
        * reasons. rgw_get_user_info_by_uid doesn't trigger the operator=() but
        * calls ::decode instead. */
       RGWUserInfo euser_info;
-      if (rgw_get_user_info_by_uid(store, effective_uid, euser_info,
-                                   null_yield) < 0) {
+      if (rgw_get_user_info_by_uid(store, effective_uid, euser_info, y) < 0) {
         //ldout(s->cct, 0) << "User lookup failed!" << dendl;
         throw -EACCES;
       }
@@ -246,7 +248,7 @@ void SysReqApplier<T>::modify_request_state(req_state* const s) const
 {
   if (boost::logic::indeterminate(is_system)) {
     RGWUserInfo unused_info;
-    load_acct_info(unused_info);
+    load_acct_info(unused_info, s->yield);
   }
 
   if (is_system) {

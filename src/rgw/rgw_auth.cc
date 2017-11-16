@@ -272,7 +272,7 @@ rgw::auth::Strategy::apply(const rgw::auth::Strategy& auth_strategy,
 
       /* Account used by a given RGWOp is decoupled from identity employed
        * in the authorization phase (RGWOp::verify_permissions). */
-      applier->load_acct_info(*s->user);
+      applier->load_acct_info(*s->user, s->yield);
       s->perm_mask = applier->get_perm_mask();
 
       /* This is the signle place where we pass req_state as a pointer
@@ -386,7 +386,8 @@ void rgw::auth::RemoteApplier::to_str(std::ostream& out) const
 }
 
 void rgw::auth::RemoteApplier::create_account(const rgw_user& acct_user,
-                                              RGWUserInfo& user_info) const      /* out */
+                                              RGWUserInfo& user_info, /* out */
+                                              optional_yield_context y) const
 {
   rgw_user new_acct_user = acct_user;
 
@@ -404,7 +405,7 @@ void rgw::auth::RemoteApplier::create_account(const rgw_user& acct_user,
   user_info.user_id = new_acct_user;
   user_info.display_name = info.acct_name;
 
-  int ret = rgw_store_user_info(store, user_info, nullptr, null_yield, nullptr,
+  int ret = rgw_store_user_info(store, user_info, nullptr, y, nullptr,
                                 real_time(), true);
   if (ret < 0) {
     ldout(cct, 0) << "ERROR: failed to store new user info: user="
@@ -414,7 +415,8 @@ void rgw::auth::RemoteApplier::create_account(const rgw_user& acct_user,
 }
 
 /* TODO(rzarzynski): we need to handle display_name changes. */
-void rgw::auth::RemoteApplier::load_acct_info(RGWUserInfo& user_info) const      /* out */
+void rgw::auth::RemoteApplier::load_acct_info(RGWUserInfo& user_info, /* out */
+                                              optional_yield_context y) const
 {
   /* It's supposed that RGWRemoteAuthApplier tries to load account info
    * that belongs to the authenticated identity. Another policy may be
@@ -435,16 +437,15 @@ void rgw::auth::RemoteApplier::load_acct_info(RGWUserInfo& user_info) const     
   if (acct_user.tenant.empty()) {
     const rgw_user tenanted_uid(acct_user.id, acct_user.id);
 
-    if (rgw_get_user_info_by_uid(store, tenanted_uid, user_info,
-                                 null_yield) >= 0) {
+    if (rgw_get_user_info_by_uid(store, tenanted_uid, user_info, y) >= 0) {
       /* Succeeded. */
       return;
     }
   }
 
-  if (rgw_get_user_info_by_uid(store, acct_user, user_info, null_yield) < 0) {
+  if (rgw_get_user_info_by_uid(store, acct_user, user_info, y) < 0) {
     ldout(cct, 0) << "NOTICE: couldn't map swift user " << acct_user << dendl;
-    create_account(acct_user, user_info);
+    create_account(acct_user, user_info, y);
   }
 
   /* Succeeded if we are here (create_account() hasn't throwed). */
@@ -512,7 +513,8 @@ uint32_t rgw::auth::LocalApplier::get_perm_mask(const std::string& subuser_name,
   }
 }
 
-void rgw::auth::LocalApplier::load_acct_info(RGWUserInfo& user_info) const /* out */
+void rgw::auth::LocalApplier::load_acct_info(RGWUserInfo& user_info,
+                                             optional_yield_context y) const /* out */
 {
   /* Load the account that belongs to the authenticated identity. An extra call
    * to RADOS may be safely skipped in this case. */
