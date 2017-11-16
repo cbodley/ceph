@@ -100,7 +100,8 @@ public:
    *
    * XXX: be aware that the "account" term refers to rgw_user. The naming
    * is legacy. */
-  virtual void load_acct_info(RGWUserInfo& user_info) const = 0; /* out */
+  virtual void load_acct_info(RGWUserInfo& user_info, /* out */
+                              optional_yield_context y) const = 0;
 
   /* Apply any changes to request state. This method will be most useful for
    * TempURL of Swift API. */
@@ -399,7 +400,8 @@ protected:
   const bool implicit_tenants;
 
   virtual void create_account(const rgw_user& acct_user,
-                              RGWUserInfo& user_info) const;          /* out */
+                              RGWUserInfo& user_info, /* out */
+                              optional_yield_context y) const;
 
 public:
   RemoteApplier(CephContext* const cct,
@@ -421,7 +423,8 @@ public:
 
   uint32_t get_perm_mask() const override { return info.perm_mask; }
   void to_str(std::ostream& out) const override;
-  void load_acct_info(RGWUserInfo& user_info) const override; /* out */
+  void load_acct_info(RGWUserInfo& user_info, /* out */
+                      optional_yield_context y) const override;
 
   struct Factory {
     virtual ~Factory() {}
@@ -469,7 +472,8 @@ public:
     return get_perm_mask(subuser, user_info);
   }
   void to_str(std::ostream& out) const override;
-  void load_acct_info(RGWUserInfo& user_info) const override; /* out */
+  void load_acct_info(RGWUserInfo& user_info, /* out */
+                      optional_yield_context y) const override;
 
   struct Factory {
     virtual ~Factory() {}
