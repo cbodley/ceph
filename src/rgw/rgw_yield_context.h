@@ -70,4 +70,8 @@ class optional_yield_context {
 // type tag object to construct an empty optional_yield_context
 static constexpr optional_yield_context::empty_t null_yield{};
 
+/// indicates whether the current thread is in boost::asio::io_service::run(),
+/// used to log warnings if synchronous librados calls are made
+extern thread_local bool is_asio_thread;
+
 #endif // RGW_ASIO_YIELD_CONTEXT_H

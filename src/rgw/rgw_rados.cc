@@ -115,6 +115,8 @@ static string RGW_DEFAULT_ZONEGROUP_ROOT_POOL = "rgw.root";
 static string RGW_DEFAULT_REALM_ROOT_POOL = "rgw.root";
 static string RGW_DEFAULT_PERIOD_ROOT_POOL = "rgw.root";
 
+thread_local bool is_asio_thread = false; // declared extern in rgw_yield_context.h
+
 #define RGW_STATELOG_OBJ_PREFIX "statelog."
 
 #define dout_subsys ceph_subsys_rgw
@@ -7157,6 +7159,9 @@ int RGWRados::put_system_obj_impl(rgw_raw_obj& obj, uint64_t size, real_time *mt
     librados::async_operate(service, ref.ioctx, ref.oid, &op, 0, yield[ec]);
     r = -ec.value();
   } else {
+    if (is_asio_thread) {
+      dout(20) << "WARNING: synchronous librados call in " << __func__ << dendl;
+    }
 #else
   {
 #endif
@@ -7209,6 +7214,9 @@ int RGWRados::put_system_obj_data(void *ctx, rgw_raw_obj& obj, bufferlist& bl,
     librados::async_operate(service, ref.ioctx, ref.oid, &op, 0, yield[ec]);
     r = -ec.value();
   } else {
+    if (is_asio_thread) {
+      dout(20) << "WARNING: synchronous librados call in " << __func__ << dendl;
+    }
 #else
   {
 #endif
@@ -9513,6 +9521,9 @@ int RGWRados::system_obj_get_attr(rgw_raw_obj& obj, const char *name, bufferlist
     librados::async_operate(service, ref.ioctx, ref.oid, &op, 0, yield[ec]);
     r = -ec.value();
   } else {
+    if (is_asio_thread) {
+      dout(20) << "WARNING: synchronous librados call in " << __func__ << dendl;
+    }
 #else
   {
 #endif
@@ -10339,6 +10350,9 @@ int RGWRados::get_system_obj(RGWObjectCtx& obj_ctx, RGWRados::SystemObject::Read
     librados::async_operate(service, ref->ioctx, ref->oid, &op, 0, yield[ec]);
     r = -ec.value();
   } else {
+    if (is_asio_thread) {
+      dout(20) << "WARNING: synchronous librados call in " << __func__ << dendl;
+    }
 #else
   {
 #endif
@@ -11596,6 +11610,9 @@ int RGWRados::remove_olh_pending_entries(const RGWBucketInfo& bucket_info,
     librados::async_operate(service, ref.ioctx, ref.oid, &op, 0, yield[ec]);
     r = -ec.value();
   } else {
+    if (is_asio_thread) {
+      dout(20) << "WARNING: synchronous librados call in " << __func__ << dendl;
+    }
 #else
   {
 #endif
@@ -11696,6 +11713,9 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
     librados::async_operate(service, ref.ioctx, ref.oid, &op, 0, yield[ec]);
     r = -ec.value();
   } else {
+    if (is_asio_thread) {
+      dout(20) << "WARNING: synchronous librados call in " << __func__ << dendl;
+    }
 #else
   {
 #endif
