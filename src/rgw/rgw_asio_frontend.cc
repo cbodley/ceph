@@ -31,19 +31,22 @@ namespace ssl = boost::asio::ssl;
 template <typename Stream>
 class StreamIO : public rgw::asio::ClientIO {
   Stream& stream;
+  boost::asio::yield_context yield;
   beast::flat_buffer& buffer;
  public:
   StreamIO(Stream& stream, rgw::asio::parser_type& parser,
+           boost::asio::yield_context yield,
            beast::flat_buffer& buffer, bool is_ssl,
            const tcp::endpoint& local_endpoint,
            const tcp::endpoint& remote_endpoint)
       : ClientIO(parser, is_ssl, local_endpoint, remote_endpoint),
-        stream(stream), buffer(buffer)
+        stream(stream), yield(yield), buffer(buffer)
   {}
 
   size_t write_data(const char* buf, size_t len) override {
     boost::system::error_code ec;
-    auto bytes = boost::asio::write(stream, boost::asio::buffer(buf, len), ec);
+    auto bytes = boost::asio::async_write(stream, boost::asio::buffer(buf, len),
+                                          yield[ec]);
     if (ec) {
       derr << "write_data failed: " << ec.message() << dendl;
       throw rgw::io::Exception(ec.value(), std::system_category());
@@ -59,7 +62,7 @@ class StreamIO : public rgw::asio::ClientIO {
 
     while (body_remaining.size && !parser.is_done()) {
       boost::system::error_code ec;
-      beast::http::read_some(stream, buffer, parser, ec);
+      beast::http::async_read_some(stream, buffer, parser, yield[ec]);
       if (ec == beast::http::error::partial_message ||
           ec == beast::http::error::need_buffer) {
         break;
@@ -136,7 +139,7 @@ void handle_connection(RGWProcessEnv& env, Stream& stream,
       RGWRequest req{env.store->get_new_req_id()};
 
       auto& socket = stream.lowest_layer();
-      StreamIO real_client{stream, parser, buffer, is_ssl,
+      StreamIO real_client{stream, parser, yield, buffer, is_ssl,
                            socket.local_endpoint(),
                            socket.remote_endpoint()};
 
