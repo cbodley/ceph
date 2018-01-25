@@ -84,6 +84,7 @@ namespace none {
 
 class KeyHandlerImpl : public KeyHandler {
 public:
+  size_t block_size() const override { return 1; }
   void encrypt(const bufferlist& in, bufferlist& out) const override {
     out = in;
   }
@@ -114,6 +115,8 @@ public:
 // CEPH_CRYPTO_AES128
 namespace aes128 {
 
+static constexpr size_t BLOCK_SIZE = 16;
+
 class HandlerImpl : public Handler {
 public:
   int get_type() const override {
@@ -127,7 +130,6 @@ public:
 #ifdef USE_NSS
 // when we say AES, we mean AES-128
 # define AES_KEY_LEN	16
-# define AES_BLOCK_LEN   16
 
 class nss_exception : public std::exception {
   static constexpr size_t buffer_size = 128;
@@ -227,6 +229,8 @@ public:
       param(std::move(param)),
       secret(secret)
   {}
+
+  size_t block_size() const override { return BLOCK_SIZE; }
 
   void encrypt(const bufferlist& in, bufferlist& out) const override {
     nss_aes_operation(CKA_ENCRYPT, mechanism, key.get(), param.get(), in, out);

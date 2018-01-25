@@ -52,6 +52,10 @@ public:
 
   virtual ~KeyHandler() {}
 
+  /// returns the required block size in bytes. the length of buffer segments
+  /// passed as input to encrypt()/decrypt() must be a multiple of this size
+  virtual size_t block_size() const = 0;
+
   virtual void encrypt(const bufferlist& in, bufferlist& out) const = 0;
   virtual void decrypt(const bufferlist& in, bufferlist& out) const = 0;
 };
