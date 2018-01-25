@@ -173,44 +173,122 @@ struct secitem_deleter {
 };
 using secitem_ptr = std::unique_ptr<SECItem, secitem_deleter>;
 
+// cipher operations require the input buffers to be sized on block
+// boundaries, though bufferlists may contain segments that are not
+bool all_segments_aligned(const bufferlist& in, size_t block_size)
+{
+  for (auto& p : in.buffers()) {
+    if (p.length() % block_size) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <typename Func> // Func(unsigned char*, size_t)
+void nss_aes_op_aligned(const bufferlist& in, Func& cipher_op)
+{
+  // process each block-aligned buffer segment
+  for (auto& p : in.buffers()) {
+    cipher_op((unsigned char*)p.c_str(), p.length());
+  }
+}
+
+template <size_t BlockSize, typename Func> // Func(unsigned char*, size_t)
+void nss_aes_op_unaligned(const bufferlist& in, Func& cipher_op)
+{
+  // carry unaligned bytes between segments until we have a full block
+  std::array<unsigned char, BlockSize> carry;
+  auto carry_pos = carry.begin();
+  auto carry_left = carry.size();
+
+  // process each buffer segment
+  for (auto& p : in.buffers()) {
+    auto in_pos = (unsigned char*)p.c_str();
+    auto in_len = p.length();
+
+    if (carry_pos != carry.begin()) {
+      const auto count = std::min<size_t>(carry_left, in_len);
+      carry_pos = std::copy(in_pos, in_pos + count, carry_pos);
+      carry_left -= count;
+      if (carry_left == 0) {
+        // process the carry block
+        cipher_op(carry.data(), carry.size());
+        carry_pos = carry.begin();
+        carry_left = carry.size();
+      }
+      in_pos += count;
+      in_len -= count;
+    }
+    // round down to block size
+    const auto count = (in_len / BlockSize) * BlockSize;
+    if (count > 0) {
+      // process the aligned input buffer
+      cipher_op(in_pos, count);
+      in_pos += count;
+      in_len -= count;
+    }
+    // carry any remaining bytes
+    if (in_len > 0) {
+      assert(in_len <= carry_left);
+      carry_pos = std::copy(in_pos, in_pos + in_len, carry_pos);
+      carry_left -= in_len;
+    }
+  }
+  assert(carry_pos == carry.begin());
+}
+
+template <size_t BlockSize>
 static void nss_aes_operation(CK_ATTRIBUTE_TYPE op,
                               CK_MECHANISM_TYPE mechanism,
                               PK11SymKey *key,
                               SECItem *param,
                               const bufferlist& in, bufferlist& out)
 {
-  // sample source said this has to be at least size of input + 8,
-  // but i see 15 still fail with SEC_ERROR_OUTPUT_LEN
-  bufferptr out_tmp(in.length()+16);
-  bufferlist incopy;
-
-  SECStatus ret;
-  int written;
-  unsigned char *in_buf;
+  if (in.length() % BlockSize) {
+    throw std::invalid_argument("buffer length not a multiple of block size");
+  }
 
   pk11_context_ptr ectx{PK11_CreateContextBySymKey(mechanism, op, key, param)};
   if (!ectx) {
     throw nss_exception("PK11_CreateContextBySymKey", PR_GetError());
   }
 
-  incopy = in;  // it's a shallow copy!
-  in_buf = (unsigned char*)incopy.c_str();
-  ret = PK11_CipherOp(ectx.get(),
-		      (unsigned char*)out_tmp.c_str(), &written, out_tmp.length(),
-		      in_buf, in.length());
-  if (ret != SECSuccess) {
-    throw nss_exception("PK11_CipherOp", PR_GetError());
+  // sample source said this has to be at least size of input + 8,
+  // but i see 15 still fail with SEC_ERROR_OUTPUT_LEN
+  bufferptr out_tmp(in.length()+16);
+  auto out_pos = (unsigned char*)out_tmp.c_str();
+  int out_left = out_tmp.length();
+
+  unsigned out_len = 0;
+
+  // lambda that processes a single block-aligned input buffer
+  auto cipher_op = [&] (unsigned char* buf, size_t len) {
+    int written = 0;
+    auto ret = PK11_CipherOp(ectx.get(), out_pos, &written, out_left, buf, len);
+    if (ret != SECSuccess) {
+      throw nss_exception("PK11_CipherOp", PR_GetError());
+    }
+    // advance the output buffer position
+    out_pos += written;
+    out_len += written;
+    out_left -= written;
+  };
+
+  if (all_segments_aligned(in, BlockSize)) {
+    nss_aes_op_aligned(in, cipher_op);
+  } else {
+    nss_aes_op_unaligned<BlockSize>(in, cipher_op);
   }
 
-  unsigned int written2;
-  ret = PK11_DigestFinal(ectx.get(),
-			 (unsigned char*)out_tmp.c_str()+written, &written2,
-			 out_tmp.length()-written);
+  unsigned int written = 0;
+  auto ret = PK11_DigestFinal(ectx.get(), out_pos, &written, out_left);
   if (ret != SECSuccess) {
     throw nss_exception("PK11_DigestFinal", PR_GetError());
   }
+  out_len += written;
 
-  out_tmp.set_length(written + written2);
+  out_tmp.set_length(out_len);
   out.append(out_tmp);
 }
 
@@ -233,10 +311,12 @@ public:
   size_t block_size() const override { return BLOCK_SIZE; }
 
   void encrypt(const bufferlist& in, bufferlist& out) const override {
-    nss_aes_operation(CKA_ENCRYPT, mechanism, key.get(), param.get(), in, out);
+    nss_aes_operation<BLOCK_SIZE>(CKA_ENCRYPT, mechanism, key.get(),
+                                  param.get(), in, out);
   }
   void decrypt(const bufferlist& in, bufferlist& out) const override {
-    nss_aes_operation(CKA_DECRYPT, mechanism, key.get(), param.get(), in, out);
+    nss_aes_operation<BLOCK_SIZE>(CKA_DECRYPT, mechanism, key.get(),
+                                  param.get(), in, out);
   }
 };
 
