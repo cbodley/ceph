@@ -556,10 +556,7 @@ if (WITH_SYSTEM_ROCKSDB)
 endif()
 
 option(WITH_SEASTAR "Build seastar components")
-if(WITH_SEASTAR)
-  find_package(Seastar REQUIRED)
-  set(HAVE_SEASTAR ${SEASTAR_FOUND})
-endif()
+set(HAVE_SEASTAR ${WITH_SEASTAR})
 
 # Boost
 option(WITH_SYSTEM_BOOST "require and build with system Boost" OFF)
@@ -576,6 +573,7 @@ endif()
 if(WITH_BOOST_CONTEXT)
   list(APPEND BOOST_COMPONENTS context coroutine)
 endif()
+list(APPEND BOOST_COMPONENTS test timer)
 
 set(Boost_USE_MULTITHREADED ON)
 # require minimally the bundled version

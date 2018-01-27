@@ -371,6 +371,7 @@ include_directories("${CMAKE_SOURCE_DIR}/src/dmclock/support/src")
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/googletest/googletest/include")
 
 if(WITH_SEASTAR)
+  add_subdirectory(seastar)
   add_subdirectory(crimson)
 endif()
 
@@ -396,14 +397,14 @@ endif(HAVE_RDMA)
 add_library(common_buffer_obj OBJECT
   common/buffer.cc)
 
-if(HAVE_SEASTAR)
+if(WITH_SEASTAR)
   add_library(seastar_buffer_obj OBJECT common/buffer_seastar.cc)
   # target_link_libraries() doesn't work for object libraries, so the
   # Seastar properties are applied manually (and link is unnecessary)
   target_compile_definitions(seastar_buffer_obj
-    PUBLIC $<TARGET_PROPERTY:Seastar::Seastar,INTERFACE_COMPILE_DEFINITIONS>)
+    PUBLIC $<TARGET_PROPERTY:Seastar::seastar,INTERFACE_COMPILE_DEFINITIONS>)
   target_include_directories(seastar_buffer_obj
-    PUBLIC $<TARGET_PROPERTY:Seastar::Seastar,INTERFACE_INCLUDE_DIRECTORIES>)
+    PUBLIC $<TARGET_PROPERTY:Seastar::seastar,INTERFACE_INCLUDE_DIRECTORIES>)
 endif()
 
 add_library(common_texttable_obj OBJECT
