@@ -41,35 +41,48 @@ TEST(AES, Encrypt) {
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
     0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
   };
-  bufferptr secret(secret_s, sizeof(secret_s));
-
-  unsigned char plaintext_s[] = {
-    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
-    0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
-  };
-  bufferlist plaintext;
-  plaintext.append((char *)plaintext_s, sizeof(plaintext_s));
+  bufferptr secret(buffer::create_static(sizeof(secret_s), (char*)secret_s));
 
   std::unique_ptr<ceph::crypto::KeyHandler> kh;
   ASSERT_NO_THROW(kh = h->get_key_handler(secret));
 
-  bufferlist cipher;
-  ASSERT_NO_THROW(kh->encrypt(plaintext, cipher));
+  unsigned char plaintext_s[] = {
+    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+    0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+    0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+  };
+  constexpr size_t plaintext_len = sizeof(plaintext_s);
 
-  unsigned char want_cipher[] = {
+  unsigned char want_cipher_s[] = {
     0xb3, 0x8f, 0x5b, 0xc9, 0x35, 0x4c, 0xf8, 0xc6,
     0x13, 0x15, 0x66, 0x6f, 0x37, 0xd7, 0x79, 0x3a,
-    0x11, 0x90, 0x7b, 0xe9, 0xd8, 0x3c, 0x35, 0x70,
-    0x58, 0x7b, 0x97, 0x9b, 0x03, 0xd2, 0xa5, 0x01,
+    0x3a, 0xfa, 0xcf, 0xa9, 0xcd, 0x8a, 0x4b, 0x3c,
+    0x9d, 0xee, 0x09, 0x9d, 0x6f, 0xeb, 0x6f, 0x96,
+    0xdb, 0xaa, 0x14, 0x20, 0xd0, 0x37, 0x94, 0xa7,
+    0xcf, 0xa2, 0x96, 0x14, 0x1e, 0xdf, 0x62, 0x31,
   };
-  char cipher_s[sizeof(want_cipher)];
+  const auto want_cipher = bufferlist::static_from_mem((char*)want_cipher_s,
+                                                       sizeof(want_cipher_s));
 
-  ASSERT_EQ(sizeof(cipher_s), cipher.length());
-  cipher.copy(0, sizeof(cipher_s), &cipher_s[0]);
+  // test every combination with up to three buffer segments
+  char *p1 = (char*)plaintext_s; // start of first segment
+  for (unsigned l1 = 0; l1 <= plaintext_len; l1++) {
+    char *p2 = p1 + l1; // start of second segment
+    for (unsigned l2 = 0; l1 + l2 <= plaintext_len; l2++) {
+      char *p3 = p2 + l2; // start of third segment
+      unsigned l3 = plaintext_len - l2 - l1;
 
-  int err;
-  err = memcmp(cipher_s, want_cipher, sizeof(want_cipher));
-  ASSERT_EQ(0, err);
+      bufferlist plaintext;
+      if (l1) plaintext.append(buffer::create_static(l1, p1));
+      if (l2) plaintext.append(buffer::create_static(l2, p2));
+      if (l3) plaintext.append(buffer::create_static(l3, p3));
+
+      bufferlist cipher;
+      ASSERT_NO_THROW(kh->encrypt(plaintext, cipher));
+      EXPECT_EQ(want_cipher, cipher);
+    }
+  }
 }
 
 TEST(AES, Decrypt) {
@@ -78,35 +91,48 @@ TEST(AES, Decrypt) {
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
     0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
   };
-  bufferptr secret(secret_s, sizeof(secret_s));
-
-  unsigned char cipher_s[] = {
-    0xb3, 0x8f, 0x5b, 0xc9, 0x35, 0x4c, 0xf8, 0xc6,
-    0x13, 0x15, 0x66, 0x6f, 0x37, 0xd7, 0x79, 0x3a,
-    0x11, 0x90, 0x7b, 0xe9, 0xd8, 0x3c, 0x35, 0x70,
-    0x58, 0x7b, 0x97, 0x9b, 0x03, 0xd2, 0xa5, 0x01,
-  };
-  bufferlist cipher;
-  cipher.append((char *)cipher_s, sizeof(cipher_s));
-
-  unsigned char want_plaintext[] = {
-    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
-    0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
-  };
-  char plaintext_s[sizeof(want_plaintext)];
+  bufferptr secret(buffer::create_static(sizeof(secret_s), (char*)secret_s));
 
   std::unique_ptr<ceph::crypto::KeyHandler> kh;
   ASSERT_NO_THROW(kh = h->get_key_handler(secret));
 
-  bufferlist plaintext;
-  ASSERT_NO_THROW(kh->decrypt(cipher, plaintext));
+  unsigned char cipher_s[] = {
+    0xb3, 0x8f, 0x5b, 0xc9, 0x35, 0x4c, 0xf8, 0xc6,
+    0x13, 0x15, 0x66, 0x6f, 0x37, 0xd7, 0x79, 0x3a,
+    0x3a, 0xfa, 0xcf, 0xa9, 0xcd, 0x8a, 0x4b, 0x3c,
+    0x9d, 0xee, 0x09, 0x9d, 0x6f, 0xeb, 0x6f, 0x96,
+    0xdb, 0xaa, 0x14, 0x20, 0xd0, 0x37, 0x94, 0xa7,
+    0xcf, 0xa2, 0x96, 0x14, 0x1e, 0xdf, 0x62, 0x31,
+  };
+  constexpr size_t cipher_len = sizeof(cipher_s);
 
-  ASSERT_EQ(sizeof(plaintext_s), plaintext.length());
-  plaintext.copy(0, sizeof(plaintext_s), &plaintext_s[0]);
+  unsigned char plaintext_s[] = {
+    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+    0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+    0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+  };
+  const auto want_plaintext = bufferlist::static_from_mem((char*)plaintext_s,
+                                                          sizeof(plaintext_s));
 
-  int err;
-  err = memcmp(plaintext_s, want_plaintext, sizeof(want_plaintext));
-  ASSERT_EQ(0, err);
+  // test every combination with up to three buffer segments
+  char *p1 = (char*)cipher_s; // start of first segment
+  for (unsigned l1 = 0; l1 <= cipher_len; l1++) {
+    char *p2 = p1 + l1; // start of second segment
+    for (unsigned l2 = 0; l1 + l2 <= cipher_len; l2++) {
+      char *p3 = p2 + l2; // start of third segment
+      unsigned l3 = cipher_len - l2 - l1;
+
+      bufferlist cipher;
+      if (l1) cipher.append(buffer::create_static(l1, p1));
+      if (l2) cipher.append(buffer::create_static(l2, p2));
+      if (l3) cipher.append(buffer::create_static(l3, p3));
+
+      bufferlist plaintext;
+      ASSERT_NO_THROW(kh->decrypt(cipher, plaintext));
+      EXPECT_EQ(want_plaintext, plaintext);
+    }
+  }
 }
 
 TEST(AES, Loop) {
