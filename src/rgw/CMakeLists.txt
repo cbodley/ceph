@@ -195,6 +195,10 @@ add_dependencies(radosgw cls_rgw cls_lock cls_refcount
   cls_version cls_replica_log cls_user)
 install(TARGETS radosgw DESTINATION bin)
 
+if (WITH_RADOSGW_BEAST_FRONTEND)
+  target_link_libraries(radosgw_a ${OPENSSL_LIBRARIES})
+endif()
+
 set(radosgw_admin_srcs
   rgw_admin.cc
   rgw_orphan.cc)
