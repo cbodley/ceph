@@ -4,6 +4,7 @@ tasks:
     flavor: notcmalloc
     debuginfo: true
 - ceph:
+- ssl:
 - rgw:
     client.0:
       valgrind: [--tool=memcheck]
