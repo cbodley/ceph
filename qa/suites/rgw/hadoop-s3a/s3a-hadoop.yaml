@@ -30,3 +30,4 @@ tasks:
 - ssh-keys:
 - ceph-ansible:
 - s3a-hadoop:
+    client: rgw.0

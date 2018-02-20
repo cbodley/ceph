@@ -3,6 +3,8 @@ import logging
 import time
 from teuthology import misc
 from teuthology.orchestra import run
+from teuthology.exceptions import ConfigError
+from util import get_remote_for_role
 
 log = logging.getLogger(__name__)
 
@@ -15,11 +17,12 @@ def task(ctx, config):
       -tasks:
          ceph-ansible:
          s3a-hadoop:
+           client: client.0 (client name of rgw)
            maven-version: '3.3.9' (default)
            hadoop-version: '2.7.3'
            bucket-name: 's3atest' (default)
            access-key: 'anykey' (uses a default value)
-           secret-key: 'secretkey' ( uses a default value)
+           secret-key: 'secretkey' (uses a default value)
     """
     if config is None:
         config = {}
@@ -30,9 +33,12 @@ def task(ctx, config):
     overrides = ctx.config.get('overrides', {})
     misc.deep_merge(config, overrides.get('s3a-hadoop', {}))
     testdir = misc.get_testdir(ctx)
-    rgws = ctx.cluster.only(misc.is_type('rgw'))
-    # use the first rgw node to test s3a
-    rgw_node = rgws.remotes.keys()[0]
+
+    client = config.get('client', None)
+    if not client:
+        raise ConfigError('s3a-hadoop: missing required field "client"')
+    remote = get_remote_for_role(ctx, client)
+
     # get versions
     maven_major = config.get('maven-major', 'maven-3')
     maven_version = config.get('maven-version', '3.3.9')
@@ -50,8 +56,8 @@ def task(ctx, config):
         '{maven_major}/{maven_version}/binaries/'.format(maven_major=maven_major, maven_version=maven_version) + apache_maven
     hadoop_git = 'https://github.com/apache/hadoop'
     hadoop_rel = 'hadoop-{ver} rel/release-{ver}'.format(ver=hadoop_ver)
-    install_prereq(rgw_node)
-    rgw_node.run(
+    install_prereq(remote)
+    remote.run(
         args=[
             'cd',
             testdir,
@@ -76,11 +82,9 @@ def task(ctx, config):
             run.Raw(hadoop_rel)
         ]
     )
-    dnsmasq_name = 's3.ceph.com'
-    configure_s3a(rgw_node, dnsmasq_name, access_key, secret_key, bucket_name, testdir)
-    setup_dnsmasq(rgw_node, dnsmasq_name)
-    fix_rgw_config(rgw_node, dnsmasq_name)
-    setup_user_bucket(rgw_node, dnsmasq_name, access_key, secret_key, bucket_name, testdir)
+    configure_s3a(remote, remote.hostname, access_key, secret_key, bucket_name, testdir)
+    fix_rgw_config(remote, remote.hostname)
+    setup_user_bucket(remote, remote.hostname, access_key, secret_key, bucket_name, testdir)
     if hadoop_ver.startswith('2.8'):
         # test all ITtests but skip AWS test using public bucket landsat-pds
         # which is not available from within this test
@@ -88,16 +92,15 @@ def task(ctx, config):
     else:
         test_options = 'test -Dtest=S3a*,TestS3A*'
     try:
-        run_s3atest(rgw_node, maven_version, testdir, test_options)
+        run_s3atest(remote, maven_version, testdir, test_options)
         yield
     finally:
         log.info("Done s3a testing, Cleaning up")
         for fil in ['apache*', 'hadoop*', 'venv*', 'create*']:
-            rgw_node.run(args=['rm', run.Raw('-rf'), run.Raw('{tdir}/{file}'.format(tdir=testdir, file=fil))])
+            remote.run(args=['rm', run.Raw('-rf'), run.Raw('{tdir}/{file}'.format(tdir=testdir, file=fil))])
         # restart and let NM restore original config
-        rgw_node.run(args=['sudo', 'systemctl', 'stop', 'dnsmasq'])
-        rgw_node.run(args=['sudo', 'systemctl', 'restart', 'network.service'], check_status=False)
-        rgw_node.run(args=['sudo', 'systemctl', 'status', 'network.service'], check_status=False)
+        remote.run(args=['sudo', 'systemctl', 'restart', 'network.service'], check_status=False)
+        remote.run(args=['sudo', 'systemctl', 'status', 'network.service'], check_status=False)
 
 
 def install_prereq(client):
@@ -114,42 +117,9 @@ def install_prereq(client):
                     '-y',
                     'protobuf-c.x86_64',
                     'java',
-                    'java-1.8.0-openjdk-devel',
-                    'dnsmasq'
+                    'java-1.8.0-openjdk-devel'
                     ]
                 )
-
-
-def setup_dnsmasq(client, name):
-    """
-    Setup simple dnsmasq name eg: s3.ceph.com
-    Local RGW host can then be used with whatever name has been setup with.
-    """
-    resolv_conf = "nameserver 127.0.0.1\n"
-    dnsmasq_template = """address=/{name}/{ip_address}
-server=8.8.8.8
-server=8.8.4.4
-""".format(name=name, ip_address=client.ip_address)
-    dnsmasq_config_path = '/etc/dnsmasq.d/ceph'
-    # point resolv.conf to local dnsmasq
-    misc.sudo_write_file(
-        remote=client,
-        path='/etc/resolv.conf',
-        data=resolv_conf,
-    )
-    misc.sudo_write_file(
-        remote=client,
-        path=dnsmasq_config_path,
-        data=dnsmasq_template,
-    )
-    client.run(args=['cat', dnsmasq_config_path])
-    # restart dnsmasq
-    client.run(args=['sudo', 'systemctl', 'restart', 'dnsmasq'])
-    client.run(args=['sudo', 'systemctl', 'status', 'dnsmasq'])
-    time.sleep(5)
-    # verify dns name is set
-    client.run(args=['ping', '-c', '4', name])
-
 
 def fix_rgw_config(client, name):
     """
