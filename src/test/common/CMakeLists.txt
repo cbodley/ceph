@@ -277,3 +277,6 @@ add_ceph_unittest(unittest_bounded_key_counter)
 
 add_executable(unittest_static_ptr test_static_ptr.cc)
 add_ceph_unittest(unittest_static_ptr)
+
+add_executable(bench_throttle bench_throttle.cc)
+target_link_libraries(bench_throttle global)
