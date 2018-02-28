@@ -80,7 +80,7 @@ WRITE_CLASS_ENCODER(RGWBWRedirectInfo)
 struct RGWBWRoutingRuleCondition
 {
   std::string key_prefix_equals;
-  uint16_t http_error_code_returned_equals;
+  uint16_t http_error_code_returned_equals = 0;
 
   void encode(bufferlist& bl) const {
     ENCODE_START(1, 1, bl);
@@ -101,8 +101,9 @@ struct RGWBWRoutingRuleCondition
   void decode_xml(XMLObj *obj);
 
   bool check_key_condition(const std::string& key);
-  bool check_error_code_condition(const int error_code) {
-    return (uint16_t)error_code == http_error_code_returned_equals;
+  bool check_error_code_condition(int error_code) {
+    return http_error_code_returned_equals == 0
+        || (uint16_t)error_code == http_error_code_returned_equals;
   }
 };
 WRITE_CLASS_ENCODER(RGWBWRoutingRuleCondition)
