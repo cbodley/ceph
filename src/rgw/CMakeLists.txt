@@ -179,7 +179,9 @@ endif (WITH_RADOSGW_BEAST_FRONTEND)
 
 add_library(radosgw_a STATIC ${radosgw_srcs}
   $<TARGET_OBJECTS:civetweb_common_objs>)
-target_link_libraries(radosgw_a rgw_a ${SSL_LIBRARIES})
+if (WITH_RADOSGW_BEAST_FRONTEND AND WITH_RADOSGW_BEAST_OPENSSL)
+  target_link_libraries(radosgw_a rgw_a ${SSL_LIBRARIES})
+endif()
 
 add_executable(radosgw rgw_main.cc)
 target_link_libraries(radosgw radosgw_a librados

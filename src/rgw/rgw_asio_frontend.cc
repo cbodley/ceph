@@ -13,7 +13,9 @@
 #include "rgw_asio_client.h"
 #include "rgw_asio_frontend.h"
 
+#ifdef WITH_RADOSGW_BEAST_OPENSSL
 #include <boost/asio/ssl.hpp>
+#endif
 
 #define dout_subsys ceph_subsys_rgw
 
@@ -63,8 +65,10 @@ void Pauser::wait()
 }
 
 using tcp = boost::asio::ip::tcp;
-namespace ssl = boost::asio::ssl;
 namespace beast = boost::beast;
+#ifdef WITH_RADOSGW_BEAST_OPENSSL
+namespace ssl = boost::asio::ssl;
+#endif
 
 template <typename Stream>
 class StreamIO : public rgw::asio::ClientIO {
@@ -199,7 +203,9 @@ class AsioFrontend {
   RGWProcessEnv env;
   RGWFrontendConfig* conf;
   boost::asio::io_service service;
+#ifdef WITH_RADOSGW_BEAST_OPENSSL
   ssl::context ssl_context{ssl::context::tls};
+#endif
 
   struct Listener {
     tcp::endpoint endpoint;
@@ -268,6 +274,7 @@ int AsioFrontend::init()
   boost::system::error_code ec;
   auto& config = conf->get_config_map();
 
+#ifdef WITH_RADOSGW_BEAST_OPENSSL
   // ssl configuration
   auto key = config.find("ssl_private_key");
   const bool have_private_key = key != config.end();
@@ -299,6 +306,7 @@ int AsioFrontend::init()
       }
     }
   }
+#endif // WITH_RADOSGW_BEAST_OPENSSL
 
   // parse endpoints
   auto ports = config.equal_range("port");
@@ -311,6 +319,7 @@ int AsioFrontend::init()
     listeners.emplace_back(service);
     listeners.back().endpoint.port(port);
   }
+#ifdef WITH_RADOSGW_BEAST_OPENSSL
   ports = config.equal_range("ssl_port");
   for (auto i = ports.first; i != ports.second; ++i) {
     if (!have_cert) {
@@ -326,6 +335,7 @@ int AsioFrontend::init()
     listeners.back().endpoint.port(port);
     listeners.back().use_ssl = true;
   }
+#endif // WITH_RADOSGW_BEAST_OPENSSL
 
   auto endpoints = config.equal_range("endpoint");
   for (auto i = endpoints.first; i != endpoints.second; ++i) {
@@ -337,6 +347,7 @@ int AsioFrontend::init()
     listeners.emplace_back(service);
     listeners.back().endpoint = endpoint;
   }
+#ifdef WITH_RADOSGW_BEAST_OPENSSL
   endpoints = config.equal_range("ssl_endpoint");
   for (auto i = endpoints.first; i != endpoints.second; ++i) {
     if (!have_cert) {
@@ -352,6 +363,7 @@ int AsioFrontend::init()
     listeners.back().endpoint = endpoint;
     listeners.back().use_ssl = true;
   }
+#endif // WITH_RADOSGW_BEAST_OPENSSL
 
   // start listeners
   for (auto& l : listeners) {
@@ -394,6 +406,7 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
                           });
 
   // spawn a coroutine to handle the connection
+#ifdef WITH_RADOSGW_BEAST_OPENSSL
   if (l.use_ssl) {
     boost::asio::spawn(service,
       [this, s=std::move(socket)] (boost::asio::yield_context yield) mutable {
@@ -411,6 +424,9 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
         stream.async_shutdown(yield[ec]);
       });
   } else {
+#else
+  {
+#endif // WITH_RADOSGW_BEAST_OPENSSL
     boost::asio::spawn(service,
       [this, s=std::move(socket)] (boost::asio::yield_context yield) mutable {
         handle_connection(env, s, false, yield);
