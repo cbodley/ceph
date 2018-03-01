@@ -204,7 +204,7 @@ class AsioFrontend {
   RGWFrontendConfig* conf;
   boost::asio::io_service service;
 #ifdef WITH_RADOSGW_BEAST_OPENSSL
-  ssl::context ssl_context{ssl::context::tls};
+  boost::optional<ssl::context> ssl_context;
 #endif
 
   struct Listener {
@@ -276,21 +276,29 @@ int AsioFrontend::init()
 
 #ifdef WITH_RADOSGW_BEAST_OPENSSL
   // ssl configuration
+  auto cert = config.find("ssl_certificate");
+  const bool have_cert = cert != config.end();
+  if (have_cert) {
+    // only initialize the ssl context if it's going to be used
+    ssl_context = boost::in_place(ssl::context::tls);
+  }
+
   auto key = config.find("ssl_private_key");
   const bool have_private_key = key != config.end();
   if (have_private_key) {
-    ssl_context.use_private_key_file(key->second, ssl::context::pem, ec);
+    if (!have_cert) {
+      lderr(ctx()) << "no ssl_certificate configured for ssl_private_key" << dendl;
+      return -EINVAL;
+    }
+    ssl_context->use_private_key_file(key->second, ssl::context::pem, ec);
     if (ec) {
       lderr(ctx()) << "failed to add ssl_private_key=" << key->second
           << ": " << ec.message() << dendl;
       return -ec.value();
     }
   }
-
-  auto cert = config.find("ssl_certificate");
-  const bool have_cert = cert != config.end();
   if (have_cert) {
-    ssl_context.use_certificate_chain_file(cert->second, ec);
+    ssl_context->use_certificate_chain_file(cert->second, ec);
     if (ec) {
       lderr(ctx()) << "failed to use ssl_certificate=" << cert->second
           << ": " << ec.message() << dendl;
@@ -298,7 +306,7 @@ int AsioFrontend::init()
     }
     if (!have_private_key) {
       // attempt to use it as a private key if a separate one wasn't provided
-      ssl_context.use_private_key_file(cert->second, ssl::context::pem, ec);
+      ssl_context->use_private_key_file(cert->second, ssl::context::pem, ec);
       if (ec) {
         lderr(ctx()) << "failed to use ssl_certificate=" << cert->second
             << " as a private key: " << ec.message() << dendl;
@@ -411,7 +419,7 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
     boost::asio::spawn(service,
       [this, s=std::move(socket)] (boost::asio::yield_context yield) mutable {
         // wrap the socket in an ssl stream
-        ssl::stream<tcp::socket&> stream{s, ssl_context};
+        ssl::stream<tcp::socket&> stream{s, *ssl_context};
         // do ssl handshake
         boost::system::error_code ec;
         stream.async_handshake(ssl::stream_base::server, yield[ec]);
