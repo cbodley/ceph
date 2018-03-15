@@ -138,3 +138,12 @@ add_ceph_unittest(unittest_rgw_string)
 add_executable(unittest_rgw_async_completion test_rgw_async_completion.cc)
 add_ceph_unittest(unittest_rgw_async_completion)
 target_link_libraries(unittest_rgw_async_completion Boost::system)
+
+# unitttest_rgw_dmclock
+add_executable(unittest_rgw_dmclock test_rgw_dmclock.cc)
+add_ceph_unittest(unittest_rgw_dmclock)
+target_link_libraries(unittest_rgw_dmclock rgw_a dmclock ${Boost_LIBRARIES})
+if(WITH_BOOST_CONTEXT)
+  target_compile_definitions(unittest_rgw_dmclock PRIVATE BOOST_COROUTINES_NO_DEPRECATION_WARNING)
+  target_link_libraries(unittest_rgw_dmclock Boost::coroutine Boost::context)
+endif()
