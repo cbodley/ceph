@@ -133,3 +133,8 @@ set_target_properties(unittest_rgw_iam_policy PROPERTIES COMPILE_FLAGS ${UNITTES
 # unitttest_rgw_string
 add_executable(unittest_rgw_string test_rgw_string.cc)
 add_ceph_unittest(unittest_rgw_string)
+
+# unitttest_rgw_async_completion
+add_executable(unittest_rgw_async_completion test_rgw_async_completion.cc)
+add_ceph_unittest(unittest_rgw_async_completion)
+target_link_libraries(unittest_rgw_async_completion Boost::system)
