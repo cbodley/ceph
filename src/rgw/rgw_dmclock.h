@@ -35,6 +35,7 @@ using Cost = double; // may change to uint64_t
 using crimson::dmclock::ReqParams;
 using crimson::dmclock::PhaseType;
 using crimson::dmclock::ClientInfo;
+using crimson::dmclock::AtLimit;
 
 using crimson::dmclock::Time;
 using crimson::dmclock::get_time;
