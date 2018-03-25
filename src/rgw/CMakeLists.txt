@@ -163,13 +163,14 @@ target_include_directories(rgw_a SYSTEM PUBLIC "../rapidjson/include")
 
 target_link_libraries(rgw_a librados cls_otp_client cls_lock_client cls_rgw_client cls_refcount_client
   cls_log_client cls_statelog_client cls_timeindex_client cls_version_client
-  cls_user_client ceph-common common_utf8 global
+  cls_user_client ceph-common common_utf8 global dmclock
   ${CURL_LIBRARIES}
   ${EXPAT_LIBRARIES}
   ${OPENLDAP_LIBRARIES} ${CRYPTO_LIBS}
   OATH::OATH)
 
 if (WITH_RADOSGW_BEAST_FRONTEND)
+  target_compile_definitions(rgw_common PUBLIC BOOST_COROUTINES_NO_DEPRECATION_WARNING)
   target_compile_definitions(rgw_a PUBLIC BOOST_COROUTINES_NO_DEPRECATION_WARNING)
   target_link_libraries(rgw_a Boost::coroutine Boost::context)
 endif()
