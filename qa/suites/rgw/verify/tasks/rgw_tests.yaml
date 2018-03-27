@@ -11,7 +11,7 @@ tasks:
       valgrind: [--tool=memcheck]
 - s3tests:
     client.0:
-      force-branch: ceph-master
+      force-branch: wip-unpin-requests
       rgw_server: client.0
 - swift:
     client.0:
