@@ -6210,7 +6210,7 @@ std::vector<Option> get_rgw_options() {
 			  "to turn off cache expiry, set this value to zero."),
 
     Option("rgw_max_concurrent_requests", Option::TYPE_INT, Option::LEVEL_BASIC)
-    .set_default(8192)
+    .set_default(1024)
     .set_description("Maximum number of concurrent HTTP requests.")
     .set_long_description(
         "Maximum number of concurrent HTTP requests that the beast frontend "
