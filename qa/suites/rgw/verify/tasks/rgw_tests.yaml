@@ -15,6 +15,7 @@ tasks:
       rgw_server: client.0
 - swift:
     client.0:
+      force-branch: wip-bootstrap-netifaces
       rgw_server: client.0
 - ragweed:
     client.0:
