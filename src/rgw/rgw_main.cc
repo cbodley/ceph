@@ -37,7 +37,7 @@
 #include "rgw_frontend.h"
 #include "rgw_http_client_curl.h"
 #if defined(WITH_RADOSGW_BEAST_FRONTEND)
-#include "rgw_dmclock_queue.h"
+#include "rgw_dmclock_scheduler.h"
 #include "rgw_asio_frontend.h"
 #endif /* WITH_RADOSGW_BEAST_FRONTEND */
 
@@ -430,7 +430,7 @@ int main(int argc, const char **argv)
   namespace dmc = rgw::dmclock;
   auto dmclock_clients = dmc::ClientConfig{cct.get()};
   auto dmclock_counters = dmc::ClientCounters{cct.get()};
-  auto dmclock_queue = dmc::PriorityQueue(cct.get(), iocontext,
+  auto dmclock_scheduler = dmc::Scheduler(cct.get(), iocontext,
                                           std::ref(dmclock_counters),
                                           &dmclock_clients,
                                           std::ref(dmclock_clients),
@@ -481,7 +481,7 @@ int main(int argc, const char **argv)
       std::string uri_prefix;
       config->get_val("prefix", "", &uri_prefix);
       RGWProcessEnv env{ store, &rest, olog, port, uri_prefix, auth_registry };
-      fe = new RGWAsioFrontend(env, config, iocontext, &dmclock_queue);
+      fe = new RGWAsioFrontend(env, config, iocontext, &dmclock_scheduler);
     }
 #endif /* WITH_RADOSGW_BEAST_FRONTEND */
 #if defined(WITH_RADOSGW_FCGI_FRONTEND)

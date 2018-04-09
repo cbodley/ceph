@@ -55,7 +55,7 @@ class ClientConfig : public md_config_obs_t {
                           const std::set<std::string>& changed) override;
 };
 
-class PriorityQueue;
+class Scheduler;
 
 } // namespace rgw::dmclock
 
