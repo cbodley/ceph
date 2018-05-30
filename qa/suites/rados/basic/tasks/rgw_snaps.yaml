@@ -29,6 +29,7 @@ tasks:
 - s3readwrite:
     client.0:
       rgw_server: client.0
+      force-branch: wip-pr-228
       readwrite:
         bucket: rwtest
         readers: 10
