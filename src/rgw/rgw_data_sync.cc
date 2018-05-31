@@ -2778,7 +2778,10 @@ int RGWBucketShardIncrementalSyncCR::operate()
           continue;
         }
         auto& squash_entry = squash_map[make_pair(e.object, e.instance)];
-        if (squash_entry.first <= e.timestamp) {
+        if (squash_entry.first <= e.timestamp &&
+            // don't squash over olh entries - we need to apply their olh_epoch
+            squash_entry.second != CLS_RGW_OP_LINK_OLH &&
+            squash_entry.second != CLS_RGW_OP_UNLINK_INSTANCE) {
           squash_entry = make_pair<>(e.timestamp, e.op);
         }
       }
