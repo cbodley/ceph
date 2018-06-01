@@ -7937,7 +7937,16 @@ int RGWRados::fetch_remote_obj(RGWObjectCtx& obj_ctx,
 #define MAX_COMPLETE_RETRY 100
   for (i = 0; i < MAX_COMPLETE_RETRY; i++) {
     ret = cb.complete(etag, mtime, set_mtime, attrs, delete_at, zones_trace);
-    if (ret < 0) {
+    if (ret == -ERR_NOT_MODIFIED && copy_if_newer) {
+      if (olh_epoch) {
+        // we may have already fetched during sync of OP_ADD, but were waiting
+        // for OP_LINK_OLH to call set_olh() with a real olh_epoch
+        ret = set_olh(obj_ctx, dest_bucket_info, dest_obj, false, nullptr,
+                      *olh_epoch, real_time(), false, zones_trace);
+      } else {
+        // we already have the latest copy
+        ret = 0;
+      }
       goto set_err_state;
     }
     if (copy_if_newer && cb.is_canceled()) {
@@ -7977,9 +7986,6 @@ int RGWRados::fetch_remote_obj(RGWObjectCtx& obj_ctx,
 
   return 0;
 set_err_state:
-  if (copy_if_newer && ret == -ERR_NOT_MODIFIED) {
-    ret = 0;
-  }
   if (opstate) {
     RGWOpState::OpState state;
     if (ret < 0) {
