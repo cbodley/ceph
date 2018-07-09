@@ -24,6 +24,7 @@
 #include <type_traits>
 
 #include <boost/thread/shared_mutex.hpp>
+#include <boost/asio.hpp>
 
 #include "include/ceph_assert.h"
 #include "include/buffer.h"
@@ -36,7 +37,6 @@
 #include "common/config_obs.h"
 #include "common/shunique_lock.h"
 #include "common/zipkin_trace.h"
-#include "common/Finisher.h"
 #include "common/Throttle.h"
 
 #include "messages/MOSDOp.h"
@@ -49,7 +49,6 @@ class Messenger;
 class OSDMap;
 class MonClient;
 class Message;
-class Finisher;
 
 class MPoolOpReply;
 
@@ -1225,7 +1224,10 @@ public:
 public:
   Messenger *messenger;
   MonClient *monc;
-  Finisher *finisher;
+  boost::asio::io_context& service;
+  // The guaranteed sequenced, one-at-a-time execution and apparently
+  // people sometimes depend on this.
+  boost::asio::io_context::strand finish_strand;
   ZTracer::Endpoint trace_endpoint;
 private:
   OSDMap    *osdmap;
@@ -1728,7 +1730,6 @@ public:
     bool canceled;
     Context *on_reg_commit;
 
-    // we trigger these from an async finisher
     Context *on_notify_finish;
     ceph::buffer::list *notify_result_bl;
     uint64_t notify_id;
@@ -1973,10 +1974,11 @@ public:
 		    uint32_t register_gen);
   int _normalize_watch_error(int r);
 
-  friend class C_DoWatchError;
+  friend class CB_DoWatchError;
 public:
-  void linger_callback_flush(Context *ctx) {
-    finisher->queue(ctx);
+  template<typename CT>
+  auto linger_callback_flush(CT&& ct) {
+    return boost::asio::defer(finish_strand, std::forward<CT>(ct));
   }
 
 private:
@@ -2036,10 +2038,11 @@ private:
 
  public:
   Objecter(CephContext *cct_, Messenger *m, MonClient *mc,
-	   Finisher *fin,
+	   boost::asio::io_context& service,
 	   double mon_timeout,
 	   double osd_timeout) :
-    Dispatcher(cct_), messenger(m), monc(mc), finisher(fin),
+    Dispatcher(cct_), messenger(m), monc(mc), service(service),
+    finish_strand(service),
     trace_endpoint("0.0.0.0", 0, "Objecter"),
     osdmap(new OSDMap),
     max_linger_id(0),

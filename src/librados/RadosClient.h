@@ -14,7 +14,14 @@
 #ifndef CEPH_LIBRADOS_RADOSCLIENT_H
 #define CEPH_LIBRADOS_RADOSCLIENT_H
 
+#include <functional>
+#include <memory>
+#include <string>
+
+#include "msg/Dispatcher.h"
 #include "common/config_fwd.h"
+
+#include "common/asio_misc.h"
 #include "common/Cond.h"
 #include "common/Mutex.h"
 #include "common/RWLock.h"
@@ -24,14 +31,11 @@
 #include "include/rados/librados.hpp"
 #include "mon/MonClient.h"
 #include "mgr/MgrClient.h"
-#include "msg/Dispatcher.h"
 
 #include "IoCtxImpl.h"
 
-struct AuthAuthorizer;
 struct Context;
 class CephContext;
-struct Connection;
 class Message;
 class MLog;
 class Messenger;
@@ -86,11 +90,12 @@ private:
   int wait_for_osdmap();
 
 public:
+  ceph::io_context_pool poolctx;
   Finisher finisher;
 
   explicit RadosClient(CephContext *cct_);
   ~RadosClient() override;
-  int ping_monitor(string mon_id, string *result);
+  int ping_monitor(std::string mon_id, std::string *result);
   int connect();
   void shutdown();
 

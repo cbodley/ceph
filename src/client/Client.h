@@ -16,6 +16,7 @@
 #ifndef CEPH_CLIENT_H
 #define CEPH_CLIENT_H
 
+#include "common/asio_misc.h"
 #include "common/CommandTable.h"
 #include "common/Finisher.h"
 #include "common/Mutex.h"
@@ -1297,7 +1298,7 @@ private:
  * Specialization of Client that manages its own Objecter instance
  * and handles init/shutdown of messenger/monclient
  */
-class StandaloneClient : public Client
+class StandaloneClient : private ceph::io_context_pool, public Client
 {
 public:
   StandaloneClient(Messenger *m, MonClient *mc);

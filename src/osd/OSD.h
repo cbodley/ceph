@@ -19,6 +19,7 @@
 
 #include "msg/Dispatcher.h"
 
+#include "common/asio_misc.h"
 #include "common/Mutex.h"
 #include "common/RWLock.h"
 #include "common/Timer.h"
@@ -672,6 +673,7 @@ public:
   void promote_throttle_recalibrate();
 
   // -- Objecter, for tiering reads/writes from/to other OSDs --
+  ceph::io_context_pool poolctx;
   Objecter *objecter;
   int m_objecter_finishers;
   vector<Finisher*> objecter_finishers;

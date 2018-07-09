@@ -241,7 +241,8 @@ OSDService::OSDService(OSD *osd) :
   last_recalibrate(ceph_clock_now()),
   promote_max_objects(0),
   promote_max_bytes(0),
-  objecter(new Objecter(osd->client_messenger->cct, osd->objecter_messenger, osd->monc, NULL, 0, 0)),
+  poolctx(cct),
+  objecter(new Objecter(osd->client_messenger->cct, osd->objecter_messenger, osd->monc, poolctx, 0, 0)),
   m_objecter_finishers(cct->_conf->osd_objecter_finishers),
   watch_lock("OSDService::watch_lock"),
   watch_timer(osd->client_messenger->cct, watch_lock),
@@ -276,6 +277,7 @@ OSDService::OSDService(OSD *osd) :
   , pgid_lock("OSDService::pgid_lock")
 #endif
 {
+  poolctx.start();
   objecter->init();
 
   for (int i = 0; i < m_objecter_finishers; i++) {

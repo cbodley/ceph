@@ -70,6 +70,7 @@ librados::RadosClient::RadosClient(CephContext *cct_)
     timer(cct, lock),
     refcnt(1),
     log_last_version(0), log_cb(NULL), log_cb2(NULL), log_cb_arg(NULL),
+    poolctx(cct, ceph::construct_suspended),
     finisher(cct, "radosclient", "fn-radosclient")
 {
 }
@@ -242,6 +243,8 @@ int librados::RadosClient::connect()
 
   common_init_finish(cct);
 
+  poolctx.start();
+
   // get monmap
   err = monclient.build_initial_monmap();
   if (err < 0)
@@ -262,9 +265,9 @@ int librados::RadosClient::connect()
   ldout(cct, 1) << "starting objecter" << dendl;
 
   objecter = new (std::nothrow) Objecter(cct, messenger, &monclient,
-			  &finisher,
-			  cct->_conf->rados_mon_op_timeout,
-			  cct->_conf->rados_osd_op_timeout);
+					 poolctx,
+					 cct->_conf->rados_mon_op_timeout,
+					 cct->_conf->rados_osd_op_timeout);
   if (!objecter)
     goto out;
   objecter->set_balanced_budget();
@@ -321,6 +324,7 @@ int librados::RadosClient::connect()
 
   timer.init();
 
+  poolctx.start();
   finisher.start();
 
   state = CONNECTED;
@@ -372,6 +376,7 @@ void librados::RadosClient::shutdown()
   state = DISCONNECTED;
   instance_id = 0;
   timer.shutdown();   // will drop+retake lock
+  poolctx.finish();
   lock.Unlock();
   if (need_objecter) {
     objecter->shutdown();
@@ -384,37 +389,32 @@ void librados::RadosClient::shutdown()
     messenger->wait();
   }
   ldout(cct, 1) << "shutdown" << dendl;
+  poolctx.finish();
 }
 
 int librados::RadosClient::watch_flush()
 {
   ldout(cct, 10) << __func__ << " enter" << dendl;
-  Mutex mylock("RadosClient::watch_flush::mylock");
-  Cond cond;
-  bool done;
-  objecter->linger_callback_flush(new C_SafeCond(&mylock, &cond, &done));
+  auto f = objecter->linger_callback_flush(boost::asio::use_future);
 
-  mylock.Lock();
-  while (!done)
-    cond.Wait(mylock);
-  mylock.Unlock();
+  f.get();
 
   ldout(cct, 10) << __func__ << " exit" << dendl;
   return 0;
 }
 
-struct C_aio_watch_flush_Complete : public Context {
+struct CB_aio_watch_flush_Complete {
   librados::RadosClient *client;
   librados::AioCompletionImpl *c;
 
-  C_aio_watch_flush_Complete(librados::RadosClient *_client, librados::AioCompletionImpl *_c)
+  CB_aio_watch_flush_Complete(librados::RadosClient *_client, librados::AioCompletionImpl *_c)
     : client(_client), c(_c) {
     c->get();
   }
 
-  void finish(int r) override {
+  void operator()() {
     c->lock.Lock();
-    c->rval = r;
+    c->rval = 0;
     c->complete = true;
     c->cond.Signal();
 
@@ -429,8 +429,7 @@ struct C_aio_watch_flush_Complete : public Context {
 int librados::RadosClient::async_watch_flush(AioCompletionImpl *c)
 {
   ldout(cct, 10) << __func__ << " enter" << dendl;
-  Context *oncomplete = new C_aio_watch_flush_Complete(this, c);
-  objecter->linger_callback_flush(oncomplete);
+  objecter->linger_callback_flush(CB_aio_watch_flush_Complete(this, c));
   ldout(cct, 10) << __func__ << " exit" << dendl;
   return 0;
 }

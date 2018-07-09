@@ -41,6 +41,7 @@ public:
 protected:
   MonClient monc;
   std::unique_ptr<Messenger> client_messenger;
+  ceph::io_context_pool poolctx;
   Objecter objecter;
   Client client;
 

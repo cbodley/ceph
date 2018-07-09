@@ -46,7 +46,8 @@ MgrStandby::MgrStandby(int argc, const char **argv) :
 		     "mgr",
 		     getpid(),
 		     0)),
-  objecter{g_ceph_context, client_messenger.get(), &monc, NULL, 0, 0},
+  poolctx(cct, ceph::construct_suspended),
+  objecter{g_ceph_context, client_messenger.get(), &monc, poolctx, 0, 0},
   client{client_messenger.get(), &monc, &objecter},
   mgrc(g_ceph_context, client_messenger.get()),
   log_client(g_ceph_context, client_messenger.get(), &monc.monmap, LogClient::NO_FLAGS),
@@ -170,6 +171,7 @@ int MgrStandby::init()
   // this method.
   monc.set_passthrough_monmap();
 
+  poolctx.start();
   client_t whoami = monc.get_global_id();
   client_messenger->set_myname(entity_name_t::MGR(whoami.v));
   monc.set_log_client(&log_client);
@@ -294,10 +296,11 @@ void MgrStandby::shutdown()
     client_messenger->shutdown();
   }));
 
-  // Then stop the finisher to ensure its enqueued contexts aren't going
-  // to touch references to the things we're about to tear down
-  finisher.wait_for_empty();
-  finisher.stop();
+  // objecter is used by monc and active_mgr
+  objecter.shutdown();
+  // client_messenger is used by all of them, so stop it in the end
+  client_messenger->shutdown();
+  poolctx.finish();
 }
 
 void MgrStandby::respawn()

@@ -486,7 +486,8 @@ MDSRank::MDSRank(
     whoami(whoami_), incarnation(0),
     mds_lock(mds_lock_), cct(msgr->cct), clog(clog_), timer(timer_),
     mdsmap(mdsmap_),
-    objecter(new Objecter(g_ceph_context, msgr, monc_, nullptr, 0, 0)),
+    ctxpool(g_ceph_context, ceph::construct_suspended),
+    objecter(new Objecter(g_ceph_context, msgr, monc_, ctxpool, 0, 0)),
     server(NULL), mdcache(NULL), locker(NULL), mdlog(NULL),
     balancer(NULL), scrubstack(NULL),
     damage_table(whoami_),
@@ -592,6 +593,7 @@ MDSRank::~MDSRank()
 
 void MDSRankDispatcher::init()
 {
+  ctxpool.start();
   objecter->init();
   messenger->add_dispatcher_head(objecter);
 
@@ -844,6 +846,7 @@ void MDSRankDispatcher::shutdown()
     objecter->shutdown();
 
   monc->shutdown();
+  ctxpool.finish();
 
   op_tracker.on_shutdown();
 

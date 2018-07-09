@@ -20,6 +20,7 @@
 #include "msg/Dispatcher.h"
 #include "msg/Messenger.h"
 #include "auth/Auth.h"
+#include "common/asio_misc.h"
 #include "common/Finisher.h"
 #include "common/Timer.h"
 
@@ -38,6 +39,7 @@ protected:
 
   Mutex lock;
   Finisher finisher;
+  ceph::io_context_pool poolctx;
 
   Context *waiting_for_mds_map;
 
