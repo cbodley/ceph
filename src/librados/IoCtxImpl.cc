@@ -76,17 +76,16 @@ struct C_notify_Finish : public Context {
   }
 };
 
-struct C_aio_linger_cancel : public Context {
+struct CB_aio_linger_cancel {
   Objecter *objecter;
   Objecter::LingerOp *linger_op;
 
-  C_aio_linger_cancel(Objecter *_objecter, Objecter::LingerOp *_linger_op)
+  CB_aio_linger_cancel(Objecter *_objecter, Objecter::LingerOp *_linger_op)
     : objecter(_objecter), linger_op(_linger_op)
   {
   }
 
-  void finish(int r) override
-  {
+  void operator()() {
     objecter->linger_cancel(linger_op);
   }
 };
@@ -104,8 +103,9 @@ struct C_aio_linger_Complete : public Context {
 
   void finish(int r) override {
     if (cancel || r < 0)
-      c->io->client->finisher.queue(new C_aio_linger_cancel(c->io->objecter,
-                                                            linger_op));
+      boost::asio::defer(c->io->client->finish_strand,
+			 CB_aio_linger_cancel(c->io->objecter,
+					      linger_op));
 
     c->lock.Lock();
     c->rval = r;
@@ -114,7 +114,7 @@ struct C_aio_linger_Complete : public Context {
 
     if (c->callback_complete ||
 	c->callback_safe) {
-      c->io->client->finisher.queue(new C_AioComplete(c));
+      boost::asio::defer(c->io->client->finish_strand, CB_AioComplete(c));
     }
     c->put_unlock();
   }
@@ -196,7 +196,7 @@ struct C_aio_selfmanaged_snap_op_Complete : public Context {
     c->cond.Signal();
 
     if (c->callback_complete || c->callback_safe) {
-      client->finisher.queue(new librados::C_AioComplete(c));
+      boost::asio::defer(client->finish_strand, librados::CB_AioComplete(c));
     }
     c->put_unlock();
   }
@@ -313,7 +313,7 @@ void librados::IoCtxImpl::complete_aio_write(AioCompletionImpl *c)
     ldout(client->cct, 20) << " waking waiters on seq " << waiters->first << dendl;
     for (std::list<AioCompletionImpl*>::iterator it = waiters->second.begin();
 	 it != waiters->second.end(); ++it) {
-      client->finisher.queue(new C_AioCompleteAndSafe(*it));
+      boost::asio::defer(client->finish_strand, CB_AioCompleteAndSafe(*it));
       (*it)->put();
     }
     aio_write_waiters.erase(waiters++);
@@ -333,7 +333,7 @@ void librados::IoCtxImpl::flush_aio_writes_async(AioCompletionImpl *c)
   if (aio_write_list.empty()) {
     ldout(client->cct, 20) << "flush_aio_writes_async no writes. (tid "
 			   << seq << ")" << dendl;
-    client->finisher.queue(new C_AioCompleteAndSafe(c));
+    boost::asio::defer(client->finish_strand, CB_AioCompleteAndSafe(c));
   } else {
     ldout(client->cct, 20) << "flush_aio_writes_async " << aio_write_list.size()
 			   << " writes in flight; waiting on tid " << seq << dendl;
@@ -1173,7 +1173,7 @@ struct AioGetxattrsData {
   AioGetxattrsData(librados::AioCompletionImpl *c, map<string, bufferlist>* attrset,
 		   librados::RadosClient *_client) :
     user_completion(c), user_attrset(attrset), client(_client) {}
-  struct librados::C_AioCompleteAndSafe user_completion;
+  struct librados::CB_AioCompleteAndSafe user_completion;
   map<string, bufferlist> result_attrset;
   map<std::string, bufferlist>* user_attrset;
   librados::RadosClient *client;
@@ -1192,7 +1192,7 @@ static void aio_getxattrs_complete(rados_completion_t c, void *arg) {
       (*cdata->user_attrset)[p->first] = p->second;
     }
   }
-  cdata->user_completion.finish(rc);
+  cdata->user_completion(rc);
   ((librados::AioCompletionImpl*)c)->put();
   delete cdata;
 }
@@ -1918,7 +1918,7 @@ void librados::IoCtxImpl::C_aio_stat_Ack::finish(int r)
   }
 
   if (c->callback_complete) {
-    c->io->client->finisher.queue(new C_AioComplete(c));
+    boost::asio::defer(c->io->client->finish_strand, CB_AioComplete(c));
   }
 
   c->put_unlock();
@@ -1946,7 +1946,7 @@ void librados::IoCtxImpl::C_aio_stat2_Ack::finish(int r)
   }
 
   if (c->callback_complete) {
-    c->io->client->finisher.queue(new C_AioComplete(c));
+    boost::asio::defer(c->io->client->finish_strand, CB_AioComplete(c));
   }
 
   c->put_unlock();
@@ -1982,7 +1982,7 @@ void librados::IoCtxImpl::C_aio_Complete::finish(int r)
 
   if (c->callback_complete ||
       c->callback_safe) {
-    c->io->client->finisher.queue(new C_AioComplete(c));
+    boost::asio::defer(c->io->client->finish_strand, CB_AioComplete(c));
   }
 
   if (c->aio_write_seq) {
@@ -2061,7 +2061,10 @@ void librados::IoCtxImpl::application_enable_async(const std::string& app_name,
   // preserved until Luminous is configured as minimim version.
   if (!client->get_required_monitor_features().contains_all(
         ceph::features::mon::FEATURE_LUMINOUS)) {
-    client->finisher.queue(new C_PoolAsync_Safe(c), -EOPNOTSUPP);
+    boost::asio::defer(client->finish_strand,
+		       [cb = CB_PoolAsync_Safe(c)]() mutable {
+			 cb(-EOPNOTSUPP);
+		       });
     return;
   }
 
@@ -2079,7 +2082,7 @@ void librados::IoCtxImpl::application_enable_async(const std::string& app_name,
   cmds.push_back(cmd.str());
   bufferlist inbl;
   client->mon_command_async(cmds, inbl, nullptr, nullptr,
-                            new C_PoolAsync_Safe(c));
+                            make_lambda_context(CB_PoolAsync_Safe(c)));
 }
 
 int librados::IoCtxImpl::application_list(std::set<std::string> *app_names)

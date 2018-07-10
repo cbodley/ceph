@@ -91,7 +91,7 @@ private:
 
 public:
   ceph::io_context_pool poolctx;
-  Finisher finisher;
+  boost::asio::io_context::strand finish_strand{poolctx.get_io_context()};
 
   explicit RadosClient(CephContext *cct_);
   ~RadosClient() override;

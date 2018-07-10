@@ -1959,7 +1959,7 @@ struct AioGetxattrDataPP {
   AioGetxattrDataPP(librados::AioCompletionImpl *c, bufferlist *_bl) :
     bl(_bl), completion(c) {}
   bufferlist *bl;
-  struct librados::C_AioCompleteAndSafe completion;
+  struct librados::CB_AioCompleteAndSafe completion;
 };
 
 static void rados_aio_getxattr_completepp(rados_completion_t c, void *arg) {
@@ -1968,7 +1968,7 @@ static void rados_aio_getxattr_completepp(rados_completion_t c, void *arg) {
   if (rc >= 0) {
     rc = cdata->bl->length();
   }
-  cdata->completion.finish(rc);
+  cdata->completion(rc);
   delete cdata;
 }
 
