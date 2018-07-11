@@ -67,7 +67,6 @@ librados::RadosClient::RadosClient(CephContext *cct_)
     instance_id(0),
     objecter(NULL),
     lock("librados::RadosClient::lock"),
-    timer(cct, lock),
     refcnt(1),
     log_last_version(0), log_cb(NULL), log_cb2(NULL), log_cb_arg(NULL),
     poolctx(cct, ceph::construct_suspended)
@@ -321,8 +320,6 @@ int librados::RadosClient::connect()
   objecter->start();
   lock.Lock();
 
-  timer.init();
-
   state = CONNECTED;
   instance_id = monclient.get_global_id();
 
@@ -369,7 +366,6 @@ void librados::RadosClient::shutdown()
   }
   state = DISCONNECTED;
   instance_id = 0;
-  timer.shutdown();   // will drop+retake lock
   poolctx.stop();
   lock.Unlock();
   if (need_objecter) {

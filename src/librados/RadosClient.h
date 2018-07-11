@@ -25,8 +25,6 @@
 #include "common/Cond.h"
 #include "common/Mutex.h"
 #include "common/RWLock.h"
-#include "common/Timer.h"
-#include "common/ceph_time.h"
 #include "include/rados/librados.h"
 #include "include/rados/librados.hpp"
 #include "mon/MonClient.h"
@@ -74,7 +72,6 @@ private:
 
   Mutex lock;
   Cond cond;
-  SafeTimer timer;
   int refcnt;
 
   version_t log_last_version;
