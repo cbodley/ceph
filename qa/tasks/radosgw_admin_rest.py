@@ -104,8 +104,8 @@ def rgwadmin_rest(connection, cmd, params=None, headers=None, raw=False):
     result = handler(url, params=params, headers=request.headers)
 
     if raw:
-        log.info(' text result: %s' % result.txt)
-        return result.status_code, result.txt
+        log.info(' text result: %s' % result.text)
+        return result.status_code, result.text
     else:
         log.info(' json result: %s' % result.json())
         return result.status_code, result.json()
@@ -251,7 +251,7 @@ def task(ctx, config):
             ['key', 'rm'],
             {'uid' : user1,
              'access-key' : access_key2
-            })
+            }, raw=True) # fixme
 
     assert ret == 200
 
@@ -300,7 +300,7 @@ def task(ctx, config):
             ['key', 'rm'],
             {'subuser' : subuser1,
              'key-type' :'swift'
-            })
+            }, raw=True) # fixme
 
     assert ret == 200
 
@@ -311,7 +311,7 @@ def task(ctx, config):
     (ret, out) = rgwadmin_rest(admin_conn,
             ['subuser', 'rm'],
             {'subuser' : subuser1
-            })
+            }, raw=True) # fixme
 
     assert ret == 200
 
@@ -323,8 +323,8 @@ def task(ctx, config):
             ['subuser', 'rm'],
             {'subuser' : subuser2,
              'key-type' : 'swift',
-             '{purge-keys' :True
-            })
+             'purge-keys' : True
+            }, raw=True) # fixme
 
     assert ret == 200
 
@@ -390,7 +390,11 @@ def task(ctx, config):
     key.delete()
 
     # TESTCASE 'bucket unlink', 'bucket', 'unlink', 'unlink bucket from user', 'fails', 'access denied error'
-    (ret, out) = rgwadmin_rest(admin_conn, ['bucket', 'unlink'], {'uid' : user1, 'bucket' : bucket_name})
+    (ret, out) = rgwadmin_rest(admin_conn,
+            ['bucket', 'unlink'],
+            {'uid' : user1,
+             'bucket' : bucket_name,
+            }, raw=True) # fixme
 
     assert ret == 200
 
@@ -426,7 +430,7 @@ def task(ctx, config):
             {'uid' : user2,
              'bucket' : bucket_name,
              'bucket-id' : bucket_id,
-            })
+            }, raw=True) # fixme
 
     assert ret == 200
 
@@ -446,10 +450,13 @@ def task(ctx, config):
             {'uid' : user1,
              'bucket' : bucket_name,
              'bucket-id' : bucket_id,
-            })
+            }, raw=True) # fixme
     assert ret == 200
 
-    (ret, out) = rgwadmin_rest(admin_conn, ['user', 'rm'], {'uid' : user2})
+    (ret, out) = rgwadmin_rest(admin_conn,
+            ['user', 'rm'],
+            {'uid' : user2
+            }, raw=True) # fixme
     assert ret == 200
 
     # TESTCASE 'object-rm', 'object', 'rm', 'remove object', 'succeeds, object is removed'
@@ -460,7 +467,11 @@ def task(ctx, config):
     key.set_contents_from_string(object_name)
 
     # now delete it
-    (ret, out) = rgwadmin_rest(admin_conn, ['object', 'rm'], {'bucket' : bucket_name, 'object' : object_name})
+    (ret, out) = rgwadmin_rest(admin_conn,
+            ['object', 'rm'],
+            {'bucket' : bucket_name,
+             'object' : object_name,
+            }, raw=True) # fixme
     assert ret == 200
 
     # TESTCASE 'bucket-stats6','bucket','stats','after deleting key','succeeds, lists one no objects'
@@ -563,7 +574,10 @@ def task(ctx, config):
     big_key.delete()
 
     # TESTCASE 'rm-user-buckets','user','rm','existing user','fails, still has buckets'
-    (ret, out) = rgwadmin_rest(admin_conn, ['user', 'rm'], {'uid' : user1})
+    (ret, out) = rgwadmin_rest(admin_conn,
+            ['user', 'rm'],
+            {'uid' : user1
+            }, raw=True) # fixme
     assert ret == 409
 
     # delete should fail because ``key`` still exists
@@ -625,7 +639,10 @@ def task(ctx, config):
     bucket = connection.create_bucket(bucket_name)
     key = boto.s3.key.Key(bucket)
 
-    (ret, out) = rgwadmin_rest(admin_conn, ['user', 'rm'], {'uid' : user1})
+    (ret, out) = rgwadmin_rest(admin_conn,
+            ['user', 'rm'],
+            {'uid' : user1,
+            }, raw=True) # fixme
     assert ret == 409
 
     # TESTCASE 'rm-user2', 'user', 'rm', user with data', 'succeeds'
@@ -633,7 +650,11 @@ def task(ctx, config):
     key = boto.s3.key.Key(bucket)
     key.set_contents_from_string('twelve')
 
-    (ret, out) = rgwadmin_rest(admin_conn, ['user', 'rm'], {'uid' : user1, 'purge-data' : True})
+    (ret, out) = rgwadmin_rest(admin_conn,
+            ['user', 'rm'],
+            {'uid' : user1,
+             'purge-data' : True
+            }, raw=True) # fixme
     assert ret == 200
 
     # TESTCASE 'rm-user3','user','info','deleted user','fails'
