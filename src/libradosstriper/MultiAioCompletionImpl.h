@@ -20,7 +20,9 @@
 
 #include "include/radosstriper/libradosstriper.hpp"
 
-struct libradosstriper::MultiAioCompletionImpl {
+namespace libradosstriper {
+
+struct MultiAioCompletionImpl {
 
   Mutex lock;
   Cond cond;
@@ -174,10 +176,17 @@ struct libradosstriper::MultiAioCompletionImpl {
   void complete_request(ssize_t r);
   void safe_request(ssize_t r);
   void finish_adding_requests();
-
 };
 
-void intrusive_ptr_add_ref(libradosstriper::MultiAioCompletionImpl*);
-void intrusive_ptr_release(libradosstriper::MultiAioCompletionImpl*);
+inline void intrusive_ptr_add_ref(MultiAioCompletionImpl* ptr)
+{
+  ptr->get();
+}
+
+inline void intrusive_ptr_release(MultiAioCompletionImpl* ptr)
+{
+  ptr->put();
+}
+}
 
 #endif // CEPH_LIBRADOSSTRIPERSTRIPER_MULTIAIOCOMPLETIONIMPL_H

@@ -39,9 +39,9 @@ public:
 			  const std::set <std::string> &changed) override;
 
 protected:
+  ceph::io_context_pool poolctx;
   MonClient monc;
   std::unique_ptr<Messenger> client_messenger;
-  ceph::io_context_pool poolctx;
   Objecter objecter;
   Client client;
 

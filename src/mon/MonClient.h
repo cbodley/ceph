@@ -23,7 +23,6 @@
 #include "MonSub.h"
 
 #include "common/Timer.h"
-#include "common/Finisher.h"
 #include "common/config.h"
 
 #include "auth/AuthClient.h"
@@ -249,7 +248,8 @@ private:
 
   mutable Mutex monc_lock;
   SafeTimer timer;
-  Finisher finisher;
+  boost::asio::io_context& service;
+  boost::asio::io_context::strand finish_strand{service};
 
   bool initialized;
   bool stopping = false;
@@ -405,7 +405,7 @@ public:
   std::unique_ptr<RotatingKeyRing> rotating_secrets;
 
  public:
-  explicit MonClient(CephContext *cct_);
+  MonClient(CephContext *cct_, boost::asio::io_context& service);
   MonClient(const MonClient &) = delete;
   MonClient& operator=(const MonClient &) = delete;
   ~MonClient() override;

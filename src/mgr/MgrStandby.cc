@@ -38,7 +38,8 @@
 
 MgrStandby::MgrStandby(int argc, const char **argv) :
   Dispatcher(g_ceph_context),
-  monc{g_ceph_context},
+  poolctx(cct, ceph::construct_suspended),
+  monc{g_ceph_context, poolctx},
   client_messenger(Messenger::create(
 		     g_ceph_context,
 		     cct->_conf.get_val<std::string>("ms_type"),
@@ -46,7 +47,6 @@ MgrStandby::MgrStandby(int argc, const char **argv) :
 		     "mgr",
 		     getpid(),
 		     0)),
-  poolctx(cct, ceph::construct_suspended),
   objecter{g_ceph_context, client_messenger.get(), &monc, poolctx, 0, 0},
   client{client_messenger.get(), &monc, &objecter},
   mgrc(g_ceph_context, client_messenger.get()),
@@ -117,6 +117,8 @@ int MgrStandby::init()
   client_messenger->add_dispatcher_tail(&client);
   client_messenger->start();
 
+  poolctx.start();
+
   // Initialize MonClient
   if (monc.build_initial_monmap() < 0) {
     client_messenger->shutdown();
@@ -171,7 +173,6 @@ int MgrStandby::init()
   // this method.
   monc.set_passthrough_monmap();
 
-  poolctx.start();
   client_t whoami = monc.get_global_id();
   client_messenger->set_myname(entity_name_t::MGR(whoami.v));
   monc.set_log_client(&log_client);
@@ -289,7 +290,20 @@ void MgrStandby::shutdown()
     }
 
     py_module_registry.shutdown();
-
+    // stop sending beacon first, i use monc to talk with monitors
+    timer.shutdown();
+    // client uses monc and objecter
+    client.shutdown();
+    mgrc.shutdown();
+    // Stop asio threads, so leftover events won't call into shut down
+    // monclient/objecter.
+    poolctx.finish();
+    // stop monc, so mon won't be able to instruct me to shutdown/activate after
+    // the active_mgr is stopped
+    monc.shutdown();
+    if (active_mgr) {
+      active_mgr->shutdown();
+    }
     // objecter is used by monc and active_mgr
     objecter.shutdown();
     // client_messenger is used by all of them, so stop it in the end
@@ -300,7 +314,6 @@ void MgrStandby::shutdown()
   objecter.shutdown();
   // client_messenger is used by all of them, so stop it in the end
   client_messenger->shutdown();
-  poolctx.finish();
 }
 
 void MgrStandby::respawn()

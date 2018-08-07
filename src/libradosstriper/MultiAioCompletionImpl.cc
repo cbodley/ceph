@@ -59,13 +59,3 @@ void libradosstriper::MultiAioCompletionImpl::finish_adding_requests()
     safe();
   lock.Unlock();
 }
-
-void intrusive_ptr_add_ref(libradosstriper::MultiAioCompletionImpl* ptr)
-{
-  ptr->get();
-}
-
-void intrusive_ptr_release(libradosstriper::MultiAioCompletionImpl* ptr)
-{
-  ptr->put();
-}

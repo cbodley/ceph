@@ -47,6 +47,8 @@ class librados::RadosClient : public Dispatcher
 public:
   using Dispatcher::cct;
   const ConfigProxy& conf;
+  ceph::io_context_pool poolctx;
+  boost::asio::io_context::strand finish_strand{poolctx.get_io_context()};
 private:
   enum {
     DISCONNECTED,
@@ -87,8 +89,6 @@ private:
   int wait_for_osdmap();
 
 public:
-  ceph::io_context_pool poolctx;
-  boost::asio::io_context::strand finish_strand{poolctx.get_io_context()};
 
   explicit RadosClient(CephContext *cct_);
   ~RadosClient() override;

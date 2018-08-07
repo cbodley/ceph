@@ -67,6 +67,7 @@ class MDSDaemon : public Dispatcher, public md_config_obs_t {
 
   Messenger    *messenger;
   MonClient    *monc;
+  boost::asio::io_context& ioctx;
   MgrClient     mgrc;
   std::unique_ptr<MDSMap> mdsmap;
   LogClient    log_client;
@@ -75,7 +76,8 @@ class MDSDaemon : public Dispatcher, public md_config_obs_t {
   MDSRankDispatcher *mds_rank;
 
  public:
-  MDSDaemon(std::string_view n, Messenger *m, MonClient *mc);
+  MDSDaemon(std::string_view n, Messenger *m, MonClient *mc,
+	    boost::asio::io_context& ioctx);
   ~MDSDaemon() override;
   int orig_argc;
   const char **orig_argv;

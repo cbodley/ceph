@@ -27,7 +27,7 @@ MDSUtility::MDSUtility() :
   waiting_for_mds_map(NULL),
   inited(false)
 {
-  monc = new MonClient(g_ceph_context);
+  monc = new MonClient(g_ceph_context, poolctx);
   messenger = Messenger::create_client_messenger(g_ceph_context, "mds");
   fsmap = new FSMap();
   objecter = new Objecter(g_ceph_context, messenger, monc, poolctx, 0, 0);

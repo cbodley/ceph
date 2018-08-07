@@ -60,16 +60,16 @@ librados::RadosClient::RadosClient(CephContext *cct_)
   : Dispatcher(cct_->get()),
     cct_deleter{cct_, [](CephContext *p) {p->put();}},
     conf(cct_->_conf),
+    poolctx(cct, ceph::construct_suspended),
     state(DISCONNECTED),
-    monclient(cct_),
+    monclient(cct_, poolctx),
     mgrclient(cct_, nullptr),
     messenger(NULL),
     instance_id(0),
     objecter(NULL),
     lock("librados::RadosClient::lock"),
     refcnt(1),
-    log_last_version(0), log_cb(NULL), log_cb2(NULL), log_cb_arg(NULL),
-    poolctx(cct, ceph::construct_suspended)
+    log_last_version(0), log_cb(NULL), log_cb2(NULL), log_cb_arg(NULL)
 {
 }
 
@@ -233,7 +233,7 @@ int librados::RadosClient::connect()
   }
 
   {
-    MonClient mc_bootstrap(cct);
+    MonClient mc_bootstrap(cct, poolctx);
     err = mc_bootstrap.get_monmap_and_config();
     if (err < 0)
       return err;

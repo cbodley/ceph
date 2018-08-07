@@ -182,7 +182,7 @@ class TestStub : public Dispatcher
   TestStub(CephContext *cct, string who)
     : Dispatcher(cct),
       poolctx(cct, ceph::construct_suspended),
-      monc(cct),
+      monc(cct, poolctx),
       lock(who.append("::lock").c_str()),
       timer(cct, lock),
       do_shutdown(false),

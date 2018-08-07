@@ -12,6 +12,7 @@
  *
  */
 
+#include "common/asio_misc.h"
 #include "common/ceph_argparse.h"
 #include "common/code_environment.h"
 #include "common/config.h"
@@ -151,14 +152,18 @@ void global_pre_init(
     // make sure our mini-session gets legacy values
     conf.apply_changes(nullptr);
 
-    MonClient mc_bootstrap(g_ceph_context);
+    ceph::io_context_pool cp(g_ceph_context, 1);
+    MonClient mc_bootstrap(g_ceph_context, cp);
     if (mc_bootstrap.get_monmap_and_config() < 0) {
+      cp.stop();
       cct->_log->flush();
       cerr << "failed to fetch mon config (--no-mon-config to skip)"
 	   << std::endl;
       _exit(1);
     }
+    cp.stop();
   }
+
   if (!cct->_log->is_started()) {
     cct->_log->start();
   }
@@ -368,16 +373,6 @@ global_init(const std::map<std::string,std::string> *defaults,
   }
 
   return boost::intrusive_ptr<CephContext>{g_ceph_context, false};
-}
-
-void intrusive_ptr_add_ref(CephContext* cct)
-{
-  cct->get();
-}
-
-void intrusive_ptr_release(CephContext* cct)
-{
-  cct->put();
 }
 
 void global_print_banner(void)

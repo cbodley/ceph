@@ -58,13 +58,13 @@
 
 using std::string;
 
-MonClient::MonClient(CephContext *cct_) :
+MonClient::MonClient(CephContext *cct_, boost::asio::io_context& service) :
   Dispatcher(cct_),
   AuthServer(cct_),
   messenger(NULL),
   monc_lock("MonClient::monc_lock"),
   timer(cct_, monc_lock),
-  finisher(cct_),
+  service(service),
   initialized(false),
   log_client(NULL),
   more_log_pending(false),
@@ -423,13 +423,18 @@ void MonClient::handle_monmap(MMonMap *m)
 void MonClient::handle_config(MConfig *m)
 {
   ldout(cct,10) << __func__ << " " << *m << dendl;
-  finisher.queue(new FunctionContext([this, m](int r) {
-	cct->_conf.set_mon_vals(cct, m->config, config_cb);
-	if (config_notify_cb) {
-	  config_notify_cb();
-	}
-	m->put();
-      }));
+  // Take the sledgehammer approach to ensuring we don't depend on
+  // anything in MonClient.
+  boost::asio::defer(finish_strand,
+		    [m, cct = boost::intrusive_ptr<CephContext>(cct),
+		     config_notify_cb = config_notify_cb,
+		     config_cb = config_cb]() {
+		      cct->_conf.set_mon_vals(cct.get(), m->config, config_cb);
+		      if (config_notify_cb) {
+			config_notify_cb();
+		      }
+		      m->put();
+		    });
   got_config = true;
   map_cond.Signal();
 }
@@ -469,7 +474,6 @@ int MonClient::init()
   messenger->add_dispatcher_head(this);
 
   timer.init();
-  finisher.start();
   schedule_tick();
 
   return 0;
@@ -503,11 +507,6 @@ void MonClient::shutdown()
 
   monc_lock.Unlock();
 
-  if (initialized) {
-    finisher.wait_for_empty();
-    finisher.stop();
-    initialized = false;
-  }
   monc_lock.Lock();
   timer.shutdown();
   stopping = false;
@@ -669,7 +668,10 @@ void MonClient::_reopen_session(int rank)
 
   // throw out version check requests
   while (!version_requests.empty()) {
-    finisher.queue(version_requests.begin()->second->context, -EAGAIN);
+    boost::asio::defer(finish_strand,
+		       [c=version_requests.begin()->second->context]() {
+			 c->complete(-EAGAIN);
+		       });
     delete version_requests.begin()->second;
     version_requests.erase(version_requests.begin());
   }
@@ -1144,15 +1146,18 @@ void MonClient::_finish_command(MonCommand *r, int ret, string rs)
   if (r->prs)
     *(r->prs) = rs;
   if (r->onfinish)
-    finisher.queue(r->onfinish, ret);
+    boost::asio::defer(finish_strand,
+		       [c=r->onfinish, ret]() {
+			 c->complete(ret);
+		       });
   mon_commands.erase(r->tid);
   delete r;
 }
 
-void MonClient::start_mon_command(const std::vector<string>& cmd,
-                                  const ceph::buffer::list& inbl,
-                                  ceph::buffer::list *outbl, string *outs,
-                                  Context *onfinish)
+void MonClient::start_mon_command(const std::vector<std::string>& cmd,
+				  const ceph::buffer::list& inbl,
+				  ceph::buffer::list *outbl, std::string *outs,
+				  Context *onfinish)
 {
   std::lock_guard l(monc_lock);
   if (!initialized || stopping) {
@@ -1256,7 +1261,10 @@ void MonClient::handle_get_version_reply(MMonGetVersionReply* m)
       *req->newest = m->version;
     if (req->oldest)
       *req->oldest = m->oldest_version;
-    finisher.queue(req->context, 0);
+    boost::asio::defer(finish_strand,
+		       [c=req->context] {
+			 c->complete(0);
+		       });
     delete req;
   }
   m->put();
