@@ -230,6 +230,43 @@ struct MonClientPinger : public Dispatcher,
   }
 };
 
+const boost::system::error_category& monc_category() noexcept;
+
+namespace monc_errc {
+enum monc_errc_t {
+  shutting_down = 1, // Command failed due to MonClient shutting down
+  session_reset, // Monitor session was reset
+  rank_dne, // Requested monitor rank does not exist
+  mon_dne, // Requested monitor does not exist
+  timed_out // Monitor operation timed out
+};
+}
+
+namespace boost {
+namespace system {
+template<>
+struct is_error_code_enum<::monc_errc::monc_errc_t> {
+  static const bool value = true;
+};
+}
+}
+
+namespace monc_errc {
+//  explicit conversion:
+inline boost::system::error_code make_error_code(monc_errc_t e) noexcept {
+  return { e, monc_category() };
+}
+
+// implicit conversion:
+inline boost::system::error_condition make_error_condition(monc_errc_t e)
+  noexcept {
+  return { e, monc_category() };
+}
+}
+
+const boost::system::error_category& monc_category() noexcept;
+
+
 
 class MonClient : public Dispatcher,
 		  public AuthClient,
@@ -238,6 +275,9 @@ public:
   // Error, Newest, Oldest
   using VersionSig = void(boost::system::error_code, version_t, version_t);
   using VersionCompletion = ceph::async::Completion<VersionSig>;
+
+  using CommandSig = void(boost::system::error_code, std::string, ceph::bufferlist);
+  using CommandCompletion = ceph::async::Completion<CommandSig>;
 
   MonMap monmap;
   std::map<std::string,std::string> config_mgr;
@@ -299,7 +339,6 @@ private:
   double reopen_interval_multiplier;
 
   Dispatcher *handle_authentication_dispatcher = nullptr;
-  
   bool _opened() const;
   bool _hunting() const;
   void _start_hunting();
@@ -505,42 +544,154 @@ private:
 
   struct MonCommand {
     std::string target_name;
-    int target_rank;
+    int target_rank = -1;
     uint64_t tid;
     std::vector<std::string> cmd;
     ceph::buffer::list inbl;
-    ceph::buffer::list *poutbl;
-    std::string *prs;
-    int *prval;
-    Context *onfinish, *ontimeout;
-
-    explicit MonCommand(uint64_t t)
-      : target_rank(-1),
-	tid(t),
-	poutbl(NULL), prs(NULL), prval(NULL), onfinish(NULL), ontimeout(NULL)
-    {}
+    std::unique_ptr<CommandCompletion> onfinish;
+    std::optional<boost::asio::steady_timer> cancel_timer;
+    MonCommand(MonClient& monc, uint64_t t,
+	       std::unique_ptr<CommandCompletion> onfinish)
+      : tid(t), onfinish(std::move(onfinish)) {
+      auto timeout = ceph::maybe_timespan(monc.cct->_conf->rados_mon_op_timeout);
+      if (timeout) {
+	cancel_timer.emplace(monc.service, *timeout);
+	cancel_timer->async_wait(
+          [this, &monc](boost::system::error_code ec) {
+	    if (ec)
+	      return;
+	    Mutex::Locker l(monc.monc_lock);
+	    monc._cancel_mon_command(tid);
+	  });
+      }
+    }
   };
+  friend MonCommand;
   std::map<uint64_t,MonCommand*> mon_commands;
 
   void _send_command(MonCommand *r);
   void _resend_mon_commands();
   int _cancel_mon_command(uint64_t tid);
-  void _finish_command(MonCommand *r, int ret, std::string rs);
+  void _finish_command(MonCommand *r, boost::system::error_code ret, string&& rs, bufferlist&& bl);
   void _finish_auth();
   void handle_mon_command_ack(MMonCommandAck *ack);
 
 public:
-  void start_mon_command(const std::vector<std::string>& cmd, const ceph::buffer::list& inbl,
-			ceph::buffer::list *outbl, std::string *outs,
-			Context *onfinish);
+  template<typename CompletionToken>
+  auto start_mon_command(const std::vector<std::string>& cmd,
+                         const ceph::buffer::list& inbl,
+			 CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, CommandSig> init(token);
+    {
+      std::scoped_lock l(monc_lock);
+      auto h = CommandCompletion::create(service.get_executor(),
+					 std::move(init.completion_handler));
+      if (!initialized || stopping) {
+	ceph::async::post(std::move(h), monc_errc::shutting_down, std::string{},
+			  bufferlist{});
+      } else {
+	auto r = new MonCommand(*this, ++last_mon_command_tid, std::move(h));
+	r->cmd = cmd;
+	r->inbl = inbl;
+	mon_commands.emplace(r->tid, r);
+	_send_command(r);
+      }
+    }
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
+  auto start_mon_command(int mon_rank, const std::vector<std::string>& cmd,
+			 const ceph::buffer::list& inbl, CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, CommandSig> init(token);
+    {
+      std::scoped_lock l(monc_lock);
+      auto h = CommandCompletion::create(service.get_executor(),
+					 std::move(init.completion_handler));
+      if (!initialized || stopping) {
+	ceph::async::post(std::move(h), monc_errc::shutting_down, std::string{},
+			  bufferlist{});
+      } else {
+	auto r = new MonCommand(*this, ++last_mon_command_tid, std::move(h));
+	r->target_rank = mon_rank;
+	r->cmd = cmd;
+	r->inbl = inbl;
+	mon_commands.emplace(r->tid, r);
+	_send_command(r);
+      }
+    }
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
+  auto start_mon_command(const std::string& mon_name,
+                         const std::vector<std::string>& cmd,
+			 const ceph::buffer::list& inbl,
+			 CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, CommandSig> init(token);
+    {
+      std::scoped_lock l(monc_lock);
+      auto h = CommandCompletion::create(service.get_executor(),
+					 std::move(init.completion_handler));
+      if (!initialized || stopping) {
+	ceph::async::post(std::move(h), monc_errc::shutting_down, std::string{},
+			  bufferlist{});
+      } else {
+	auto r = new MonCommand(*this, ++last_mon_command_tid, std::move(h));
+	r->target_name = mon_name;
+	r->cmd = cmd;
+	r->inbl = inbl;
+	mon_commands.emplace(r->tid, r);
+	_send_command(r);
+      }
+    }
+    return init.result.get();
+  }
+
+  class ContextVerter {
+    std::string* outs;
+    ceph::bufferlist* outbl;
+    Context* onfinish;
+
+  public:
+    ContextVerter(std::string* outs, ceph::bufferlist* outbl, Context* onfinish)
+      : outs(outs), outbl(outbl), onfinish(onfinish) {}
+    ~ContextVerter() = default;
+    ContextVerter(const ContextVerter&) = default;
+    ContextVerter& operator =(const ContextVerter&) = default;
+    ContextVerter(ContextVerter&&) = default;
+    ContextVerter& operator =(ContextVerter&&) = default;
+
+    void operator()(boost::system::error_code e,
+		    std::string&& s,
+		    ceph::bufferlist&& bl) {
+      if (outs)
+	*outs = std::move(s);
+      if (outbl)
+	*outbl = std::move(bl);
+      if (onfinish)
+	onfinish->complete(ceph::from_error_code(e));
+    }
+  };
+
+  void start_mon_command(const vector<string>& cmd, const bufferlist& inbl,
+			 bufferlist *outbl, string *outs,
+			 Context *onfinish) {
+    start_mon_command(cmd, inbl, ContextVerter(outs, outbl, onfinish));
+  }
   void start_mon_command(int mon_rank,
-                         const std::vector<std::string>& cmd, const ceph::buffer::list& inbl,
-                         ceph::buffer::list *outbl, std::string *outs,
-                         Context *onfinish);
-  void start_mon_command(const std::string &mon_name,  ///< mon name, with mon. prefix
-                         const std::vector<std::string>& cmd, const ceph::buffer::list& inbl,
-                         ceph::buffer::list *outbl, std::string *outs,
-                         Context *onfinish);
+			 const vector<string>& cmd, const bufferlist& inbl,
+			 bufferlist *outbl, string *outs,
+			 Context *onfinish) {
+    start_mon_command(mon_rank, cmd, inbl, ContextVerter(outs, outbl, onfinish));
+  }
+  void start_mon_command(const string &mon_name,  ///< mon name, with mon. prefix
+			 const vector<string>& cmd, const bufferlist& inbl,
+			 bufferlist *outbl, string *outs,
+			 Context *onfinish) {
+    start_mon_command(mon_name, cmd, inbl, ContextVerter(outs, outbl, onfinish));
+  }
+
 
   // version requests
 public:
@@ -595,38 +746,5 @@ private:
   md_config_t::config_callback config_cb;
   std::function<void(void)> config_notify_cb;
 };
-
-const boost::system::error_category& monc_category() noexcept;
-
-namespace monc_errc {
-enum monc_errc_t {
-  shutting_down = 1, // Command failed due to MonClient shutting down
-  session_reset // Monitor session was reset
-};
-}
-
-namespace boost {
-namespace system {
-template<>
-struct is_error_code_enum<::monc_errc::monc_errc_t> {
-  static const bool value = true;
-};
-}
-}
-
-namespace monc_errc {
-//  explicit conversion:
-inline boost::system::error_code make_error_code(monc_errc_t e) noexcept {
-  return { e, monc_category() };
-}
-
-// implicit conversion:
-inline boost::system::error_condition make_error_condition(monc_errc_t e)
-  noexcept {
-  return { e, monc_category() };
-}
-}
-
-const boost::system::error_category& monc_category() noexcept;
 
 #endif

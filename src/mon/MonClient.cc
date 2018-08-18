@@ -1054,7 +1054,7 @@ void MonClient::_send_command(MonCommand *r)
 		   << dendl;
     if (r->target_rank >= (int)monmap.size()) {
       ldout(cct, 10) << " target " << r->target_rank << " >= max mon " << monmap.size() << dendl;
-      _finish_command(r, -ENOENT, "mon rank dne");
+      _finish_command(r, monc_errc::rank_dne, string("mon rank dne"), {});
       return;
     }
     _reopen_session(r->target_rank);
@@ -1069,7 +1069,7 @@ void MonClient::_send_command(MonCommand *r)
 		   << dendl;
     if (!monmap.contains(r->target_name)) {
       ldout(cct, 10) << " target " << r->target_name << " not present in monmap" << dendl;
-      _finish_command(r, -ENOENT, "mon dne");
+      _finish_command(r, monc_errc::mon_dne, string("mon dne"), {});
       return;
     }
     _reopen_session(monmap.get_rank(r->target_name));
@@ -1112,9 +1112,8 @@ void MonClient::handle_mon_command_ack(MMonCommandAck *ack)
   }
 
   ldout(cct, 10) << __func__ << " " << r->tid << " " << r->cmd << dendl;
-  if (r->poutbl)
-    r->poutbl->claim(ack->get_data());
-  _finish_command(r, ack->r, ack->rs);
+  _finish_command(r, ceph::to_error_code(ack->r), std::move(ack->rs),
+		  std::move(ack->get_data()));
   ack->put();
 }
 
@@ -1131,102 +1130,19 @@ int MonClient::_cancel_mon_command(uint64_t tid)
   ldout(cct, 10) << __func__ << " tid " << tid << dendl;
 
   MonCommand *cmd = it->second;
-  _finish_command(cmd, -ETIMEDOUT, "");
+  _finish_command(cmd, ceph::to_error_code(-ETIMEDOUT),
+		  string("timed out"), {});
   return 0;
 }
 
-void MonClient::_finish_command(MonCommand *r, int ret, string rs)
+void MonClient::_finish_command(MonCommand *r, boost::system::error_code ret, string&& rs,
+				bufferlist&& bl)
 {
-  ldout(cct, 10) << __func__ << " " << r->tid << " = " << ret << " " << rs << dendl;
-  if (r->prval)
-    *(r->prval) = ret;
-  if (r->prs)
-    *(r->prs) = rs;
-  if (r->onfinish)
-    boost::asio::defer(finish_strand,
-		       [c=r->onfinish, ret]() {
-			 c->complete(ret);
-		       });
+  ldout(cct, 10) << __func__ << " " << r->tid << " = " << ret << " " << rs
+		 << dendl;
+  ceph::async::defer(std::move(r->onfinish), ret, std::move(rs), std::move(bl));
   mon_commands.erase(r->tid);
   delete r;
-}
-
-void MonClient::start_mon_command(const std::vector<std::string>& cmd,
-				  const ceph::buffer::list& inbl,
-				  ceph::buffer::list *outbl, std::string *outs,
-				  Context *onfinish)
-{
-  std::lock_guard l(monc_lock);
-  if (!initialized || stopping) {
-    onfinish->complete(-ECANCELED);
-    return;
-  }
-  MonCommand *r = new MonCommand(++last_mon_command_tid);
-  r->cmd = cmd;
-  r->inbl = inbl;
-  r->poutbl = outbl;
-  r->prs = outs;
-  r->onfinish = onfinish;
-  if (cct->_conf->rados_mon_op_timeout > 0) {
-    class C_CancelMonCommand : public Context
-    {
-      uint64_t tid;
-      MonClient *monc;
-      public:
-      C_CancelMonCommand(uint64_t tid, MonClient *monc) : tid(tid), monc(monc) {}
-      void finish(int r) override {
-	monc->_cancel_mon_command(tid);
-      }
-    };
-    r->ontimeout = new C_CancelMonCommand(r->tid, this);
-    timer.add_event_after(cct->_conf->rados_mon_op_timeout, r->ontimeout);
-  }
-  mon_commands[r->tid] = r;
-  _send_command(r);
-}
-
-void MonClient::start_mon_command(const string &mon_name,
-                                  const std::vector<string>& cmd,
-                                  const ceph::buffer::list& inbl,
-                                  ceph::buffer::list *outbl, string *outs,
-                                  Context *onfinish)
-{
-  std::lock_guard l(monc_lock);
-  if (!initialized || stopping) {
-    onfinish->complete(-ECANCELED);
-    return;
-  }
-  MonCommand *r = new MonCommand(++last_mon_command_tid);
-  r->target_name = mon_name;
-  r->cmd = cmd;
-  r->inbl = inbl;
-  r->poutbl = outbl;
-  r->prs = outs;
-  r->onfinish = onfinish;
-  mon_commands[r->tid] = r;
-  _send_command(r);
-}
-
-void MonClient::start_mon_command(int rank,
-                                  const std::vector<string>& cmd,
-                                  const ceph::buffer::list& inbl,
-                                  ceph::buffer::list *outbl, string *outs,
-                                  Context *onfinish)
-{
-  std::lock_guard l(monc_lock);
-  if (!initialized || stopping) {
-    onfinish->complete(-ECANCELED);
-    return;
-  }
-  MonCommand *r = new MonCommand(++last_mon_command_tid);
-  r->target_rank = rank;
-  r->cmd = cmd;
-  r->inbl = inbl;
-  r->poutbl = outbl;
-  r->prs = outs;
-  r->onfinish = onfinish;
-  mon_commands[r->tid] = r;
-  _send_command(r);
 }
 
 // ---------
@@ -1770,6 +1686,9 @@ public:
   std::string message(int ev) const noexcept override;
   boost::system::error_condition default_error_condition(int ev) const noexcept
     override;
+  bool equivalent(int ev, const boost::system::error_condition& c) const
+    noexcept override;
+  using ceph::converting_category::equivalent;
   int from_code(int ev) const noexcept override;
 };
 
@@ -1789,6 +1708,12 @@ std::string monc_error_category::message(int ev) const noexcept {
     return "Command failed due to MonClient shutting down";
   case session_reset:
     return "Monitor session was reset";
+  case rank_dne:
+    return "Requested monitor rank does not exist";
+  case mon_dne:
+    return "Requested monitor does not exist";
+  case timed_out:
+    return "Monitor operation timed out";
   }
 
   return "Unknown error";
@@ -1801,8 +1726,23 @@ boost::system::error_condition monc_error_category::default_error_condition(int 
     return boost::system::errc::operation_canceled;
   case session_reset:
     return boost::system::errc::resource_unavailable_try_again;
+  case rank_dne:
+  case mon_dne:
+    return ceph::errc::not_in_map;
+  case timed_out:
+    return boost::system::errc::timed_out;
   }
   return { ev, *this };
+}
+
+bool monc_error_category::equivalent(int ev, const boost::system::error_condition& c) const noexcept {
+  using namespace ::monc_errc;
+  switch (ev) {
+  case rank_dne:
+  case mon_dne:
+      return c == boost::system::errc::no_such_file_or_directory;
+  }
+  return default_error_condition(ev) == c;
 }
 
 int monc_error_category::from_code(int ev) const noexcept {
@@ -1814,6 +1754,12 @@ int monc_error_category::from_code(int ev) const noexcept {
     return -ECANCELED;
   case session_reset:
     return -EAGAIN;
+  case rank_dne:
+    return -ENOENT;
+  case mon_dne:
+    return -ENOENT;
+  case timed_out:
+    return -ETIMEDOUT;
   }
   return -EDOM;
 }

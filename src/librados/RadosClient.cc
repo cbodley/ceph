@@ -28,6 +28,7 @@
 #include "common/ceph_json.h"
 #include "common/errno.h"
 #include "common/ceph_json.h"
+#include "common/waiter.h"
 #include "include/buffer.h"
 #include "include/stringify.h"
 #include "include/util.h"
@@ -840,7 +841,20 @@ void librados::RadosClient::mon_command_async(const vector<string>& cmd,
                                               Context *on_finish)
 {
   lock.Lock();
-  monclient.start_mon_command(cmd, inbl, outbl, outs, on_finish);
+  monclient.start_mon_command(cmd, inbl,
+			      [outs, outbl,
+			       on_finish = std::unique_ptr<Context>(on_finish)]
+			      (boost::system::error_code e,
+			       std::string&& s,
+			       ceph::bufferlist&& b) mutable {
+				if (outs)
+				  *outs = std::move(s);
+				if (outbl)
+				  *outbl = std::move(b);
+				if (on_finish)
+				  on_finish.release()->complete(
+				    ceph::from_error_code(e));
+			      });
   lock.Unlock();
 }
 
@@ -871,38 +885,36 @@ int librados::RadosClient::mon_command(int rank, const vector<string>& cmd,
 				       const bufferlist &inbl,
 				       bufferlist *outbl, string *outs)
 {
-  Mutex mylock("RadosClient::mon_command::mylock");
-  Cond cond;
-  bool done;
-  int rval;
   lock.Lock();
-  monclient.start_mon_command(rank, cmd, inbl, outbl, outs,
-			       new C_SafeCond(&mylock, &cond, &done, &rval));
+  waiter<boost::system::error_code, std::string, ceph::bufferlist> w;
+  monclient.start_mon_command(rank, cmd, inbl, w.ref());
   lock.Unlock();
-  mylock.Lock();
-  while (!done)
-    cond.Wait(mylock);
-  mylock.Unlock();
-  return rval;
+  auto&& [ec, s, bl] = w.wait();
+
+  if (outs)
+    *outs = std::move(s);
+  if (outbl)
+    *outbl = std::move(bl);
+
+  return ceph::from_error_code(ec);
 }
 
 int librados::RadosClient::mon_command(string name, const vector<string>& cmd,
 				       const bufferlist &inbl,
 				       bufferlist *outbl, string *outs)
 {
-  Mutex mylock("RadosClient::mon_command::mylock");
-  Cond cond;
-  bool done;
-  int rval;
   lock.Lock();
-  monclient.start_mon_command(name, cmd, inbl, outbl, outs,
-			       new C_SafeCond(&mylock, &cond, &done, &rval));
+  waiter<boost::system::error_code, std::string, ceph::bufferlist> w;
+  monclient.start_mon_command(name, cmd, inbl, w.ref());
   lock.Unlock();
-  mylock.Lock();
-  while (!done)
-    cond.Wait(mylock);
-  mylock.Unlock();
-  return rval;
+  auto&& [ec, s, bl] = w.wait();
+
+  if (outs)
+    *outs = std::move(s);
+  if (outbl)
+    *outbl = std::move(bl);
+
+  return ceph::from_error_code(ec);
 }
 
 int librados::RadosClient::osd_command(int osd, vector<string>& cmd,
