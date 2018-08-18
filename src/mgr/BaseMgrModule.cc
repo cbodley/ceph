@@ -153,10 +153,9 @@ ceph_send_command(BaseMgrModule *self, PyObject *args)
     // can wait for those.
     auto c = new FunctionContext([command_c, self](int command_r){
       self->py_modules->get_objecter().wait_for_latest_osdmap(
-          new FunctionContext([command_c, command_r](int wait_r){
-            command_c->complete(command_r);
-          })
-      );
+	[command_c, command_r](boost::system::error_code) {
+	  command_c->complete(command_r);
+	});
     });
 
     self->py_modules->get_monc().start_mon_command(

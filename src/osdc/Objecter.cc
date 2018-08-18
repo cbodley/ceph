@@ -1373,14 +1373,12 @@ void Objecter::handle_osd_map(MOSDMap *m)
   _dump_active();
 
   // finish any Contexts that were waiting on a map update
-  map<epoch_t,list< pair< Context*, int > > >::iterator p =
-    waiting_for_map.begin();
+  auto p = waiting_for_map.begin();
   while (p != waiting_for_map.end() &&
 	 p->first <= osdmap->get_epoch()) {
     //go through the list and call the onfinish methods
-    for (list<pair<Context*, int> >::iterator i = p->second.begin();
-	 i != p->second.end(); ++i) {
-      i->first->complete(i->second);
+    for (auto& [c, ec] : p->second) {
+      ceph::async::post(std::move(c), ec);
     }
     waiting_for_map.erase(p++);
   }
@@ -1932,55 +1930,32 @@ void Objecter::wait_for_osd_map()
     return;
   }
 
+  boost::asio::async_completion<const boost::asio::use_future_t<>, OpSignature>
+    init(boost::asio::use_future);
+
   // Leave this since it goes with C_SafeCond
-  Mutex lock("");
-  Cond cond;
-  bool done;
-  lock.Lock();
-  C_SafeCond *context = new C_SafeCond(&lock, &cond, &done, NULL);
-  waiting_for_map[0].push_back(pair<Context*, int>(context, 0));
+  waiting_for_map[0].emplace_back(OpCompletion::create(service.get_executor(),
+						       std::move(init.completion_handler)),
+				  boost::system::error_code{});
   l.unlock();
-  while (!done)
-    cond.Wait(lock);
-  lock.Unlock();
+  auto f = init.result.get();
+  f.wait();
 }
 
-struct CB_Objecter_GetVersion {
-  Objecter *objecter;
-  Context *fin;
-  CB_Objecter_GetVersion(Objecter *o, Context *c) : objecter(o), fin(c) {}
-  void operator()(boost::system::error_code e, version_t newest, version_t oldest) {
-    if (!e) {
-      objecter->get_latest_version(oldest, newest, fin);
-    } else if (e == boost::system::errc::resource_unavailable_try_again) {
-      // try again as instructed
-      objecter->wait_for_latest_osdmap(fin);
-    } else {
-      // it doesn't return any other error codes!
-      ceph_abort();
-    }
-  }
-};
-
-void Objecter::wait_for_latest_osdmap(Context *fin)
+void Objecter::_get_latest_version(epoch_t oldest, epoch_t newest,
+				   std::unique_ptr<OpCompletion> fin,
+				   std::unique_lock<std::shared_mutex>&& l)
 {
-  ldout(cct, 10) << __func__ << dendl;
-  monc->get_version("osdmap", CB_Objecter_GetVersion(this, fin));
-}
-
-void Objecter::get_latest_version(epoch_t oldest, epoch_t newest, Context *fin)
-{
-  unique_lock wl(rwlock);
+  ceph_assert(fin);
   if (osdmap->get_epoch() >= newest) {
     ldout(cct, 10) << __func__ << " latest " << newest << ", have it" << dendl;
-    wl.unlock();
-    if (fin)
-      fin->complete(0);
-    return;
+    l.unlock();
+    ceph::async::defer(std::move(fin), boost::system::error_code{});
+  } else {
+    ldout(cct, 10) << __func__ << " latest " << newest << ", waiting" << dendl;
+    _wait_for_new_map(std::move(fin), newest, boost::system::error_code{});
+    l.unlock();
   }
-
-  ldout(cct, 10) << __func__ << " latest " << newest << ", waiting" << dendl;
-  _wait_for_new_map(fin, newest, 0);
 }
 
 void Objecter::maybe_request_map()
@@ -2009,10 +1984,11 @@ void Objecter::_maybe_request_map()
   }
 }
 
-void Objecter::_wait_for_new_map(Context *c, epoch_t epoch, int err)
+void Objecter::_wait_for_new_map(std::unique_ptr<OpCompletion> c, epoch_t epoch,
+				 boost::system::error_code ec)
 {
   // rwlock is locked unique
-  waiting_for_map[epoch].push_back(pair<Context *, int>(c, err));
+  waiting_for_map[epoch].emplace_back(std::move(c), ec);
   _maybe_request_map();
 }
 
@@ -2035,16 +2011,6 @@ bool Objecter::have_map(const epoch_t epoch)
   } else {
     return false;
   }
-}
-
-bool Objecter::wait_for_map(epoch_t epoch, Context *c, int err)
-{
-  unique_lock wl(rwlock);
-  if (osdmap->get_epoch() >= epoch) {
-    return true;
-  }
-  _wait_for_new_map(c, epoch, err);
-  return false;
 }
 
 void Objecter::_kick_requests(OSDSession *session,
@@ -4089,7 +4055,15 @@ void Objecter::handle_pool_op_reply(MPoolOpReply *m)
       if (osdmap->get_epoch() < m->epoch) {
 	ldout(cct, 20) << "waiting for client to reach epoch " << m->epoch
 		       << " before calling back" << dendl;
-	_wait_for_new_map(op->onfinish, m->epoch, m->replyCode);
+	_wait_for_new_map(OpCompletion::create(
+			    service.get_executor(),
+			    [o = op->onfinish](boost::system::error_code ec) {
+			      o->complete(ceph::from_error_code(ec));
+			    }),
+			  m->epoch,
+			  boost::system::error_code(
+			    m->replyCode,
+			    boost::system::system_category()));
       } else {
 	// map epoch changed, probably because a MOSDMap message
 	// sneaked in. Do caller-specified callback now or else

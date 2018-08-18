@@ -11582,9 +11582,8 @@ void Client::_setxattr_maybe_wait_for_osdmap(const char *name, const void *value
     });
 
     if (r == -ENOENT) {
-      C_SaferCond ctx;
-      objecter->wait_for_latest_osdmap(&ctx);
-      ctx.wait();
+      auto f = objecter->wait_for_latest_osdmap(boost::asio::use_future);
+      f.wait();
     }
   }
 }
@@ -14407,12 +14406,11 @@ int Client::start_reclaim(const std::string& uuid, unsigned flags,
 
   // use blacklist to check if target session was killed
   // (config option mds_session_blacklist_on_evict needs to be true)
-  C_SaferCond cond;
-  if (!objecter->wait_for_map(reclaim_osd_epoch, &cond)) {
-    ldout(cct, 10) << __func__ << ": waiting for OSD epoch " << reclaim_osd_epoch << dendl;
-    client_lock.Unlock();
-    cond.wait();
-    client_lock.Lock();
+  ldout(cct, 10) << __func__ << ": waiting for OSD epoch " << reclaim_osd_epoch << dendl;
+  try {
+    auto f = objecter->wait_for_map(reclaim_osd_epoch, boost::asio::use_future);
+  } catch (boost::system::system_error& e) {
+    return ceph::from_error_code(e.code());
   }
 
   bool blacklisted = objecter->with_osdmap(

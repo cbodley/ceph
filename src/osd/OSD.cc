@@ -9991,9 +9991,8 @@ void OSD::get_latest_osdmap()
 {
   dout(10) << __func__ << " -- start" << dendl;
 
-  C_SaferCond cond;
-  service.objecter->wait_for_latest_osdmap(&cond);
-  cond.wait();
+  auto f = service.objecter->wait_for_latest_osdmap(boost::asio::use_future);
+  f.wait();
 
   dout(10) << __func__ << " -- finish" << dendl;
 }

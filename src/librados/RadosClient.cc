@@ -595,17 +595,13 @@ int librados::RadosClient::wait_for_osdmap()
 
 int librados::RadosClient::wait_for_latest_osdmap()
 {
-  Mutex mylock("RadosClient::wait_for_latest_osdmap");
-  Cond cond;
-  bool done;
-
-  objecter->wait_for_latest_osdmap(new C_SafeCond(&mylock, &cond, &done));
-
-  mylock.Lock();
-  while (!done)
-    cond.Wait(mylock);
-  mylock.Unlock();
-
+  auto f = objecter->wait_for_latest_osdmap(boost::asio::use_future);
+  f.wait();
+  try {
+    f.get();
+  } catch (const boost::system::system_error& e) {
+    return ceph::from_error_code(e.code());
+  }
   return 0;
 }
 

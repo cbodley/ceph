@@ -32,12 +32,15 @@
 #include "include/rados/rados_types.hpp"
 
 #include "common/admin_socket.h"
+#include "common/async/completion.h"
 #include "common/ceph_time.h"
 #include "common/ceph_timer.h"
 #include "common/config_obs.h"
 #include "common/shunique_lock.h"
 #include "common/zipkin_trace.h"
 #include "common/Throttle.h"
+
+#include "mon/MonClient.h"
 
 #include "messages/MOSDOp.h"
 #include "msg/Dispatcher.h"
@@ -47,7 +50,6 @@
 class Context;
 class Messenger;
 class OSDMap;
-class MonClient;
 class Message;
 
 class MPoolOpReply;
@@ -1216,6 +1218,9 @@ struct ObjectOperation {
 
 class Objecter : public md_config_obs_t, public Dispatcher {
 public:
+  using OpSignature = void(boost::system::error_code);
+  using OpCompletion = ceph::async::Completion<OpSignature>;
+
   // config observer bits
   const char** get_tracked_conf_keys() const override;
   void handle_conf_change(const ConfigProxy& conf,
@@ -1912,7 +1917,9 @@ public:
   std::map<ceph_tid_t, Op*> check_latest_map_ops;
   std::map<ceph_tid_t, CommandOp*> check_latest_map_commands;
 
-  std::map<epoch_t,std::list< std::pair<Context*, int> > > waiting_for_map;
+  std::map<epoch_t,
+	   std::vector<std::pair<std::unique_ptr<OpCompletion>,
+				 boost::system::error_code>>> waiting_for_map;
 
   ceph::timespan mon_timeout;
   ceph::timespan osd_timeout;
@@ -2196,11 +2203,85 @@ public:
   void set_client_incarnation(int inc) { client_inc = inc; }
 
   bool have_map(epoch_t epoch);
-  /// wait for epoch; true if we already have it
-  bool wait_for_map(epoch_t epoch, Context *c, int err=0);
-  void _wait_for_new_map(Context *c, epoch_t epoch, int err=0);
-  void wait_for_latest_osdmap(Context *fin);
-  void get_latest_version(epoch_t oldest, epoch_t neweset, Context *fin);
+
+  struct CB_Objecter_GetVersion {
+    Objecter *objecter;
+    std::unique_ptr<OpCompletion> fin;
+
+    CB_Objecter_GetVersion(Objecter *o, std::unique_ptr<OpCompletion> c)
+      : objecter(o), fin(std::move(c)) {}
+    void operator()(boost::system::error_code ec, version_t newest,
+		    version_t oldest) {
+      if (ec == boost::system::errc::resource_unavailable_try_again) {
+	// try again as instructed
+	objecter->wait_for_latest_osdmap(std::move(fin));
+      } else if (ec) {
+	ceph::async::post(std::move(fin), ec);
+      } else {
+	auto l = std::unique_lock(objecter->rwlock);
+	objecter->_get_latest_version(oldest, newest, std::move(fin),
+				      std::move(l));
+      }
+    }
+  };
+
+  template<typename CompletionToken>
+  typename boost::asio::async_result<CompletionToken, OpSignature>::return_type
+  wait_for_map(epoch_t epoch, CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, OpSignature> init(token);
+
+    if (osdmap->get_epoch() >= epoch) {
+      boost::asio::post(service,
+			ceph::async::bind_handler(
+			  std::move(init.completion_handler),
+			  boost::system::error_code()));
+    } else {
+      monc->get_version("osdmap",
+			CB_Objecter_GetVersion(
+			  this,
+			  OpCompletion::create(service.get_executor(),
+					       std::move(init.completion_handler))));
+    }
+    return init.result.get();
+  }
+
+  void _wait_for_new_map(std::unique_ptr<OpCompletion>, epoch_t epoch,
+			 boost::system::error_code = {});
+
+  template<typename CompletionToken>
+  typename boost::asio::async_result<CompletionToken, OpSignature>::return_type
+  wait_for_latest_osdmap(CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, OpSignature> init(token);
+
+    monc->get_version("osdmap",
+		      CB_Objecter_GetVersion(
+			this,
+			OpCompletion::create(service.get_executor(),
+					     std::move(init.completion_handler))));
+    return init.result.get();
+  }
+
+  void wait_for_latest_osdmap(std::unique_ptr<OpCompletion> c) {
+    monc->get_version("osdmap",
+		      CB_Objecter_GetVersion(this, std::move(c)));
+  }
+
+  template<typename CompletionToken>
+  auto get_latest_version(epoch_t oldest, epoch_t newest,
+			  CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, OpSignature> init(token);
+    unique_lock wl(rwlock);
+    _get_latest_version(oldest, newest,
+			OpCompletion::create(
+			  service.get_executor(),
+			  std::move(init.completion_handler)),
+			std::move(wl));
+    return init.result.get();
+  }
+
+  void _get_latest_version(epoch_t oldest, epoch_t neweset,
+			   std::unique_ptr<OpCompletion> fin,
+			   std::unique_lock<std::shared_mutex>&& ul);
 
   /** Get the current set of global op flags */
   int get_global_op_flags() const { return global_op_flags; }
