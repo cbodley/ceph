@@ -1172,7 +1172,7 @@ void *RGWHTTPManager::reqs_thread_entry()
 
   auto all_reqs = std::move(reqs);
   for (auto iter : all_reqs) {
-    _finish_request(iter.second, -ECANCELED);
+    _unlink_request(iter.second);
   }
 
   reqs.clear();
