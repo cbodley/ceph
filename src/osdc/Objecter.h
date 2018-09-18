@@ -1739,50 +1739,44 @@ public:
   };
 
   struct LingerOp : public RefCountedObject {
-    uint64_t linger_id;
-
-    op_target_t target;
-
-    snapid_t snap;
+    uint64_t linger_id{0};
+    op_target_t target{object_t(), object_locator_t(), 0};
+    snapid_t snap{CEPH_NOSNAP};
     SnapContext snapc;
     ceph::real_time mtime;
 
     std::vector<OSDOp> ops;
     ceph::buffer::list inbl;
-    ceph::buffer::list *poutbl;
-    version_t *pobjver;
+    ceph::buffer::list* poutbl{nullptr};
+    version_t *pobjver{nullptr};
 
-    bool is_watch;
+    bool is_watch{false};
     ceph::coarse_mono_time watch_valid_thru; ///< send time for last acked ping
-    int last_error;  ///< error from last failed ping|reconnect, if any
+    int last_error{0};  ///< error from last failed ping|reconnect, if any
     std::shared_mutex watch_lock;
-    using lock_guard = std::unique_lock<decltype(watch_lock)>;
-    using unique_lock = std::unique_lock<decltype(watch_lock)>;
-    using shared_lock = boost::shared_lock<decltype(watch_lock)>;
-    using shunique_lock = ceph::shunique_lock<decltype(watch_lock)>;
 
     // queue of pending async operations, with the timestamp of
     // when they were queued.
     std::list<ceph::coarse_mono_time> watch_pending_async;
 
-    uint32_t register_gen;
-    bool registered;
-    bool canceled;
-    Context *on_reg_commit;
+    uint32_t register_gen{0};
+    bool registered{false};
+    bool canceled{false};
+    Context *on_reg_commit{nullptr};
 
-    Context *on_notify_finish;
-    ceph::buffer::list *notify_result_bl;
-    uint64_t notify_id;
+    Context *on_notify_finish{nullptr};
+    ceph::buffer::list* notify_result_bl{nullptr};
+    uint64_t notify_id{0};
 
-    WatchContext *watch_context;
+    WatchContext *watch_context{nullptr};
 
-    OSDSession *session;
+    OSDSession *session{nullptr};
 
     Objecter *objecter;
-    int ctx_budget;
-    ceph_tid_t register_tid;
-    ceph_tid_t ping_tid;
-    epoch_t map_dne_bound;
+    int ctx_budget{-1};
+    ceph_tid_t register_tid{0};
+    ceph_tid_t ping_tid{0};
+    epoch_t map_dne_bound{0};
 
     void _queued_async() {
       // watch_lock ust be locked unique
@@ -1794,24 +1788,8 @@ public:
       watch_pending_async.pop_front();
     }
 
-    explicit LingerOp(Objecter *o) : linger_id(0),
-			    target(object_t(), object_locator_t(), 0),
-			    snap(CEPH_NOSNAP), poutbl(NULL), pobjver(NULL),
-			    is_watch(false), last_error(0),
-			    register_gen(0),
-			    registered(false),
-			    canceled(false),
-			    on_reg_commit(NULL),
-			    on_notify_finish(NULL),
-			    notify_result_bl(NULL),
-			    notify_id(0),
-			    watch_context(NULL),
-			    session(NULL),
-			    objecter(o),
-			    ctx_budget(-1),
-			    register_tid(0),
-			    ping_tid(0),
-			    map_dne_bound(0) {}
+    explicit LingerOp(Objecter *o)
+      : objecter(o) {}
 
     const LingerOp &operator=(const LingerOp& r) = delete;
     LingerOp(const LingerOp& o) = delete;
