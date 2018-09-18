@@ -103,7 +103,7 @@ def bilog_list(zone, bucket, args = None):
     return json.loads(bilog)
 
 def bilog_autotrim(zone, args = None):
-    zone.cluster.admin(['bilog', 'autotrim'] + (args or []))
+    zone.cluster.admin(['bilog', 'autotrim'] + (args or []), debug_rgw=20, debug_ms=1)
 
 def parse_meta_sync_status(meta_sync_status_json):
     meta_sync_status_json = meta_sync_status_json.decode('utf-8')
