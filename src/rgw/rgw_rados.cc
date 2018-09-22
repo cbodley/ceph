@@ -2531,6 +2531,20 @@ RGWPutObjProcessor_Aio::~RGWPutObjProcessor_Aio()
   }
 }
 
+int RGWPutObjProcessor_Aio::process(rgw::putobj::WriteList completed)
+{
+  std::optional<int> err; // return the first error code, if any
+  for (const auto& c : completed) {
+    if (c.result >= 0) {
+      // track objects written successfully
+      written_objs.insert(c.obj);
+    } else if (!err) {
+      err = c.result;
+    }
+  }
+  return err.value_or(0);
+}
+
 int RGWPutObjProcessor_Aio::handle_obj_data(rgw_raw_obj& obj, const bufferlist& bl,
                                             off_t ofs, off_t abs_ofs, bool exclusive)
 {
@@ -2538,102 +2552,48 @@ int RGWPutObjProcessor_Aio::handle_obj_data(rgw_raw_obj& obj, const bufferlist& 
   if (obj_len < abs_ofs + len)
     obj_len = abs_ofs + len;
 
-  // For the first call pass -1 as the offset to
-  // do a write_full.
-  void *handle;
-  int r = store->aio_put_obj_data(NULL, obj, bl, ((ofs != 0) ? ofs : -1), exclusive, &handle);
+  // wait for throttle
+  auto handle = throttle->get({obj, len});
+
+  // check for previous failures
+  int r = process(std::move(handle.completed));
   if (r < 0) {
     return r;
   }
-  // we may need to handle EEXIST before submitting more writes
-  const bool need_to_wait = exclusive;
-  return throttle_pending(handle, obj, len, need_to_wait);
-}
 
-struct put_obj_aio_info RGWPutObjProcessor_Aio::pop_pending()
-{
-  struct put_obj_aio_info info;
-  info = pending.front();
-  pending.pop_front();
-  pending_size -= info.size;
-  return info;
-}
-
-int RGWPutObjProcessor_Aio::wait_pending_front()
-{
-  if (pending.empty()) {
-    return 0;
-  }
-  struct put_obj_aio_info info = pop_pending();
-  int ret = store->aio_wait(info.handle);
-
-  if (ret >= 0) {
-    add_written_obj(info.obj);
+  rgw_rados_ref ref;
+  r = store->get_raw_obj_ref(obj, &ref);
+  if (r < 0) {
+    return r;
   }
 
-  return ret;
-}
+  ObjectWriteOperation op;
+  if (exclusive)
+    op.create(true);
+  if (ofs == 0) {
+    op.write_full(bl);
+  } else {
+    op.write(ofs, bl);
+  }
+  r = ref.ioctx.aio_operate(ref.oid, handle.completion, &op);
+  if (r < 0) {
+    return r;
+  }
+  handle.release();
 
-bool RGWPutObjProcessor_Aio::pending_has_completed()
-{
-  if (pending.empty())
-    return false;
-
-  struct put_obj_aio_info& info = pending.front();
-  return store->aio_completed(info.handle);
+  if (exclusive) {
+    // wait on the completion to check for EEXIST before submitting more writes
+    auto completed = throttle->drain();
+    ceph_assert(completed.size() == 1u);
+    return process(std::move(completed));
+  }
+  return 0;
 }
 
 int RGWPutObjProcessor_Aio::drain_pending()
 {
-  int ret = 0;
-  while (!pending.empty()) {
-    int r = wait_pending_front();
-    if (r < 0)
-      ret = r;
-  }
-  return ret;
-}
-
-int RGWPutObjProcessor_Aio::throttle_pending(void *handle, const rgw_raw_obj& obj,
-                                             uint64_t size, bool need_to_wait)
-{
-  bool _wait = need_to_wait;
-
-  if (handle) {
-    struct put_obj_aio_info info;
-    info.handle = handle;
-    info.obj = obj;
-    info.size = size;
-    pending_size += size;
-    pending.push_back(info);
-  }
-  size_t orig_size = pending_size;
-
-  /* first drain complete IOs */
-  while (pending_has_completed()) {
-    int r = wait_pending_front();
-    if (r < 0)
-      return r;
-
-    _wait = false;
-  }
-
-  /* resize window in case messages are draining too fast */
-  if (orig_size - pending_size >= window_size) {
-    window_size += store->ctx()->_conf->rgw_max_chunk_size;
-    uint64_t max_window_size = store->ctx()->_conf->rgw_put_obj_max_window_size;
-    if (window_size > max_window_size) {
-      window_size = max_window_size;
-    }
-  }
-
-  /* now throttle. Note that need_to_wait should only affect the first IO operation */
-  if (pending_size > window_size || _wait) {
-    int r = wait_pending_front();
-    if (r < 0)
-      return r;
-  }
-  return 0;
+  auto completed = throttle->drain();
+  return process(std::move(completed));
 }
 
 int RGWPutObjProcessor_Atomic::write_data(const bufferlist& bl, off_t ofs, bool exclusive)
@@ -2656,7 +2616,7 @@ int RGWPutObjProcessor_Aio::prepare(RGWRados *store, string *oid_rand)
 {
   RGWPutObjProcessor::prepare(store, oid_rand);
 
-  window_size = store->ctx()->_conf->rgw_put_obj_min_window_size;
+  throttle.emplace(store->ctx()->_conf->rgw_put_obj_min_window_size);
 
   return 0;
 }
@@ -7461,63 +7421,6 @@ int RGWRados::put_system_obj_data(void *ctx, rgw_raw_obj& obj, const bufferlist&
     objv_tracker->apply_write();
   }
   return 0;
-}
-
-/**
- * Write/overwrite an object to the bucket storage.
- * bucket: the bucket to store the object in
- * obj: the object name/key
- * data: the object contents/value
- * offset: the offet to write to in the object
- *         If this is -1, we will overwrite the whole object.
- * size: the amount of data to write (data must be this long)
- * attrs: all the given attrs are written to bucket storage for the given object
- * Returns: 0 on success, -ERR# otherwise.
- */
-
-int RGWRados::aio_put_obj_data(void *ctx, rgw_raw_obj& obj, const bufferlist& bl,
-			       off_t ofs, bool exclusive,
-                               void **handle)
-{
-  rgw_rados_ref ref;
-  int r = get_raw_obj_ref(obj, &ref);
-  if (r < 0) {
-    return r;
-  }
-
-  AioCompletion *c = librados::Rados::aio_create_completion(NULL, NULL, NULL);
-  *handle = c;
-  
-  ObjectWriteOperation op;
-
-  if (exclusive)
-    op.create(true);
-
-  if (ofs == -1) {
-    op.write_full(bl);
-  } else {
-    op.write(ofs, bl);
-  }
-  r = ref.ioctx.aio_operate(ref.oid, c, &op);
-  if (r < 0)
-    return r;
-
-  return 0;
-}
-
-int RGWRados::aio_wait(void *handle)
-{
-  AioCompletion *c = (AioCompletion *)handle;
-  c->wait_for_safe();
-  int ret = c->get_return_value();
-  c->release();
-  return ret;
-}
-
-bool RGWRados::aio_completed(void *handle)
-{
-  AioCompletion *c = (AioCompletion *)handle;
-  return c->is_safe();
 }
 
 // PutObj filter that buffers data so we don't try to compress tiny blocks.

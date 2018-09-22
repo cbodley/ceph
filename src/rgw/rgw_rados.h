@@ -24,6 +24,7 @@
 #include "rgw_metadata.h"
 #include "rgw_meta_sync_status.h"
 #include "rgw_period_puller.h"
+#include "rgw_putobj.h"
 #include "rgw_sync_module.h"
 #include "rgw_sync_log_trim.h"
 
@@ -2996,8 +2997,6 @@ public:
   virtual int put_system_obj_data(void *ctx, rgw_raw_obj& obj,
               const bufferlist& bl, off_t ofs, bool exclusive,
               RGWObjVersionTracker *objv_tracker = nullptr);
-  int aio_put_obj_data(void *ctx, rgw_raw_obj& obj, const bufferlist& bl,
-                        off_t ofs, bool exclusive, void **handle);
 
   int put_system_obj(void *ctx, rgw_raw_obj& obj, const bufferlist& data, bool exclusive,
               ceph::real_time *mtime, map<std::string, bufferlist>& attrs, RGWObjVersionTracker *objv_tracker,
@@ -3008,8 +3007,6 @@ public:
 
     return put_system_obj_impl(obj, data.length(), mtime, attrs, flags, data, objv_tracker, set_mtime);
   }
-  int aio_wait(void *handle);
-  bool aio_completed(void *handle);
 
   int on_last_entry_in_listing(RGWBucketInfo& bucket_info,
                                const std::string& obj_prefix,
@@ -3887,25 +3884,14 @@ public:
   bool is_canceled() { return canceled; }
 }; /* RGWPutObjProcessor */
 
-struct put_obj_aio_info {
-  void *handle;
-  rgw_raw_obj obj;
-  uint64_t size;
-};
-
 #define RGW_PUT_OBJ_MIN_WINDOW_SIZE_DEFAULT (16 * 1024 * 1024)
 
 class RGWPutObjProcessor_Aio : public RGWPutObjProcessor
 {
-  list<struct put_obj_aio_info> pending;
-  uint64_t window_size{RGW_PUT_OBJ_MIN_WINDOW_SIZE_DEFAULT};
-  uint64_t pending_size{0};
+  using Throttle = rgw::putobj::AioThrottle;
+  std::optional<Throttle> throttle; // initialized in prepare()
 
-  struct put_obj_aio_info pop_pending();
-  int wait_pending_front();
-  bool pending_has_completed();
-
-  int throttle_pending(void *handle, const rgw_raw_obj& obj, uint64_t size, bool need_to_wait);
+  int process(rgw::putobj::WriteList completed);
 
 protected:
   uint64_t obj_len{0};
