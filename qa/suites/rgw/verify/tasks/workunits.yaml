@@ -3,3 +3,4 @@ tasks:
     clients:
       client.0:
         - cls/test_cls_rgw.sh
+        - rgw/test_rgw_putobj.sh
