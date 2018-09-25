@@ -163,7 +163,7 @@ def assign_endpoints(ctx, config, default_cert):
     """
     Assign port numbers starting with port 7280.
     """
-    port = 7280
+    next_port = 7280
     role_endpoints = {}
 
     for role, client_config in config.iteritems():
@@ -181,8 +181,11 @@ def assign_endpoints(ctx, config, default_cert):
         else:
             ssl_certificate = None
 
+        port = client_config.get('port')
+        if port is None:
+            port = next_port
+            next_port += 1
         role_endpoints[role] = RGWEndpoint(remote.hostname, port, ssl_certificate)
-        port += 1
 
     return role_endpoints
 
