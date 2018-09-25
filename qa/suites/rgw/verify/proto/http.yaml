@@ -1,0 +1,4 @@
+overrides:
+  rgw:
+    client.0:
+      port: 80

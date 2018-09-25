@@ -12,3 +12,4 @@ overrides:
   rgw:
     client.0:
       ssl certificate: rgw.client.0
+      port: 443
