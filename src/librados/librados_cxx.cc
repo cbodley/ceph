@@ -155,10 +155,11 @@ void librados::ObjectOperation::assert_exists()
 {
   ceph_assert(impl);
   ::ObjectOperation *o = &impl->o;
-  o->stat(NULL, (ceph::real_time*) NULL, NULL);
+  o->stat(NULL, (ceph::real_time*) NULL, (int*)NULL);
 }
 
-void librados::ObjectOperation::exec(const char *cls, const char *method, bufferlist& inbl)
+void librados::ObjectOperation::exec(const char *cls, const char *method,
+				     bufferlist& inbl)
 {
   ceph_assert(impl);
   ::ObjectOperation *o = &impl->o;

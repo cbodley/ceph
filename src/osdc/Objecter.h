@@ -21,6 +21,8 @@
 #include <mutex>
 #include <memory>
 #include <sstream>
+#include <string>
+#include <string_view>
 #include <type_traits>
 
 #include <boost/thread/shared_mutex.hpp>
@@ -69,7 +71,7 @@ struct ObjectOperation {
   int flags = 0;
   int priority = 0;
 
-  std::vector<bufferlist*> out_bl;
+  std::vector<ceph::buffer::list*> out_bl;
   std::vector<fu2::unique_function<void(boost::system::error_code, int,
 				   const ceph::buffer::list& bl) &&>> out_handler;
   std::vector<int*> out_rval;
@@ -86,6 +88,16 @@ struct ObjectOperation {
     return ops.size();
   }
 
+  void clear() {
+    ops.clear();
+    flags = 0;
+    priority = 0;
+    out_bl.clear();
+    out_handler.clear();
+    out_rval.clear();
+    out_ec.clear();
+  }
+
   void set_last_op_flags(int flags) {
     ceph_assert(!ops.empty());
     ops.rbegin()->op.flags = flags;
@@ -93,7 +105,7 @@ struct ObjectOperation {
 
 
   void set_handler(fu2::unique_function<void(boost::system::error_code, int,
-					     const bufferlist&) &&> f) {
+					     const ceph::buffer::list&) &&> f) {
     if (f) {
       if (out_handler.back()) {
 	// This happens seldom enough that we may as well keep folding
@@ -103,7 +115,7 @@ struct ObjectOperation {
 	  [f = std::move(f),
 	   g = std::move(std::move(out_handler.back()))]
 	  (boost::system::error_code ec, int r,
-	   const bufferlist& bl) mutable {
+	   const ceph::buffer::list& bl) mutable {
 	    std::move(g)(ec, r, bl);
 	    std::move(f)(ec, r, bl);
 	  };
@@ -170,8 +182,26 @@ struct ObjectOperation {
       osd_op.indata.append(name, osd_op.op.xattr.name_len);
     osd_op.indata.append(data);
   }
-  void add_call(int op, const char *cname, const char *method,
-		ceph::buffer::list &indata,
+  void add_xattr(int op, std::string_view name, const ceph::buffer::list& data) {
+    OSDOp& osd_op = add_op(op);
+    osd_op.op.xattr.name_len = name.size();
+    osd_op.op.xattr.value_len = data.length();
+    osd_op.indata.append(name.data(), osd_op.op.xattr.name_len);
+    osd_op.indata.append(data);
+  }
+  void add_xattr_cmp(int op, std::string_view name, uint8_t cmp_op,
+		     uint8_t cmp_mode, const ceph::buffer::list& data) {
+    OSDOp& osd_op = add_op(op);
+    osd_op.op.xattr.name_len = name.size();
+    osd_op.op.xattr.value_len = data.length();
+    osd_op.op.xattr.cmp_op = cmp_op;
+    osd_op.op.xattr.cmp_mode = cmp_mode;
+    if (!name.empty())
+      osd_op.indata.append(name.data(), osd_op.op.xattr.name_len);
+    osd_op.indata.append(data);
+  }
+  void add_call(int op, std::string_view cname, std::string_view method,
+		const ceph::buffer::list &indata,
 		ceph::buffer::list *outbl, Context *ctx, int *prval) {
     OSDOp& osd_op = add_op(op);
 
@@ -180,11 +210,11 @@ struct ObjectOperation {
     out_bl[p] = outbl;
     out_rval[p] = prval;
 
-    osd_op.op.cls.class_len = strlen(cname);
-    osd_op.op.cls.method_len = strlen(method);
+    osd_op.op.cls.class_len = cname.size();
+    osd_op.op.cls.method_len = method.size();
     osd_op.op.cls.indata_len = indata.length();
-    osd_op.indata.append(cname, osd_op.op.cls.class_len);
-    osd_op.indata.append(method, osd_op.op.cls.method_len);
+    osd_op.indata.append(cname.data(), osd_op.op.cls.class_len);
+    osd_op.indata.append(method.data(), osd_op.op.cls.method_len);
     osd_op.indata.append(indata);
   }
   void add_pgls(int op, uint64_t count, collection_list_handle_t cookie,
@@ -256,17 +286,18 @@ struct ObjectOperation {
     o.op.flags = (excl ? CEPH_OSD_OP_FLAG_EXCL : 0);
   }
 
-  struct C_ObjectOperation_stat : public Context {
+  struct CB_ObjectOperation_stat {
     ceph::buffer::list bl;
     uint64_t *psize;
     ceph::real_time *pmtime;
     time_t *ptime;
     struct timespec *pts;
     int *prval;
-    C_ObjectOperation_stat(uint64_t *ps, ceph::real_time *pm, time_t *pt, struct timespec *_pts,
-			   int *prval)
-      : psize(ps), pmtime(pm), ptime(pt), pts(_pts), prval(prval) {}
-    void finish(int r) override {
+    boost::system::error_code* pec;
+    CB_ObjectOperation_stat(uint64_t *ps, ceph::real_time *pm, time_t *pt, struct timespec *_pts,
+			    int *prval, boost::system::error_code* pec)
+      : psize(ps), pmtime(pm), ptime(pt), pts(_pts), prval(prval), pec(pec) {}
+    void operator()(boost::system::error_code ec, int r, const ceph::buffer::list& bl) {
       using ceph::decode;
       if (r >= 0) {
 	auto p = bl.cbegin();
@@ -283,58 +314,70 @@ struct ObjectOperation {
 	    *ptime = ceph::real_clock::to_time_t(mtime);
 	  if (pts)
 	    *pts = ceph::real_clock::to_timespec(mtime);
-	} catch (ceph::buffer::error& e) {
+	} catch (const ceph::buffer::error& e) {
 	  if (prval)
 	    *prval = -EIO;
+	  if (pec)
+	    *pec = e.code();
 	}
       }
     }
   };
   void stat(uint64_t *psize, ceph::real_time *pmtime, int *prval) {
     add_op(CEPH_OSD_OP_STAT);
-    unsigned p = ops.size() - 1;
-    C_ObjectOperation_stat *h = new C_ObjectOperation_stat(psize, pmtime, NULL, NULL,
-							   prval);
-    out_bl[p] = &h->bl;
-    set_handler(h);
-    out_rval[p] = prval;
+    set_handler(CB_ObjectOperation_stat(psize, pmtime, nullptr, nullptr, prval,
+					nullptr));
+    out_rval.back() = prval;
+  }
+  void stat(uint64_t *psize, ceph::real_time *pmtime,
+	    boost::system::error_code* ec) {
+    add_op(CEPH_OSD_OP_STAT);
+    set_handler(CB_ObjectOperation_stat(psize, pmtime, nullptr, nullptr,
+					nullptr, ec));
+    out_ec.back() = ec;
   }
   void stat(uint64_t *psize, time_t *ptime, int *prval) {
     add_op(CEPH_OSD_OP_STAT);
-    unsigned p = ops.size() - 1;
-    C_ObjectOperation_stat *h = new C_ObjectOperation_stat(psize, NULL, ptime, NULL,
-							   prval);
-    out_bl[p] = &h->bl;
-    set_handler(h);
-    out_rval[p] = prval;
+    set_handler(CB_ObjectOperation_stat(psize, nullptr, ptime, nullptr, prval,
+					nullptr));
+    out_rval.back() = prval;
   }
   void stat(uint64_t *psize, struct timespec *pts, int *prval) {
     add_op(CEPH_OSD_OP_STAT);
-    unsigned p = ops.size() - 1;
-    C_ObjectOperation_stat *h = new C_ObjectOperation_stat(psize, NULL, NULL, pts,
-							   prval);
-    out_bl[p] = &h->bl;
-    set_handler(h);
-    out_rval[p] = prval;
+    set_handler(CB_ObjectOperation_stat(psize, nullptr, nullptr, pts, prval, nullptr));
+    out_rval.back() = prval;
   }
   // object cmpext
-  struct C_ObjectOperation_cmpext : public Context {
-    int *prval;
-    explicit C_ObjectOperation_cmpext(int *prval)
+  struct CB_ObjectOperation_cmpext {
+    int* prval = nullptr;
+    boost::system::error_code* ec = nullptr;
+    std::size_t* s = nullptr;
+    explicit CB_ObjectOperation_cmpext(int *prval)
       : prval(prval) {}
+    CB_ObjectOperation_cmpext(boost::system::error_code* ec, std::size_t* s)
+      : ec(ec), s(s) {}
 
-    void finish(int r) {
+    void operator()(boost::system::error_code ec, int r, const ceph::buffer::list&) {
       if (prval)
         *prval = r;
+      if (this->ec)
+	*this->ec = ec;
+      if (s)
+	*s = static_cast<std::size_t>(-(MAX_ERRNO - r));
     }
   };
 
   void cmpext(uint64_t off, ceph::buffer::list& cmp_bl, int *prval) {
     add_data(CEPH_OSD_OP_CMPEXT, off, cmp_bl.length(), cmp_bl);
-    unsigned p = ops.size() - 1;
-    C_ObjectOperation_cmpext *h = new C_ObjectOperation_cmpext(prval);
-    set_handler(h);
-    out_rval[p] = prval;
+    set_handler(CB_ObjectOperation_cmpext(prval));
+    out_rval.back() = prval;
+  }
+
+  void cmpext(uint64_t off, ceph::buffer::list&& cmp_bl, boost::system::error_code* ec,
+	      std::size_t* s) {
+    add_data(CEPH_OSD_OP_CMPEXT, off, cmp_bl.length(), cmp_bl);
+    set_handler(CB_ObjectOperation_cmpext(ec, s));
+    out_ec.back() = ec;
   }
 
   // Used by C API
@@ -342,10 +385,8 @@ struct ObjectOperation {
     ceph::buffer::list cmp_bl;
     cmp_bl.append(cmp_buf, cmp_len);
     add_data(CEPH_OSD_OP_CMPEXT, off, cmp_len, cmp_bl);
-    unsigned p = ops.size() - 1;
-    C_ObjectOperation_cmpext *h = new C_ObjectOperation_cmpext(prval);
-    set_handler(h);
-    out_rval[p] = prval;
+    set_handler(CB_ObjectOperation_cmpext(prval));
+    out_rval.back() = prval;
   }
 
   void read(uint64_t off, uint64_t len, ceph::buffer::list *pbl, int *prval,
@@ -358,17 +399,26 @@ struct ObjectOperation {
     set_handler(ctx);
   }
 
-  struct C_ObjectOperation_sparse_read : public Context {
+  void read(uint64_t off, uint64_t len, boost::system::error_code* ec,
+	    ceph::buffer::list* pbl) {
     ceph::buffer::list bl;
-    ceph::buffer::list *data_bl;
-    std::map<uint64_t, uint64_t> *extents;
-    int *prval;
-    C_ObjectOperation_sparse_read(ceph::buffer::list *data_bl,
-				  std::map<uint64_t, uint64_t> *extents,
-				  int *prval)
-      : data_bl(data_bl), extents(extents), prval(prval) {}
-    void finish(int r) override {
-      using ceph::decode;
+    add_data(CEPH_OSD_OP_READ, off, len, bl);
+    out_ec.back() = ec;
+    out_bl.back() = pbl;
+  }
+
+  template<typename Ex>
+  struct CB_ObjectOperation_sparse_read {
+    ceph::buffer::list* data_bl;
+    Ex* extents;
+    int* prval;
+    boost::system::error_code* pec;
+    CB_ObjectOperation_sparse_read(ceph::buffer::list* data_bl,
+				   Ex* extents,
+				   int* prval,
+				   boost::system::error_code* pec)
+      : data_bl(data_bl), extents(extents), prval(prval), pec(pec) {}
+    void operator()(boost::system::error_code ec, int r, const buffer::list& bl) {
       auto iter = bl.cbegin();
       if (r >= 0) {
         // NOTE: it's possible the sub-op has not been executed but the result
@@ -378,26 +428,36 @@ struct ObjectOperation {
 	  try {
 	    decode(*extents, iter);
 	    decode(*data_bl, iter);
-	  } catch (ceph::buffer::error& e) {
+	  } catch (const ceph::buffer::error& e) {
 	    if (prval)
               *prval = -EIO;
+	    if (pec)
+	      *pec = e.code();
 	  }
         } else if (prval) {
           *prval = -EIO;
-        }
+	  if (pec)
+	    *pec = boost::system::error_code(EIO,
+					     boost::system::system_category());
+	}
       }
     }
   };
-  void sparse_read(uint64_t off, uint64_t len, std::map<uint64_t,uint64_t> *m,
-		   ceph::buffer::list *data_bl, int *prval) {
+  void sparse_read(uint64_t off, uint64_t len, std::map<uint64_t, uint64_t>* m,
+		   buffer::list* data_bl, int* prval) {
     ceph::buffer::list bl;
     add_data(CEPH_OSD_OP_SPARSE_READ, off, len, bl);
-    unsigned p = ops.size() - 1;
-    C_ObjectOperation_sparse_read *h =
-      new C_ObjectOperation_sparse_read(data_bl, m, prval);
-    out_bl[p] = &h->bl;
-    set_handler(h);
-    out_rval[p] = prval;
+    set_handler(CB_ObjectOperation_sparse_read(data_bl, m, prval, nullptr));
+    out_rval.back() = prval;
+  }
+  void sparse_read(uint64_t off, uint64_t len,
+		   boost::system::error_code* ec,
+		   std::vector<std::pair<uint64_t, uint64_t>>* m,
+		   buffer::list* data_bl) {
+    ceph::buffer::list bl;
+    add_data(CEPH_OSD_OP_SPARSE_READ, off, len, bl);
+    set_handler(CB_ObjectOperation_sparse_read(data_bl, m, nullptr, ec));
+    out_ec.back() = ec;
   }
   void write(uint64_t off, ceph::buffer::list& bl,
 	     uint64_t truncate_size,
@@ -464,28 +524,37 @@ struct ObjectOperation {
     out_bl[p] = pbl;
     out_rval[p] = prval;
   }
-  struct C_ObjectOperation_decodevals : public Context {
-    uint64_t max_entries;
+  void getxattr(std::string_view name, boost::system::error_code* ec,
+		buffer::list *pbl) {
     ceph::buffer::list bl;
-    std::map<std::string,ceph::buffer::list> *pattrs;
-    bool *ptruncated;
-    int *prval;
-    C_ObjectOperation_decodevals(uint64_t m, std::map<std::string,ceph::buffer::list> *pa,
-				 bool *pt, int *pr)
-      : max_entries(m), pattrs(pa), ptruncated(pt), prval(pr) {
+    add_xattr(CEPH_OSD_OP_GETXATTR, name, bl);
+    out_bl.back() = pbl;
+    out_ec.back() = ec;
+  }
+
+  template<typename Vals>
+  struct CB_ObjectOperation_decodevals {
+    uint64_t max_entries;
+    Vals* pattrs;
+    bool* ptruncated;
+    int* prval;
+    boost::system::error_code* pec;
+    CB_ObjectOperation_decodevals(uint64_t m, Vals* pa,
+				  bool *pt, int *pr,
+				  boost::system::error_code* pec)
+      : max_entries(m), pattrs(pa), ptruncated(pt), prval(pr), pec(pec) {
       if (ptruncated) {
 	*ptruncated = false;
       }
     }
-    void finish(int r) override {
-      using ceph::decode;
+    void operator()(boost::system::error_code ec, int r, const ceph::buffer::list& bl) {
       if (r >= 0) {
 	auto p = bl.cbegin();
 	try {
 	  if (pattrs)
 	    decode(*pattrs, p);
 	  if (ptruncated) {
-	    std::map<std::string,ceph::buffer::list> ignore;
+	    Vals ignore;
 	    if (!pattrs) {
 	      decode(ignore, p);
 	      pattrs = &ignore;
@@ -493,34 +562,36 @@ struct ObjectOperation {
 	    if (!p.end()) {
 	      decode(*ptruncated, p);
 	    } else {
-	      // the OSD did not provide this.  since old OSDs do not
+	      // the OSD did not provide this.  Since old OSDs do not
 	      // enfoce omap result limits either, we can infer it from
 	      // the size of the result
 	      *ptruncated = (pattrs->size() == max_entries);
 	    }
 	  }
-	}
-	catch (ceph::buffer::error& e) {
+	} catch (const ceph::buffer::error& e) {
 	  if (prval)
 	    *prval = -EIO;
+	  if (pec)
+	    *pec = e.code();
 	}
       }
     }
   };
-  struct C_ObjectOperation_decodekeys : public Context {
+  template<typename Keys>
+  struct CB_ObjectOperation_decodekeys {
     uint64_t max_entries;
-    ceph::buffer::list bl;
-    std::set<std::string> *pattrs;
+    Keys* pattrs;
     bool *ptruncated;
     int *prval;
-    C_ObjectOperation_decodekeys(uint64_t m, std::set<std::string> *pa, bool *pt,
-				 int *pr)
-      : max_entries(m), pattrs(pa), ptruncated(pt), prval(pr) {
+    boost::system::error_code* pec;
+    CB_ObjectOperation_decodekeys(uint64_t m, Keys* pa, bool *pt,
+				  int *pr, boost::system::error_code* pec)
+      : max_entries(m), pattrs(pa), ptruncated(pt), prval(pr), pec(pec) {
       if (ptruncated) {
 	*ptruncated = false;
       }
     }
-    void finish(int r) override {
+    void operator()(boost::system::error_code ec, int r, const ceph::buffer::list& bl) {
       if (r >= 0) {
 	using ceph::decode;
 	auto p = bl.cbegin();
@@ -528,7 +599,7 @@ struct ObjectOperation {
 	  if (pattrs)
 	    decode(*pattrs, p);
 	  if (ptruncated) {
-	    std::set<std::string> ignore;
+	    Keys ignore;
 	    if (!pattrs) {
 	      decode(ignore, p);
 	      pattrs = &ignore;
@@ -542,22 +613,23 @@ struct ObjectOperation {
 	      *ptruncated = (pattrs->size() == max_entries);
 	    }
 	  }
-	}
-	catch (ceph::buffer::error& e) {
+	} catch (const ceph::buffer::error& e) {
 	  if (prval)
 	    *prval = -EIO;
+	  if (pec)
+	    *pec = e.code();
 	}
       }
     }
   };
-  struct C_ObjectOperation_decodewatchers : public Context {
-    ceph::buffer::list bl;
-    std::list<obj_watch_t> *pwatchers;
-    int *prval;
-    C_ObjectOperation_decodewatchers(std::list<obj_watch_t> *pw, int *pr)
-      : pwatchers(pw), prval(pr) {}
-    void finish(int r) override {
-      using ceph::decode;
+  template<typename Watchers>
+  struct CB_ObjectOperation_decodewatchers {
+    Watchers* pwatchers;
+    int* prval;
+    boost::system::error_code* pec;
+    CB_ObjectOperation_decodewatchers(Watchers* pw, int* pr, boost::system::error_code* pec)
+      : pwatchers(pw), prval(pr), pec(pec) {}
+    void operator()(boost::system::error_code ec, int r, const ceph::buffer::list& bl) {
       if (r >= 0) {
 	auto p = bl.cbegin();
 	try {
@@ -575,21 +647,23 @@ struct ObjectOperation {
 	      pwatchers->push_back(std::move(ow));
 	    }
 	  }
-	}
-	catch (ceph::buffer::error& e) {
+	} catch (const ceph::buffer::error& e) {
 	  if (prval)
 	    *prval = -EIO;
+	  if (pec)
+	    *pec = e.code();
 	}
       }
     }
   };
-  struct C_ObjectOperation_decodesnaps : public Context {
-    ceph::buffer::list bl;
+  struct CB_ObjectOperation_decodesnaps {
     librados::snap_set_t *psnaps;
     int *prval;
-    C_ObjectOperation_decodesnaps(librados::snap_set_t *ps, int *pr)
-      : psnaps(ps), prval(pr) {}
-    void finish(int r) override {
+    boost::system::error_code* pec;
+    CB_ObjectOperation_decodesnaps(librados::snap_set_t* ps, int* pr,
+				   boost::system::error_code* pec)
+      : psnaps(ps), prval(pr), pec(pec) {}
+    void operator()(boost::system::error_code ec, int r, const ceph::buffer::list& bl) {
       if (r >= 0) {
 	using ceph::decode;
 	auto p = bl.cbegin();
@@ -598,7 +672,9 @@ struct ObjectOperation {
 	  decode(resp, p);
 	  if (psnaps) {
 	    psnaps->clones.clear();
-	    for (auto ci = resp.clones.begin(); ci != resp.clones.end(); ++ci) {
+	    for (auto ci = resp.clones.begin();
+		 ci != resp.clones.end();
+		 ++ci) {
 	      librados::clone_info_t clone;
 
 	      clone.cloneid = ci->cloneid;
@@ -612,9 +688,11 @@ struct ObjectOperation {
 	    }
 	    psnaps->seq = resp.seq;
 	  }
-	} catch (ceph::buffer::error& e) {
+	} catch (const ceph::buffer::error& e) {
 	  if (prval)
 	    *prval = -EIO;
+	  if (pec)
+	    *pec = e.code();
 	}
       }
     }
@@ -622,18 +700,24 @@ struct ObjectOperation {
   void getxattrs(std::map<std::string,ceph::buffer::list> *pattrs, int *prval) {
     add_op(CEPH_OSD_OP_GETXATTRS);
     if (pattrs || prval) {
-      unsigned p = ops.size() - 1;
-      C_ObjectOperation_decodevals *h
-	= new C_ObjectOperation_decodevals(0, pattrs, nullptr, prval);
-      set_handler(h);
-      out_bl[p] = &h->bl;
-      out_rval[p] = prval;
+      set_handler(CB_ObjectOperation_decodevals(0, pattrs, nullptr, prval,
+						nullptr));
+      out_rval.back() = prval;
     }
+  }
+  void getxattrs(boost::system::error_code* ec,
+		 boost::container::flat_map<std::string, ceph::buffer::list> *pattrs) {
+    add_op(CEPH_OSD_OP_GETXATTRS);
+    set_handler(CB_ObjectOperation_decodevals(0, pattrs, nullptr, nullptr, ec));
+    out_ec.back() = ec;
   }
   void setxattr(const char *name, const ceph::buffer::list& bl) {
     add_xattr(CEPH_OSD_OP_SETXATTR, name, bl);
   }
-  void setxattr(const char *name, const std::string& s) {
+  void setxattr(std::string_view name, const ceph::buffer::list& bl) {
+    add_xattr(CEPH_OSD_OP_SETXATTR, name, bl);
+  }
+  void setxattr(const char *name, const string& s) {
     ceph::buffer::list bl;
     bl.append(s);
     add_xattr(CEPH_OSD_OP_SETXATTR, name, bl);
@@ -642,11 +726,19 @@ struct ObjectOperation {
 		const ceph::buffer::list& bl) {
     add_xattr_cmp(CEPH_OSD_OP_CMPXATTR, name, cmp_op, cmp_mode, bl);
   }
+  void cmpxattr(std::string_view name, uint8_t cmp_op, uint8_t cmp_mode,
+		const ceph::buffer::list& bl) {
+    add_xattr_cmp(CEPH_OSD_OP_CMPXATTR, name, cmp_op, cmp_mode, bl);
+  }
   void rmxattr(const char *name) {
     ceph::buffer::list bl;
     add_xattr(CEPH_OSD_OP_RMXATTR, name, bl);
   }
-  void setxattrs(std::map<std::string, ceph::buffer::list>& attrs) {
+  void rmxattr(std::string_view name) {
+    ceph::buffer::list bl;
+    add_xattr(CEPH_OSD_OP_RMXATTR, name, bl);
+  }
+  void setxattrs(map<string, ceph::buffer::list>& attrs) {
     using ceph::encode;
     ceph::buffer::list bl;
     encode(attrs, bl);
@@ -679,13 +771,27 @@ struct ObjectOperation {
     op.op.extent.length = bl.length();
     op.indata.claim_append(bl);
     if (prval || ptruncated || out_set) {
-      unsigned p = ops.size() - 1;
-      C_ObjectOperation_decodekeys *h =
-	new C_ObjectOperation_decodekeys(max_to_get, out_set, ptruncated, prval);
-      set_handler(h);
-      out_bl[p] = &h->bl;
-      out_rval[p] = prval;
+      set_handler(CB_ObjectOperation_decodekeys(max_to_get, out_set, ptruncated, prval,
+						nullptr));
+      out_rval.back() = prval;
     }
+  }
+  void omap_get_keys(std::optional<std::string_view> start_after,
+		     uint64_t max_to_get,
+		     boost::system::error_code* ec,
+		     boost::container::flat_set<std::string> *out_set,
+		     bool *ptruncated) {
+    OSDOp& op = add_op(CEPH_OSD_OP_OMAPGETKEYS);
+    ceph::buffer::list bl;
+    encode(start_after ? *start_after : std::string_view{}, bl);
+    encode(max_to_get, bl);
+    op.op.extent.offset = 0;
+    op.op.extent.length = bl.length();
+    op.indata.claim_append(bl);
+    set_handler(
+      CB_ObjectOperation_decodekeys(max_to_get, out_set, ptruncated, nullptr,
+				    ec));
+    out_ec.back() = ec;
   }
 
   void omap_get_vals(const std::string &start_after,
@@ -704,19 +810,34 @@ struct ObjectOperation {
     op.op.extent.length = bl.length();
     op.indata.claim_append(bl);
     if (prval || out_set || ptruncated) {
-      unsigned p = ops.size() - 1;
-      C_ObjectOperation_decodevals *h =
-	new C_ObjectOperation_decodevals(max_to_get, out_set, ptruncated, prval);
-      set_handler(h);
-      out_bl[p] = &h->bl;
-      out_rval[p] = prval;
+      set_handler(CB_ObjectOperation_decodevals(max_to_get, out_set, ptruncated,
+						prval, nullptr));
+      out_rval.back() = prval;
     }
   }
 
+  void omap_get_vals(std::optional<std::string_view> start_after,
+		     std::optional<std::string_view> filter_prefix,
+		     uint64_t max_to_get,
+		     boost::system::error_code* ec,
+		     boost::container::flat_map<std::string, ceph::buffer::list> *out_set,
+		     bool *ptruncated) {
+    OSDOp &op = add_op(CEPH_OSD_OP_OMAPGETVALS);
+    ceph::buffer::list bl;
+    encode(start_after ? *start_after : string_view{}, bl);
+    encode(max_to_get, bl);
+    encode(filter_prefix ? *start_after : string_view{}, bl);
+    op.op.extent.offset = 0;
+    op.op.extent.length = bl.length();
+    op.indata.claim_append(bl);
+    set_handler(CB_ObjectOperation_decodevals(max_to_get, out_set, ptruncated,
+					      nullptr, ec));
+    out_ec.back() = ec;
+  }
+
   void omap_get_vals_by_keys(const std::set<std::string> &to_get,
-			    std::map<std::string, ceph::buffer::list> *out_set,
-			    int *prval) {
-    using ceph::encode;
+			     std::map<std::string, ceph::buffer::list> *out_set,
+			     int *prval) {
     OSDOp &op = add_op(CEPH_OSD_OP_OMAPGETVALSBYKEYS);
     ceph::buffer::list bl;
     encode(to_get, bl);
@@ -724,16 +845,28 @@ struct ObjectOperation {
     op.op.extent.length = bl.length();
     op.indata.claim_append(bl);
     if (prval || out_set) {
-      unsigned p = ops.size() - 1;
-      C_ObjectOperation_decodevals *h =
-	new C_ObjectOperation_decodevals(0, out_set, nullptr, prval);
-      set_handler(h);
-      out_bl[p] = &h->bl;
-      out_rval[p] = prval;
+      set_handler(CB_ObjectOperation_decodevals(0, out_set, nullptr, prval,
+						nullptr));
+      out_rval.back() = prval;
     }
   }
 
-  void omap_cmp(const std::map<std::string, std::pair<ceph::buffer::list,int> > &assertions,
+  void omap_get_vals_by_keys(
+    const boost::container::flat_set<std::string>& to_get,
+    boost::system::error_code* ec,
+    boost::container::flat_map<std::string, ceph::buffer::list> *out_set) {
+    OSDOp &op = add_op(CEPH_OSD_OP_OMAPGETVALSBYKEYS);
+    ceph::buffer::list bl;
+    encode(to_get, bl);
+    op.op.extent.offset = 0;
+    op.op.extent.length = bl.length();
+    op.indata.claim_append(bl);
+    set_handler(CB_ObjectOperation_decodevals(0, out_set, nullptr, nullptr,
+					      ec));
+    out_ec.back() = ec;
+  }
+
+  void omap_cmp(const std::map<std::string, pair<ceph::buffer::list,int> > &assertions,
 		int *prval) {
     using ceph::encode;
     OSDOp &op = add_op(CEPH_OSD_OP_OMAP_CMP);
@@ -746,6 +879,18 @@ struct ObjectOperation {
       unsigned p = ops.size() - 1;
       out_rval[p] = prval;
     }
+  }
+
+  void omap_cmp(const boost::container::flat_map<
+		  std::string, pair<ceph::buffer::list, int>>& assertions,
+		boost::system::error_code *ec) {
+    OSDOp &op = add_op(CEPH_OSD_OP_OMAP_CMP);
+    ceph::buffer::list bl;
+    encode(assertions, bl);
+    op.op.extent.offset = 0;
+    op.op.extent.length = bl.length();
+    op.indata.claim_append(bl);
+    out_ec.back() = ec;
   }
 
   struct C_ObjectOperation_copyget : public Context {
@@ -836,7 +981,7 @@ struct ObjectOperation {
 	if (out_truncate_size)
 	  *out_truncate_size = copy_reply.truncate_size;
 	*cursor = copy_reply.cursor;
-      } catch (ceph::buffer::error& e) {
+      } catch (const ceph::buffer::error& e) {
 	if (prval)
 	  *prval = -EIO;
       }
@@ -900,7 +1045,7 @@ struct ObjectOperation {
 	decode(isdirty, p);
 	if (pisdirty)
 	  *pisdirty = isdirty;
-      } catch (ceph::buffer::error& e) {
+      } catch (const ceph::buffer::error& e) {
 	if (prval)
 	  *prval = -EIO;
       }
@@ -949,7 +1094,7 @@ struct ObjectOperation {
 	}
 	if (putls)
 	  putls->swap(ls);
-      } catch (ceph::buffer::error& e) {
+      } catch (const ceph::buffer::error& e) {
 	r = -EIO;
       }
       if (prval)
@@ -1012,8 +1157,19 @@ struct ObjectOperation {
     out_rval[p] = prval;
   }
 
-  void omap_set(const std::map<std::string, ceph::buffer::list>& map) {
-    using ceph::encode;
+  void omap_get_header(boost::system::error_code* ec, ceph::buffer::list *bl) {
+    add_op(CEPH_OSD_OP_OMAPGETHEADER);
+    out_bl.back() = bl;
+    out_ec.back() = ec;
+  }
+
+  void omap_set(const map<string, ceph::buffer::list> &map) {
+    ceph::buffer::list bl;
+    encode(map, bl);
+    add_data(CEPH_OSD_OP_OMAPSETVALS, 0, bl.length(), bl);
+  }
+
+  void omap_set(const boost::container::flat_map<string, ceph::buffer::list>& map) {
     ceph::buffer::list bl;
     encode(map, bl);
     add_data(CEPH_OSD_OP_OMAPSETVALS, 0, bl.length(), bl);
@@ -1033,6 +1189,11 @@ struct ObjectOperation {
     encode(to_remove, bl);
     add_data(CEPH_OSD_OP_OMAPRMKEYS, 0, bl.length(), bl);
   }
+  void omap_rm_keys(const boost::container::flat_set<std::string>& to_remove) {
+    ceph::buffer::list bl;
+    encode(to_remove, bl);
+    add_data(CEPH_OSD_OP_OMAPRMKEYS, 0, bl.length(), bl);
+  }
 
   // object classes
   void call(const char *cname, const char *method, ceph::buffer::list &indata) {
@@ -1042,6 +1203,18 @@ struct ObjectOperation {
   void call(const char *cname, const char *method, ceph::buffer::list &indata,
 	    ceph::buffer::list *outdata, Context *ctx, int *prval) {
     add_call(CEPH_OSD_OP_CALL, cname, method, indata, outdata, ctx, prval);
+  }
+
+  void call(std::string_view cname, std::string_view method,
+	    const ceph::buffer::list& indata, boost::system::error_code* ec) {
+    add_call(CEPH_OSD_OP_CALL, cname, method, indata, NULL, NULL, NULL);
+    out_ec.back() = ec;
+  }
+
+  void call(std::string_view cname, std::string_view method, const ceph::buffer::list& indata,
+	    boost::system::error_code* ec, ceph::buffer::list *outdata) {
+    add_call(CEPH_OSD_OP_CALL, cname, method, indata, outdata, nullptr, nullptr);
+    out_ec.back() = ec;
   }
 
   // watch/notify
@@ -1076,26 +1249,26 @@ struct ObjectOperation {
 
   void list_watchers(std::list<obj_watch_t> *out,
 		     int *prval) {
-    (void)add_op(CEPH_OSD_OP_LIST_WATCHERS);
+    add_op(CEPH_OSD_OP_LIST_WATCHERS);
     if (prval || out) {
-      unsigned p = ops.size() - 1;
-      C_ObjectOperation_decodewatchers *h =
-	new C_ObjectOperation_decodewatchers(out, prval);
-      set_handler(h);
-      out_bl[p] = &h->bl;
-      out_rval[p] = prval;
+      set_handler(CB_ObjectOperation_decodewatchers(out, prval, nullptr));
+      out_rval.back() = prval;
     }
   }
+  void list_watchers(vector<obj_watch_t>* out,
+		     boost::system::error_code* ec) {
+    add_op(CEPH_OSD_OP_LIST_WATCHERS);
+    set_handler(CB_ObjectOperation_decodewatchers(out, nullptr, ec));
+    out_ec.back() = ec;
+  }
 
-  void list_snaps(librados::snap_set_t *out, int *prval) {
-    (void)add_op(CEPH_OSD_OP_LIST_SNAPS);
-    if (prval || out) {
-      unsigned p = ops.size() - 1;
-      C_ObjectOperation_decodesnaps *h =
-	new C_ObjectOperation_decodesnaps(out, prval);
-      set_handler(h);
-      out_bl[p] = &h->bl;
-      out_rval[p] = prval;
+  void list_snaps(librados::snap_set_t *out, int *prval,
+		  boost::system::error_code* ec = nullptr) {
+    add_op(CEPH_OSD_OP_LIST_SNAPS);
+    if (prval || out || ec) {
+      set_handler(CB_ObjectOperation_decodesnaps(out, prval, ec));
+      out_rval.back() = prval;
+      out_ec.back() = ec;
     }
   }
 
@@ -1396,7 +1569,8 @@ public:
     void dump(ceph::Formatter *f) const;
   };
 
-  fu2::unique_function<void(boost::system::error_code)> OpContextVert(Context* c) {
+  static fu2::unique_function<void(boost::system::error_code)> OpContextVert(Context* c) {
+
     if (c)
       return [c = std::unique_ptr<Context>(c)]
 	(boost::system::error_code e) mutable {
@@ -1407,98 +1581,104 @@ public:
   }
 
   struct Op : public RefCountedObject {
-    OSDSession *session;
-    int incarnation;
+    OSDSession *session = nullptr;
+    int incarnation = 0;
 
     op_target_t target;
 
-    ConnectionRef con;  // for rx buffer only
-    uint64_t features;  // explicitly specified op features
+    ConnectionRef con = nullptr;  // for rx buffer only
+    uint64_t features = CEPH_FEATURES_SUPPORTED_DEFAULT; // explicitly specified op features
 
     std::vector<OSDOp> ops;
 
-    snapid_t snapid;
+    snapid_t snapid = CEPH_NOSNAP;
     SnapContext snapc;
     ceph::real_time mtime;
 
-    ceph::buffer::list* outbl;
+    ceph::buffer::list *outbl = nullptr;
     std::vector<ceph::buffer::list*> out_bl;
     std::vector<fu2::unique_function<void(boost::system::error_code, int,
-				    const ceph::buffer::list& bl) &&>> out_handler;
+				     const ceph::buffer::list& bl) &&>> out_handler;
     std::vector<int*> out_rval;
     std::vector<boost::system::error_code*> out_ec;
 
-    int priority;
+    int priority = 0;
     fu2::unique_function<void(boost::system::error_code)> onfinish;
-    uint64_t ontimeout;
+    uint64_t ontimeout = 0;
 
-    ceph_tid_t tid;
-    int attempts;
+    ceph_tid_t tid = 0;
+    int attempts = 0;
 
     version_t *objver;
-    epoch_t *reply_epoch;
+    epoch_t *reply_epoch = nullptr;
 
     ceph::coarse_mono_time stamp;
 
-    epoch_t map_dne_bound;
+    epoch_t map_dne_bound = 0;
 
-    int budget;
+    int budget = -1;
 
     /// true if we should resend this message on failure
-    bool should_resend;
+    bool should_resend = true;
 
     /// true if the throttle budget is get/put on a series of OPs,
     /// instead of per OP basis, when this flag is set, the budget is
     /// acquired before sending the very first OP of the series and
     /// released upon receiving the last OP reply.
-    bool ctx_budgeted;
+    bool ctx_budgeted = false;
 
     int *data_offset;
 
     osd_reqid_t reqid; // explicitly setting reqid
     ZTracer::Trace trace;
 
-    Op(const object_t& o, const object_locator_t& ol, vector<OSDOp>& op,
+    Op(const object_t& o, const object_locator_t& ol, vector<OSDOp>&& _ops,
        int f, fu2::unique_function<void(boost::system::error_code)> fin,
-       version_t *ov, int *offset = NULL,
+       version_t *ov, int *offset = nullptr,
        ZTracer::Trace *parent_trace = nullptr) :
-      session(NULL), incarnation(0),
       target(o, ol, f),
-      con(NULL),
-      features(CEPH_FEATURES_SUPPORTED_DEFAULT),
-      snapid(CEPH_NOSNAP),
-      outbl(NULL),
-      priority(0),
+      ops(std::move(_ops)),
+      out_bl(ops.size(), nullptr),
+      out_handler(ops.size()),
+      out_rval(ops.size(), nullptr),
+      out_ec(ops.size(), nullptr),
       onfinish(std::move(fin)),
-      ontimeout(0),
-      tid(0),
-      attempts(0),
       objver(ov),
-      reply_epoch(NULL),
-      map_dne_bound(0),
-      budget(-1),
-      should_resend(true),
-      ctx_budgeted(false),
       data_offset(offset) {
-      ops.swap(op);
-
-      /* initialize out_* to match op std::vector */
-      out_bl.resize(ops.size());
-      out_rval.resize(ops.size());
-      out_ec.resize(ops.size());
-      out_handler.resize(ops.size());
-      for (unsigned i = 0; i < ops.size(); i++) {
-	out_bl[i] = NULL;
-	out_rval[i] = NULL;
-      }
-
       if (target.base_oloc.key == o)
 	target.base_oloc.key.clear();
-
       if (parent_trace && parent_trace->valid()) {
         trace.init("op", nullptr, parent_trace);
         trace.event("start");
       }
+      ceph_assert(ops.size() == out_bl.size());
+      ceph_assert(ops.size() == out_rval.size());
+      ceph_assert(ops.size() == out_ec.size());
+      ceph_assert(ops.size() == out_handler.size());
+    }
+
+    Op(const object_t& o, const object_locator_t& ol, vector<OSDOp>&& _ops,
+       int f, Context* fin, version_t *ov,
+       int *offset = NULL, ZTracer::Trace *parent_trace = nullptr) :
+      target(o, ol, f),
+      ops(std::move(_ops)),
+      out_bl(ops.size(), nullptr),
+      out_handler(ops.size()),
+      out_rval(ops.size(), nullptr),
+      out_ec(ops.size(), nullptr),
+      onfinish(OpContextVert(fin)),
+      objver(ov),
+      data_offset(offset) {
+      if (target.base_oloc.key == o)
+	target.base_oloc.key.clear();
+      if (parent_trace && parent_trace->valid()) {
+        trace.init("op", nullptr, parent_trace);
+        trace.event("start");
+      }
+      ceph_assert(ops.size() == out_bl.size());
+      ceph_assert(ops.size() == out_rval.size());
+      ceph_assert(ops.size() == out_ec.size());
+      ceph_assert(ops.size() == out_handler.size());
     }
 
     bool operator<(const Op& other) const {
@@ -2364,8 +2544,8 @@ public:
     Context *oncommit, version_t *objver = NULL,
     osd_reqid_t reqid = osd_reqid_t(),
     ZTracer::Trace *parent_trace = nullptr) {
-    Op *o = new Op(oid, oloc, op.ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver,
+    Op *o = new Op(oid, oloc, std::move(op.ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit, objver,
 		   nullptr, parent_trace);
     o->priority = op.priority;
     o->mtime = mtime;
@@ -2373,6 +2553,7 @@ public:
     o->out_rval.swap(op.out_rval);
     o->out_ec.swap(op.out_ec);
     o->reqid = reqid;
+    op.clear();
     return o;
   }
   ceph_tid_t mutate(
@@ -2388,6 +2569,26 @@ public:
     return tid;
   }
 
+  void mutate(const object_t& oid, const object_locator_t& oloc,
+	      ObjectOperation&& op, const SnapContext& snapc,
+	      ceph::real_time mtime, int flags,
+	      fu2::unique_function<void(boost::system::error_code)> oncommit,
+	      version_t *objver = NULL, osd_reqid_t reqid = osd_reqid_t()) {
+    Op *o = new Op(oid, oloc, std::move(op.ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, std::move(oncommit), objver,
+		   nullptr);
+    o->priority = op.priority;
+    o->mtime = mtime;
+    o->snapc = snapc;
+    o->out_bl.swap(op.out_bl);
+    o->out_handler.swap(op.out_handler);
+    o->out_rval.swap(op.out_rval);
+    o->out_ec.swap(op.out_ec);
+    o->reqid = reqid;
+    op.clear();
+    op_submit(o);
+  }
+
   Op *prepare_read_op(
     const object_t& oid, const object_locator_t& oloc,
     ObjectOperation& op,
@@ -2396,8 +2597,8 @@ public:
     int *data_offset = NULL,
     uint64_t features = 0,
     ZTracer::Trace *parent_trace = nullptr) {
-    Op *o = new Op(oid, oloc, op.ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_READ, OpContextVert(onack), objver,
+    Op *o = new Op(oid, oloc, std::move(op.ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_READ, onack, objver,
 		   data_offset, parent_trace);
     o->priority = op.priority;
     o->snapid = snapid;
@@ -2408,6 +2609,7 @@ public:
     o->out_handler.swap(op.out_handler);
     o->out_rval.swap(op.out_rval);
     o->out_ec.swap(op.out_ec);
+    op.clear();
     return o;
   }
   ceph_tid_t read(
@@ -2425,16 +2627,41 @@ public:
     op_submit(o, &tid);
     return tid;
   }
+
+  void read(const object_t& oid, const object_locator_t& oloc,
+	    ObjectOperation&& op, snapid_t snapid, ceph::buffer::list *pbl, int flags,
+	    fu2::unique_function<void(boost::system::error_code)> onack,
+	    version_t *objver = nullptr, int *data_offset = nullptr,
+	    uint64_t features = 0) {
+    Op *o = new Op(oid, oloc, std::move(op.ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_READ, std::move(onack), objver,
+		   data_offset);
+    o->priority = op.priority;
+    o->snapid = snapid;
+    o->outbl = pbl;
+    if (!o->outbl && op.size() == 1 && op.out_bl[0]->length())
+	o->outbl = op.out_bl[0];
+    o->out_bl.swap(op.out_bl);
+    o->out_handler.swap(op.out_handler);
+    o->out_rval.swap(op.out_rval);
+    o->out_ec.swap(op.out_ec);
+    if (features)
+      o->features = features;
+    op.clear();
+    op_submit(o);
+  }
+
+
   Op *prepare_pg_read_op(
     uint32_t hash, object_locator_t oloc,
     ObjectOperation& op, ceph::buffer::list *pbl, int flags,
     Context *onack, epoch_t *reply_epoch,
     int *ctx_budget) {
     Op *o = new Op(object_t(), oloc,
-		   op.ops,
+		   std::move(op.ops),
 		   flags | global_op_flags | CEPH_OSD_FLAG_READ |
 		   CEPH_OSD_FLAG_IGNORE_OVERLAY,
-		   OpContextVert(onack), NULL);
+		   onack, NULL);
     o->target.precalc_pgid = true;
     o->target.base_pgid = pg_t(hash, oloc.pool);
     o->priority = op.priority;
@@ -2443,11 +2670,13 @@ public:
     o->out_bl.swap(op.out_bl);
     o->out_handler.swap(op.out_handler);
     o->out_rval.swap(op.out_rval);
+    o->out_ec.swap(op.out_ec);
     o->reply_epoch = reply_epoch;
     if (ctx_budget) {
       // budget is tracked by listing context
       o->ctx_budgeted = true;
     }
+    op.clear();
     return o;
   }
   ceph_tid_t pg_read(
@@ -2520,8 +2749,8 @@ public:
     int i = init_ops(ops, 1, extra_ops);
     ops[i].op.op = CEPH_OSD_OP_STAT;
     C_Stat *fin = new C_Stat(psize, pmtime, onfinish);
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_READ, OpContextVert(fin), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_READ, fin, objver);
     o->snapid = snap;
     o->outbl = &fin->bl;
     return o;
@@ -2552,8 +2781,8 @@ public:
     ops[i].op.extent.truncate_size = 0;
     ops[i].op.extent.truncate_seq = 0;
     ops[i].op.flags = op_flags;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_READ, OpContextVert(onfinish), objver,
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_READ, onfinish, objver,
 		   nullptr, parent_trace);
     o->snapid = snap;
     o->outbl = pbl;
@@ -2585,8 +2814,8 @@ public:
     ops[i].op.extent.truncate_seq = 0;
     ops[i].indata = cmp_bl;
     ops[i].op.flags = op_flags;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_READ, OpContextVert(onfinish), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_READ, onfinish, objver);
     o->snapid = snap;
     return o;
   }
@@ -2617,8 +2846,8 @@ public:
     ops[i].op.extent.truncate_size = trunc_size;
     ops[i].op.extent.truncate_seq = trunc_seq;
     ops[i].op.flags = op_flags;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_READ, OpContextVert(onfinish), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_READ, onfinish, objver);
     o->snapid = snap;
     o->outbl = pbl;
     ceph_tid_t tid;
@@ -2636,9 +2865,8 @@ public:
     ops[i].op.extent.length = len;
     ops[i].op.extent.truncate_size = 0;
     ops[i].op.extent.truncate_seq = 0;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_READ, OpContextVert(onfinish),
-		   objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_READ, onfinish, objver);
     o->snapid = snap;
     o->outbl = pbl;
     ceph_tid_t tid;
@@ -2656,8 +2884,8 @@ public:
     ops[i].op.xattr.value_len = 0;
     if (name)
       ops[i].indata.append(name, ops[i].op.xattr.name_len);
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_READ, OpContextVert(onfinish), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_READ, onfinish, objver);
     o->snapid = snap;
     o->outbl = pbl;
     ceph_tid_t tid;
@@ -2673,8 +2901,8 @@ public:
     int i = init_ops(ops, 1, extra_ops);
     ops[i].op.op = CEPH_OSD_OP_GETXATTRS;
     C_GetAttrs *fin = new C_GetAttrs(attrset, onfinish);
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_READ, OpContextVert(fin), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_READ, fin, objver);
     o->snapid = snap;
     o->outbl = &fin->bl;
     ceph_tid_t tid;
@@ -2697,8 +2925,8 @@ public:
 		     const SnapContext& snapc, int flags,
 		     Context *oncommit,
 		     version_t *objver = NULL) {
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit, objver);
     o->mtime = mtime;
     o->snapc = snapc;
     ceph_tid_t tid;
@@ -2721,8 +2949,8 @@ public:
     ops[i].op.extent.truncate_seq = 0;
     ops[i].indata = bl;
     ops[i].op.flags = op_flags;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver,
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, std::move(oncommit), objver,
                    nullptr, parent_trace);
     o->mtime = mtime;
     o->snapc = snapc;
@@ -2755,8 +2983,8 @@ public:
     ops[i].op.extent.truncate_size = 0;
     ops[i].op.extent.truncate_seq = 0;
     ops[i].indata = bl;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit, objver);
     o->mtime = mtime;
     o->snapc = snapc;
     return o;
@@ -2790,8 +3018,8 @@ public:
     ops[i].op.extent.truncate_seq = trunc_seq;
     ops[i].indata = bl;
     ops[i].op.flags = op_flags;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit, objver);
     o->mtime = mtime;
     o->snapc = snapc;
     ceph_tid_t tid;
@@ -2811,8 +3039,8 @@ public:
     ops[i].op.extent.length = bl.length();
     ops[i].indata = bl;
     ops[i].op.flags = op_flags;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit, objver);
     o->mtime = mtime;
     o->snapc = snapc;
     return o;
@@ -2845,8 +3073,8 @@ public:
     ops[i].op.writesame.data_length = bl.length();
     ops[i].indata = bl;
     ops[i].op.flags = op_flags;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit, objver);
     o->mtime = mtime;
     o->snapc = snapc;
     return o;
@@ -2878,8 +3106,8 @@ public:
     ops[i].op.extent.offset = trunc_size;
     ops[i].op.extent.truncate_size = trunc_size;
     ops[i].op.extent.truncate_seq = trunc_seq;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit, objver);
     o->mtime = mtime;
     o->snapc = snapc;
     ceph_tid_t tid;
@@ -2895,8 +3123,8 @@ public:
     ops[i].op.op = CEPH_OSD_OP_ZERO;
     ops[i].op.extent.offset = off;
     ops[i].op.extent.length = len;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit, objver);
     o->mtime = mtime;
     o->snapc = snapc;
     ceph_tid_t tid;
@@ -2912,7 +3140,7 @@ public:
     int i = init_ops(ops, 1, extra_ops);
     ops[i].op.op = CEPH_OSD_OP_ROLLBACK;
     ops[i].op.snap.snapid = snapid;
-    Op *o = new Op(oid, oloc, ops, CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), CEPH_OSD_FLAG_WRITE, oncommit, objver);
     o->mtime = mtime;
     o->snapc = snapc;
     ceph_tid_t tid;
@@ -2928,8 +3156,8 @@ public:
     int i = init_ops(ops, 1, extra_ops);
     ops[i].op.op = CEPH_OSD_OP_CREATE;
     ops[i].op.flags = create_flags;
-    Op *o = new Op(oid, oloc, ops, global_flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), global_flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit, objver);
     o->mtime = mtime;
     o->snapc = snapc;
     ceph_tid_t tid;
@@ -2944,8 +3172,8 @@ public:
     std::vector<OSDOp> ops;
     int i = init_ops(ops, 1, extra_ops);
     ops[i].op.op = CEPH_OSD_OP_DELETE;
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit, objver);
     o->mtime = mtime;
     o->snapc = snapc;
     return o;
@@ -2975,8 +3203,8 @@ public:
     if (name)
       ops[i].indata.append(name, ops[i].op.xattr.name_len);
     ops[i].indata.append(bl);
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit),
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit,
 		   objver);
     o->mtime = mtime;
     o->snapc = snapc;
@@ -2996,8 +3224,8 @@ public:
     ops[i].op.xattr.value_len = 0;
     if (name)
       ops[i].indata.append(name, ops[i].op.xattr.name_len);
-    Op *o = new Op(oid, oloc, ops, flags | global_op_flags |
-		   CEPH_OSD_FLAG_WRITE, OpContextVert(oncommit), objver);
+    Op *o = new Op(oid, oloc, std::move(ops), flags | global_op_flags |
+		   CEPH_OSD_FLAG_WRITE, oncommit, objver);
     o->mtime = mtime;
     o->snapc = snapc;
     ceph_tid_t tid;

@@ -3086,7 +3086,7 @@ LIBRADOS_C_API_BASE_DEFAULT(rados_write_op_assert_version);
 extern "C" void _rados_write_op_assert_exists(rados_write_op_t write_op)
 {
   tracepoint(librados, rados_write_op_assert_exists_enter, write_op);
-  ((::ObjectOperation *)write_op)->stat(NULL, (ceph::real_time *)NULL, NULL);
+  ((::ObjectOperation *)write_op)->stat(NULL, (ceph::real_time *)NULL, (int*)NULL);
   tracepoint(librados, rados_write_op_assert_exists_exit);
 }
 LIBRADOS_C_API_BASE_DEFAULT(rados_write_op_assert_exists);
@@ -3497,7 +3497,7 @@ LIBRADOS_C_API_BASE_DEFAULT(rados_read_op_assert_version);
 extern "C" void _rados_read_op_assert_exists(rados_read_op_t read_op)
 {
   tracepoint(librados, rados_read_op_assert_exists_enter, read_op);
-  ((::ObjectOperation *)read_op)->stat(NULL, (ceph::real_time *)NULL, NULL);
+  ((::ObjectOperation *)read_op)->stat(NULL, (ceph::real_time *)NULL, (int*)NULL);
   tracepoint(librados, rados_read_op_assert_exists_exit);
 }
 LIBRADOS_C_API_BASE_DEFAULT(rados_read_op_assert_exists);

@@ -36,10 +36,12 @@
 
 
 namespace RADOS {
+  class RADOS;
 namespace _ {
 
 class RADOS
 {
+  friend ::RADOS::RADOS;
   struct MsgDeleter {
     void operator()(Messenger* p) const {
       if (p) {

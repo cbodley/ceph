@@ -14143,7 +14143,7 @@ int Client::check_pool_perm(Inode *in, int need)
 
     C_SaferCond rd_cond;
     ObjectOperation rd_op;
-    rd_op.stat(NULL, (ceph::real_time*)nullptr, NULL);
+    rd_op.stat(NULL, (ceph::real_time*)nullptr, (int*)(nullptr));
 
     objecter->mutate(oid, OSDMap::file_to_object_locator(in->layout), rd_op,
 		     nullsnapc, ceph::real_clock::now(), 0, &rd_cond);

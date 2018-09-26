@@ -1495,7 +1495,7 @@ int librados::IoCtxImpl::stat(const object_t& oid, uint64_t *psize, time_t *pmti
 
   ::ObjectOperation rd;
   prepare_assert_ops(&rd);
-  rd.stat(psize, &mtime, NULL);
+  rd.stat(psize, &mtime, static_cast<int*>(0));
   int r = operate_read(oid, &rd, NULL);
 
   if (r >= 0 && pmtime) {
@@ -1515,7 +1515,7 @@ int librados::IoCtxImpl::stat2(const object_t& oid, uint64_t *psize, struct time
 
   ::ObjectOperation rd;
   prepare_assert_ops(&rd);
-  rd.stat(psize, &mtime, NULL);
+  rd.stat(psize, &mtime, static_cast<int*>(0));
   int r = operate_read(oid, &rd, NULL);
   if (r < 0) {
     return r;
