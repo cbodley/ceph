@@ -3467,7 +3467,7 @@ void RGWPutObj::execute()
 
   // create the object processor
   using namespace rgw::putobj;
-  AioThrottle aio(store->ctx()->_conf->rgw_put_obj_min_window_size);
+  BlockingAioThrottle aio(store->ctx()->_conf->rgw_put_obj_min_window_size);
   constexpr auto max_processor_size = std::max(sizeof(MultipartObjectProcessor),
                                                sizeof(AtomicObjectProcessor));
   ceph::static_ptr<ObjectProcessor, max_processor_size> processor;
@@ -3805,7 +3805,7 @@ void RGWPostObj::execute()
     }
 
     using namespace rgw::putobj;
-    AioThrottle aio(s->cct->_conf->rgw_put_obj_min_window_size);
+    BlockingAioThrottle aio(s->cct->_conf->rgw_put_obj_min_window_size);
     AtomicObjectProcessor processor(&aio, store, s->bucket_info,
                                     s->bucket_owner.get_id(),
                                     *static_cast<RGWObjectCtx*>(s->obj_ctx),
@@ -6573,7 +6573,7 @@ int RGWBulkUploadOp::handle_file(const boost::string_ref path,
   }
 
   using namespace rgw::putobj;
-  AioThrottle aio(store->ctx()->_conf->rgw_put_obj_min_window_size);
+  BlockingAioThrottle aio(store->ctx()->_conf->rgw_put_obj_min_window_size);
 
   AtomicObjectProcessor processor(&aio, store, binfo, bowner.get_id(),
                                   obj_ctx, obj, 0, s->req_id);

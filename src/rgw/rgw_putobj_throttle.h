@@ -24,60 +24,68 @@ class AioCompletion;
 
 namespace rgw::putobj {
 
-// a throttle for aio operations that enforces a maximum window on outstanding
-// bytes. only supports a single waiter, so all public functions must be called
-// from the same thread
-class AioThrottle : public Aio {
+class Throttle {
  protected:
   const uint64_t window;
   uint64_t pending_size = 0;
 
+  ResultList pending;
+  ResultList completed;
+
   bool is_available() const { return pending_size <= window; }
   bool has_completion() const { return !completed.empty(); }
   bool is_drained() const { return pending.empty(); }
-
-  struct Pending : ResultEntry {
-    AioThrottle *parent = nullptr;
-    uint64_t cost = 0;
-    librados::AioCompletion *completion = nullptr;
-  };
-  OwningList<Pending> pending;
-  ResultList completed;
 
   enum class Wait { None, Available, Completion, Drained };
   Wait waiter = Wait::None;
 
   bool waiter_ready() const;
 
-  ceph::mutex mutex = ceph::make_mutex("AioThrottle");
-  ceph::condition_variable cond;
-
-  void get(Pending& p);
-  void put(Pending& p);
-
-  static void aio_cb(void *cb, void *arg);
-
  public:
-  AioThrottle(uint64_t window) : window(window) {}
+  Throttle(uint64_t window) : window(window) {}
 
-  virtual ~AioThrottle() {
+  ~Throttle() {
     // must drain before destructing
     ceph_assert(pending.empty());
     ceph_assert(completed.empty());
   }
+};
+
+// a throttle for aio operations. all public functions must be called from
+// the same thread
+class BlockingAioThrottle final : public Aio, private Throttle {
+  ceph::mutex mutex = ceph::make_mutex("AioThrottle");
+  ceph::condition_variable cond;
+
+  struct Pending : ResultEntry {
+    BlockingAioThrottle *parent = nullptr;
+    uint64_t cost = 0;
+    librados::AioCompletion *completion = nullptr;
+  };
+
+  void get(Pending& p);
+  void put(Pending& p);
+
+  // aio completion callback that calls put()
+  static void aio_cb(void *cb, void *arg);
+
+ public:
+  BlockingAioThrottle(uint64_t window) : Throttle(window) {}
+
 
   ResultList submit(rgw_rados_ref& ref, const rgw_raw_obj& obj,
                     librados::ObjectReadOperation *op, bufferlist *data,
-                    uint64_t cost) override;
+                    uint64_t cost) override final;
 
   ResultList submit(rgw_rados_ref& ref, const rgw_raw_obj& obj,
-                    librados::ObjectWriteOperation *op, uint64_t cost) override;
+                    librados::ObjectWriteOperation *op,
+                    uint64_t cost) override final;
 
-  ResultList poll() override;
+  ResultList poll() override final;
 
-  ResultList wait() override;
+  ResultList wait() override final;
 
-  ResultList drain() override;
+  ResultList drain() override final;
 };
 
 } // namespace rgw::putobj

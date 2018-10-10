@@ -19,14 +19,7 @@
 
 namespace rgw::putobj {
 
-void AioThrottle::aio_cb(void *cb, void *arg)
-{
-  Pending& p = *static_cast<Pending*>(arg);
-  p.result = p.completion->get_return_value();
-  p.parent->put(p);
-}
-
-bool AioThrottle::waiter_ready() const
+bool Throttle::waiter_ready() const
 {
   switch (waiter) {
   case Wait::Available: return is_available();
@@ -36,9 +29,17 @@ bool AioThrottle::waiter_ready() const
   }
 }
 
-ResultList AioThrottle::submit(rgw_rados_ref& ref, const rgw_raw_obj& obj,
-                               librados::ObjectWriteOperation *op,
-                               uint64_t cost)
+void BlockingAioThrottle::aio_cb(void *cb, void *arg)
+{
+  Pending& p = *static_cast<Pending*>(arg);
+  p.result = p.completion->get_return_value();
+  p.parent->put(p);
+}
+
+ResultList BlockingAioThrottle::submit(rgw_rados_ref& ref,
+                                       const rgw_raw_obj& obj,
+                                       librados::ObjectWriteOperation *op,
+                                       uint64_t cost)
 {
   auto p = std::make_unique<Pending>();
   p->obj = obj;
@@ -58,9 +59,10 @@ ResultList AioThrottle::submit(rgw_rados_ref& ref, const rgw_raw_obj& obj,
   return std::move(completed);
 }
 
-ResultList AioThrottle::submit(rgw_rados_ref& ref, const rgw_raw_obj& obj,
-                               librados::ObjectReadOperation *op,
-                               bufferlist *data, uint64_t cost)
+ResultList BlockingAioThrottle::submit(rgw_rados_ref& ref,
+                                       const rgw_raw_obj& obj,
+                                       librados::ObjectReadOperation *op,
+                                       bufferlist *data, uint64_t cost)
 {
   auto p = std::make_unique<Pending>();
   p->obj = obj;
@@ -80,11 +82,11 @@ ResultList AioThrottle::submit(rgw_rados_ref& ref, const rgw_raw_obj& obj,
   return std::move(completed);
 }
 
-void AioThrottle::get(Pending& p)
+void BlockingAioThrottle::get(Pending& p)
 {
   std::unique_lock lock{mutex};
 
-  // wait for the write size to become available
+  // wait for the size to become available
   pending_size += p.cost;
   if (!is_available()) {
     ceph_assert(waiter == Wait::None);
@@ -99,7 +101,7 @@ void AioThrottle::get(Pending& p)
   pending.push_back(p);
 }
 
-void AioThrottle::put(Pending& p)
+void BlockingAioThrottle::put(Pending& p)
 {
   p.completion->release();
   p.completion = nullptr;
@@ -117,13 +119,13 @@ void AioThrottle::put(Pending& p)
   }
 }
 
-ResultList AioThrottle::poll()
+ResultList BlockingAioThrottle::poll()
 {
   std::unique_lock lock{mutex};
   return std::move(completed);
 }
 
-ResultList AioThrottle::wait()
+ResultList BlockingAioThrottle::wait()
 {
   std::unique_lock lock{mutex};
   if (completed.empty() && !pending.empty()) {
@@ -135,7 +137,7 @@ ResultList AioThrottle::wait()
   return std::move(completed);
 }
 
-ResultList AioThrottle::drain()
+ResultList BlockingAioThrottle::drain()
 {
   std::unique_lock lock{mutex};
   if (!pending.empty()) {

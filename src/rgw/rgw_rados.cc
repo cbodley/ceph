@@ -7561,7 +7561,7 @@ int RGWRados::fetch_remote_obj(RGWObjectCtx& obj_ctx,
   set_mtime_weight.high_precision = high_precision_time;
 
   using namespace rgw::putobj;
-  AioThrottle aio(cct->_conf->rgw_put_obj_min_window_size);
+  BlockingAioThrottle aio(cct->_conf->rgw_put_obj_min_window_size);
   AtomicObjectProcessor processor(&aio, this, dest_bucket_info, user_id,
                                   obj_ctx, dest_obj, olh_epoch, tag);
   int ret = processor.prepare();
@@ -8095,7 +8095,7 @@ int RGWRados::copy_obj_data(RGWObjectCtx& obj_ctx,
   append_rand_alpha(cct, tag, tag, 32);
 
   using namespace rgw::putobj;
-  AioThrottle aio(cct->_conf->rgw_put_obj_min_window_size);
+  BlockingAioThrottle aio(cct->_conf->rgw_put_obj_min_window_size);
   AtomicObjectProcessor processor(&aio, this, dest_bucket_info,
                                   dest_bucket_info.owner, obj_ctx,
                                   dest_obj, olh_epoch, tag);

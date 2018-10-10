@@ -78,7 +78,7 @@ std::ostream& operator<<(std::ostream& out, const Result& r) {
 
 TEST_F(PutObj_Throttle, NoThrottleUpToMax)
 {
-  AioThrottle throttle(4);
+  BlockingAioThrottle throttle(4);
   auto obj = make_obj(__PRETTY_FUNCTION__);
   auto ref = make_ref(obj);
   {
@@ -106,7 +106,7 @@ TEST_F(PutObj_Throttle, NoThrottleUpToMax)
 
 TEST_F(PutObj_Throttle, CostOverWindow)
 {
-  AioThrottle throttle(4);
+  BlockingAioThrottle throttle(4);
   auto obj = make_obj(__PRETTY_FUNCTION__);
   auto ref = make_ref(obj);
 
@@ -116,10 +116,10 @@ TEST_F(PutObj_Throttle, CostOverWindow)
   EXPECT_EQ(Result({obj, -EDEADLK}), c.front());
 }
 
-TEST_F(PutObj_Throttle, AioThrottleOverMax)
+TEST_F(PutObj_Throttle, ThrottleOverMax)
 {
   constexpr uint64_t window = 4;
-  AioThrottle throttle(window);
+  BlockingAioThrottle throttle(window);
 
   auto obj = make_obj(__PRETTY_FUNCTION__);
   auto ref = make_ref(obj);
