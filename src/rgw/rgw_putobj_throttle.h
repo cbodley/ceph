@@ -16,6 +16,7 @@
 
 #include <memory>
 #include "common/ceph_mutex.h"
+#include "common/async/completion.h"
 #include "rgw_putobj_aio.h"
 
 namespace librados {
@@ -72,6 +73,45 @@ class BlockingAioThrottle final : public Aio, private Throttle {
  public:
   BlockingAioThrottle(uint64_t window) : Throttle(window) {}
 
+  ResultList submit(rgw_rados_ref& ref, const rgw_raw_obj& obj,
+                    librados::ObjectReadOperation *op, bufferlist *data,
+                    uint64_t cost) override final;
+
+  ResultList submit(rgw_rados_ref& ref, const rgw_raw_obj& obj,
+                    librados::ObjectWriteOperation *op,
+                    uint64_t cost) override final;
+
+  ResultList poll() override final;
+
+  ResultList wait() override final;
+
+  ResultList drain() override final;
+};
+
+#ifdef HAVE_BOOST_CONTEXT
+// a throttle that yields the coroutine instead of blocking. all public
+// functions must be called within the coroutine strand
+class YieldingAioThrottle final : public Aio, private Throttle {
+  boost::asio::io_context& context;
+  boost::asio::yield_context yield;
+  struct Handler;
+
+  // completion callback associated with the waiter
+  using Completion = ceph::async::Completion<void(boost::system::error_code)>;
+  std::unique_ptr<Completion> completion;
+
+  template <typename CompletionToken>
+  auto async_wait(CompletionToken&& token);
+
+  struct Pending : ResultEntry { uint64_t cost = 0; };
+  void get(Pending& p);
+  void put(Pending& p);
+
+ public:
+  YieldingAioThrottle(uint64_t window, boost::asio::io_context& context,
+                      boost::asio::yield_context yield)
+    : Throttle(window), context(context), yield(yield)
+  {}
 
   ResultList submit(rgw_rados_ref& ref, const rgw_raw_obj& obj,
                     librados::ObjectReadOperation *op, bufferlist *data,
@@ -87,5 +127,6 @@ class BlockingAioThrottle final : public Aio, private Throttle {
 
   ResultList drain() override final;
 };
+#endif // HAVE_BOOST_CONTEXT
 
 } // namespace rgw::putobj

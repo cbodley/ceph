@@ -13,6 +13,7 @@
  */
 
 #include "include/rados/librados.hpp"
+#include "librados/librados_asio.h"
 
 #include "rgw_putobj_throttle.h"
 #include "rgw_rados.h"
@@ -148,5 +149,143 @@ ResultList BlockingAioThrottle::drain()
   }
   return std::move(completed);
 }
+
+#ifdef HAVE_BOOST_CONTEXT
+
+struct YieldingAioThrottle::Handler {
+  YieldingAioThrottle *throttle = nullptr;
+  Pending *p = nullptr;
+
+  // write callback
+  void operator()(boost::system::error_code ec) const {
+    p->result = -ec.value();
+    throttle->put(*p);
+  }
+  // read callback
+  void operator()(boost::system::error_code ec, bufferlist bl) const {
+    p->result = -ec.value();
+    throttle->put(*p);
+  }
+};
+
+template <typename CompletionToken>
+auto token_executor(CompletionToken&& token)
+{
+  boost::asio::async_completion<CompletionToken, void()> init(token);
+  return boost::asio::get_associated_executor(init.completion_handler);
+}
+
+ResultList YieldingAioThrottle::submit(rgw_rados_ref& ref,
+                                       const rgw_raw_obj& obj,
+                                       librados::ObjectWriteOperation *op,
+                                       uint64_t cost)
+{
+  auto p = std::make_unique<Pending>();
+  p->cost = cost;
+  if (cost > window) {
+    p->result = -EDEADLK; // would never succeed
+    completed.push_back(*p);
+  } else {
+    get(*p);
+    librados::async_operate(context, ref.ioctx, ref.oid, op, 0,
+                            boost::asio::bind_executor(token_executor(yield),
+                                                       Handler{this, p.get()}));
+  }
+  p.release();
+  return std::move(completed);
+}
+
+ResultList YieldingAioThrottle::submit(rgw_rados_ref& ref,
+                                       const rgw_raw_obj& obj,
+                                       librados::ObjectReadOperation *op,
+                                       bufferlist *data, uint64_t cost)
+{
+  auto p = std::make_unique<Pending>();
+  p->cost = cost;
+  if (cost > window) {
+    p->result = -EDEADLK; // would never succeed
+    completed.push_back(*p);
+  } else {
+    get(*p);
+    librados::async_operate(context, ref.ioctx, ref.oid, op, 0,
+                            boost::asio::bind_executor(token_executor(yield),
+                                                       Handler{this, p.get()}));
+  }
+  p.release();
+  return std::move(completed);
+}
+
+template <typename CompletionToken>
+auto YieldingAioThrottle::async_wait(CompletionToken&& token)
+{
+  using boost::asio::async_completion;
+  using Signature = void(boost::system::error_code);
+  async_completion<CompletionToken, Signature> init(token);
+  completion = Completion::create(context.get_executor(),
+                                  std::move(init.completion_handler));
+  return init.result.get();
+}
+
+void YieldingAioThrottle::get(Pending& p)
+{
+  // wait for the size to become available
+  pending_size += p.cost;
+  if (!is_available()) {
+    ceph_assert(waiter == Wait::None);
+    ceph_assert(!completion);
+
+    boost::system::error_code ec;
+    waiter = Wait::Available;
+    async_wait(yield[ec]);
+  }
+  pending.push_back(p);
+}
+
+void YieldingAioThrottle::put(Pending& p)
+{
+  // move from pending to completed
+  pending.erase(pending.iterator_to(p));
+  completed.push_back(p);
+
+  pending_size -= p.cost;
+
+  if (waiter_ready()) {
+    ceph_assert(completion);
+    ceph::async::post(std::move(completion), boost::system::error_code{});
+    waiter = Wait::None;
+  }
+}
+
+ResultList YieldingAioThrottle::poll()
+{
+  return std::move(completed);
+}
+
+ResultList YieldingAioThrottle::wait()
+{
+  if (!has_completion() && !pending.empty()) {
+    ceph_assert(waiter == Wait::None);
+    ceph_assert(!completion);
+
+    boost::system::error_code ec;
+    waiter = Wait::Completion;
+    async_wait(yield[ec]);
+  }
+  return std::move(completed);
+}
+
+ResultList YieldingAioThrottle::drain()
+{
+  if (!is_drained()) {
+    ceph_assert(waiter == Wait::None);
+    ceph_assert(!completion);
+
+    boost::system::error_code ec;
+    waiter = Wait::Drained;
+    async_wait(yield[ec]);
+  }
+  return std::move(completed);
+}
+#endif // HAVE_BOOST_CONTEXT
 
 } // namespace rgw::putobj

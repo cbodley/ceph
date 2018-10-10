@@ -17,6 +17,9 @@
 
 #include "include/rados/librados.hpp"
 
+#ifdef HAVE_BOOST_CONTEXT
+#include <boost/asio/spawn.hpp>
+#endif
 #include <gtest/gtest.h>
 
 struct RadosEnv : public ::testing::Environment {
@@ -143,5 +146,56 @@ TEST_F(PutObj_Throttle, ThrottleOverMax)
   EXPECT_EQ(0u, outstanding);
   EXPECT_EQ(window, max_outstanding);
 }
+
+#ifdef HAVE_BOOST_CONTEXT
+TEST_F(PutObj_Throttle, YieldCostOverWindow)
+{
+  auto obj = make_obj(__PRETTY_FUNCTION__);
+  auto ref = make_ref(obj);
+
+  boost::asio::io_context context;
+  boost::asio::spawn(context,
+    [&] (boost::asio::yield_context yield) {
+      YieldingAioThrottle throttle(4, context, yield);
+      librados::ObjectWriteOperation op;
+      auto c = throttle.submit(ref, obj, &op, 8);
+      ASSERT_EQ(1u, c.size());
+      EXPECT_EQ(Result({obj, -EDEADLK}), c.front());
+    });
+}
+
+TEST_F(PutObj_Throttle, YieldingThrottleOverMax)
+{
+  constexpr uint64_t window = 4;
+
+  auto obj = make_obj(__PRETTY_FUNCTION__);
+  auto ref = make_ref(obj);
+
+  // issue 32 writes, and verify that max_outstanding <= window
+  constexpr uint64_t total = 32;
+  uint64_t max_outstanding = 0;
+  uint64_t outstanding = 0;
+
+  boost::asio::io_context context;
+  boost::asio::spawn(context,
+    [&] (boost::asio::yield_context yield) {
+      YieldingAioThrottle throttle(window, context, yield);
+      for (uint64_t i = 0; i < total; i++) {
+        librados::ObjectWriteOperation op;
+        auto c = throttle.submit(ref, obj, &op, 1);
+        outstanding++;
+        outstanding -= c.size();
+        if (max_outstanding < outstanding) {
+          max_outstanding = outstanding;
+        }
+      }
+      auto c = throttle.drain();
+      outstanding -= c.size();
+    });
+  context.run();
+  EXPECT_EQ(0u, outstanding);
+  EXPECT_EQ(window, max_outstanding);
+}
+#endif // HAVE_BOOST_CONTEXT
 
 } // namespace rgw::putobj
