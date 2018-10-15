@@ -182,40 +182,6 @@ public:
 	    std::string_view format, ceph::buffer::list& out) override;
 };
 
-/**
- * This is a more limited form of C_Contexts, but that requires
- * a ceph_context which we don't have here.
- */
-class ObjectOperation::C_TwoContexts : public Context {
-  Context *first;
-  Context *second;
-public:
-  C_TwoContexts(Context *first, Context *second) :
-    first(first), second(second) {}
-  void finish(int r) override {
-    first->complete(r);
-    second->complete(r);
-    first = NULL;
-    second = NULL;
-  }
-
-  ~C_TwoContexts() override {
-    delete first;
-    delete second;
-  }
-};
-
-void ObjectOperation::add_handler(Context *extra) {
-  size_t last = out_handler.size() - 1;
-  Context *orig = out_handler[last];
-  if (orig) {
-    Context *wrapper = new C_TwoContexts(orig, extra);
-    out_handler[last] = wrapper;
-  } else {
-    out_handler[last] = extra;
-  }
-}
-
 Objecter::OSDSession::unique_completion_lock Objecter::OSDSession::get_lock(
   object_t& oid)
 {
@@ -3474,15 +3440,16 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
 		  << " != request ops " << op->ops
 		  << " from " << m->get_source_inst() << dendl;
 
-  vector<ceph::buffer::list*>::iterator pb = op->out_bl.begin();
-  vector<int*>::iterator pr = op->out_rval.begin();
-  vector<Context*>::iterator ph = op->out_handler.begin();
+  auto pb = op->out_bl.begin();
+  auto pr = op->out_rval.begin();
+  auto pe = op->out_ec.begin();
+  auto ph = op->out_handler.begin();
   ceph_assert(op->out_bl.size() == op->out_rval.size());
   ceph_assert(op->out_bl.size() == op->out_handler.size());
-  vector<OSDOp>::iterator p = out_ops.begin();
+  auto p = out_ops.begin();
   for (unsigned i = 0;
        p != out_ops.end() && pb != op->out_bl.end();
-       ++i, ++p, ++pb, ++pr, ++ph) {
+       ++i, ++p, ++pb, ++pr, ++pe, ++ph) {
     ldout(cct, 10) << " op " << i << " rval " << p->rval
 		   << " len " << p->outdata.length() << dendl;
     if (*pb)
@@ -3491,10 +3458,10 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
     // can change it if e.g. decoding fails
     if (*pr)
       **pr = ceph_to_hostos_errno(p->rval);
+    if (*pe)
+      **pe = ceph::to_error_code(p->rval);
     if (*ph) {
-      ldout(cct, 10) << " op " << i << " handler " << *ph << dendl;
-      (*ph)->complete(ceph_to_hostos_errno(p->rval));
-      *ph = NULL;
+      std::move((*ph))(ceph::to_error_code(p->rval), p->rval, p->outdata);
     }
   }
 
@@ -5237,7 +5204,7 @@ namespace {
     arg.encode(osd_op.indata);
     unsigned p = op->ops.size() - 1;
     auto *h = new C_ObjectOperation_scrub_ls{interval, items, rval};
-    op->out_handler[p] = h;
+    op->set_handler(h);
     op->out_bl[p] = &h->bl;
     op->out_rval[p] = rval;
   }

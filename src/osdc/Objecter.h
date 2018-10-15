@@ -30,6 +30,7 @@
 #include "include/buffer.h"
 #include "include/types.h"
 #include "include/rados/rados_types.hpp"
+#include "include/function2.hpp"
 
 #include "common/admin_socket.h"
 #include "common/async/completion.h"
@@ -65,20 +66,21 @@ class PerfCounters;
 
 struct ObjectOperation {
   std::vector<OSDOp> ops;
-  int flags;
-  int priority;
+  int flags = 0;
+  int priority = 0;
 
-  std::vector<ceph::buffer::list*> out_bl;
-  std::vector<Context*> out_handler;
+  std::vector<bufferlist*> out_bl;
+  std::vector<fu2::unique_function<void(boost::system::error_code, int,
+				   const ceph::buffer::list& bl) &&>> out_handler;
   std::vector<int*> out_rval;
+  std::vector<boost::system::error_code*> out_ec;
 
-  ObjectOperation() : flags(0), priority(0) {}
-  ~ObjectOperation() {
-    while (!out_handler.empty()) {
-      delete out_handler.back();
-      out_handler.pop_back();
-    }
-  }
+  ObjectOperation() = default;
+  ObjectOperation(const ObjectOperation&) = delete;
+  ObjectOperation& operator =(const ObjectOperation&) = delete;
+  ObjectOperation(ObjectOperation&&) = default;
+  ObjectOperation& operator =(ObjectOperation&&) = default;
+  ~ObjectOperation() = default;
 
   size_t size() {
     return ops.size();
@@ -89,24 +91,51 @@ struct ObjectOperation {
     ops.rbegin()->op.flags = flags;
   }
 
-  class C_TwoContexts;
-  /**
-   * Add a callback to run when this operation completes,
-   * after any other callbacks for it.
-   */
-  void add_handler(Context *extra);
+
+  void set_handler(fu2::unique_function<void(boost::system::error_code, int,
+					     const bufferlist&) &&> f) {
+    if (f) {
+      if (out_handler.back()) {
+	// This happens seldom enough that we may as well keep folding
+	// functions together when we get another one rather than
+	// using a container.
+	out_handler.back() =
+	  [f = std::move(f),
+	   g = std::move(std::move(out_handler.back()))]
+	  (boost::system::error_code ec, int r,
+	   const bufferlist& bl) mutable {
+	    std::move(g)(ec, r, bl);
+	    std::move(f)(ec, r, bl);
+	  };
+      } else {
+	out_handler.back() = std::move(f);
+      }
+    }
+    ceph_assert(ops.size() == out_handler.size());
+  }
+
+  void set_handler(Context *c) {
+    if (c)
+      set_handler([c = std::unique_ptr<Context>(c)](boost::system::error_code,
+						    int r,
+						    const buffer::list&) mutable {
+		    c.release()->complete(r);
+		  });
+
+  }
 
   OSDOp& add_op(int op) {
-    int s = ops.size();
-    ops.resize(s+1);
-    ops[s].op.op = op;
-    out_bl.resize(s+1);
-    out_bl[s] = NULL;
-    out_handler.resize(s+1);
-    out_handler[s] = NULL;
-    out_rval.resize(s+1);
-    out_rval[s] = NULL;
-    return ops[s];
+    ops.emplace_back();
+    ops.back().op.op = op;
+    out_bl.push_back(nullptr);
+    ceph_assert(ops.size() == out_bl.size());
+    out_handler.emplace_back();
+    ceph_assert(ops.size() == out_handler.size());
+    out_rval.push_back(nullptr);
+    ceph_assert(ops.size() == out_rval.size());
+    out_ec.push_back(nullptr);
+    ceph_assert(ops.size() == out_ec.size());
+    return ops.back();
   }
   void add_data(int op, uint64_t off, uint64_t len, ceph::buffer::list& bl) {
     OSDOp& osd_op = add_op(op);
@@ -147,7 +176,7 @@ struct ObjectOperation {
     OSDOp& osd_op = add_op(op);
 
     unsigned p = ops.size() - 1;
-    out_handler[p] = ctx;
+    set_handler(ctx);
     out_bl[p] = outbl;
     out_rval[p] = prval;
 
@@ -267,7 +296,7 @@ struct ObjectOperation {
     C_ObjectOperation_stat *h = new C_ObjectOperation_stat(psize, pmtime, NULL, NULL,
 							   prval);
     out_bl[p] = &h->bl;
-    out_handler[p] = h;
+    set_handler(h);
     out_rval[p] = prval;
   }
   void stat(uint64_t *psize, time_t *ptime, int *prval) {
@@ -276,7 +305,7 @@ struct ObjectOperation {
     C_ObjectOperation_stat *h = new C_ObjectOperation_stat(psize, NULL, ptime, NULL,
 							   prval);
     out_bl[p] = &h->bl;
-    out_handler[p] = h;
+    set_handler(h);
     out_rval[p] = prval;
   }
   void stat(uint64_t *psize, struct timespec *pts, int *prval) {
@@ -285,7 +314,7 @@ struct ObjectOperation {
     C_ObjectOperation_stat *h = new C_ObjectOperation_stat(psize, NULL, NULL, pts,
 							   prval);
     out_bl[p] = &h->bl;
-    out_handler[p] = h;
+    set_handler(h);
     out_rval[p] = prval;
   }
   // object cmpext
@@ -304,7 +333,7 @@ struct ObjectOperation {
     add_data(CEPH_OSD_OP_CMPEXT, off, cmp_bl.length(), cmp_bl);
     unsigned p = ops.size() - 1;
     C_ObjectOperation_cmpext *h = new C_ObjectOperation_cmpext(prval);
-    out_handler[p] = h;
+    set_handler(h);
     out_rval[p] = prval;
   }
 
@@ -315,7 +344,7 @@ struct ObjectOperation {
     add_data(CEPH_OSD_OP_CMPEXT, off, cmp_len, cmp_bl);
     unsigned p = ops.size() - 1;
     C_ObjectOperation_cmpext *h = new C_ObjectOperation_cmpext(prval);
-    out_handler[p] = h;
+    set_handler(h);
     out_rval[p] = prval;
   }
 
@@ -326,7 +355,7 @@ struct ObjectOperation {
     unsigned p = ops.size() - 1;
     out_bl[p] = pbl;
     out_rval[p] = prval;
-    out_handler[p] = ctx;
+    set_handler(ctx);
   }
 
   struct C_ObjectOperation_sparse_read : public Context {
@@ -367,7 +396,7 @@ struct ObjectOperation {
     C_ObjectOperation_sparse_read *h =
       new C_ObjectOperation_sparse_read(data_bl, m, prval);
     out_bl[p] = &h->bl;
-    out_handler[p] = h;
+    set_handler(h);
     out_rval[p] = prval;
   }
   void write(uint64_t off, ceph::buffer::list& bl,
@@ -424,7 +453,7 @@ struct ObjectOperation {
     unsigned p = ops.size() - 1;
     out_bl[p] = pbl;
     out_rval[p] = prval;
-    out_handler[p] = ctx;
+    set_handler(ctx);
   }
 
   // object attrs
@@ -596,7 +625,7 @@ struct ObjectOperation {
       unsigned p = ops.size() - 1;
       C_ObjectOperation_decodevals *h
 	= new C_ObjectOperation_decodevals(0, pattrs, nullptr, prval);
-      out_handler[p] = h;
+      set_handler(h);
       out_bl[p] = &h->bl;
       out_rval[p] = prval;
     }
@@ -653,7 +682,7 @@ struct ObjectOperation {
       unsigned p = ops.size() - 1;
       C_ObjectOperation_decodekeys *h =
 	new C_ObjectOperation_decodekeys(max_to_get, out_set, ptruncated, prval);
-      out_handler[p] = h;
+      set_handler(h);
       out_bl[p] = &h->bl;
       out_rval[p] = prval;
     }
@@ -678,7 +707,7 @@ struct ObjectOperation {
       unsigned p = ops.size() - 1;
       C_ObjectOperation_decodevals *h =
 	new C_ObjectOperation_decodevals(max_to_get, out_set, ptruncated, prval);
-      out_handler[p] = h;
+      set_handler(h);
       out_bl[p] = &h->bl;
       out_rval[p] = prval;
     }
@@ -698,7 +727,7 @@ struct ObjectOperation {
       unsigned p = ops.size() - 1;
       C_ObjectOperation_decodevals *h =
 	new C_ObjectOperation_decodevals(0, out_set, nullptr, prval);
-      out_handler[p] = h;
+      set_handler(h);
       out_bl[p] = &h->bl;
       out_rval[p] = prval;
     }
@@ -848,7 +877,7 @@ struct ObjectOperation {
 				    out_reqid_return_codes, truncate_seq,
 				    truncate_size, prval);
     out_bl[p] = &h->bl;
-    out_handler[p] = h;
+    set_handler(h);
   }
 
   void undirty() {
@@ -885,7 +914,7 @@ struct ObjectOperation {
     C_ObjectOperation_isdirty *h =
       new C_ObjectOperation_isdirty(pisdirty, prval);
     out_bl[p] = &h->bl;
-    out_handler[p] = h;
+    set_handler(h);
   }
 
   struct C_ObjectOperation_hit_set_ls : public Context {
@@ -945,7 +974,7 @@ struct ObjectOperation {
     C_ObjectOperation_hit_set_ls *h =
       new C_ObjectOperation_hit_set_ls(pls, NULL, prval);
     out_bl[p] = &h->bl;
-    out_handler[p] = h;
+    set_handler(h);
   }
   void hit_set_ls(std::list<std::pair<ceph::real_time, ceph::real_time> > *pls,
 		  int *prval) {
@@ -955,7 +984,7 @@ struct ObjectOperation {
     C_ObjectOperation_hit_set_ls *h =
       new C_ObjectOperation_hit_set_ls(NULL, pls, prval);
     out_bl[p] = &h->bl;
-    out_handler[p] = h;
+    set_handler(h);
   }
 
   /**
@@ -1052,7 +1081,7 @@ struct ObjectOperation {
       unsigned p = ops.size() - 1;
       C_ObjectOperation_decodewatchers *h =
 	new C_ObjectOperation_decodewatchers(out, prval);
-      out_handler[p] = h;
+      set_handler(h);
       out_bl[p] = &h->bl;
       out_rval[p] = prval;
     }
@@ -1064,7 +1093,7 @@ struct ObjectOperation {
       unsigned p = ops.size() - 1;
       C_ObjectOperation_decodesnaps *h =
 	new C_ObjectOperation_decodesnaps(out, prval);
-      out_handler[p] = h;
+      set_handler(h);
       out_bl[p] = &h->bl;
       out_rval[p] = prval;
     }
@@ -1193,10 +1222,11 @@ struct ObjectOperation {
     out_bl.resize(sops.size());
     out_handler.resize(sops.size());
     out_rval.resize(sops.size());
+    out_ec.resize(sops.size());
     for (uint32_t i = 0; i < sops.size(); i++) {
       out_bl[i] = &sops[i].outdata;
-      out_handler[i] = NULL;
       out_rval[i] = &sops[i].rval;
+      out_ec[i] = nullptr;
     }
   }
 
@@ -1381,10 +1411,12 @@ public:
     SnapContext snapc;
     ceph::real_time mtime;
 
-    ceph::buffer::list *outbl;
+    ceph::buffer::list* outbl;
     std::vector<ceph::buffer::list*> out_bl;
-    std::vector<Context*> out_handler;
+    std::vector<fu2::unique_function<void(boost::system::error_code, int,
+				    const ceph::buffer::list& bl) &&>> out_handler;
     std::vector<int*> out_rval;
+    std::vector<boost::system::error_code*> out_ec;
 
     int priority;
     Context *onfinish;
@@ -1442,10 +1474,10 @@ public:
       /* initialize out_* to match op std::vector */
       out_bl.resize(ops.size());
       out_rval.resize(ops.size());
+      out_ec.resize(ops.size());
       out_handler.resize(ops.size());
       for (unsigned i = 0; i < ops.size(); i++) {
 	out_bl[i] = NULL;
-	out_handler[i] = NULL;
 	out_rval[i] = NULL;
       }
 
@@ -1470,10 +1502,6 @@ public:
 
   private:
     ~Op() override {
-      while (!out_handler.empty()) {
-	delete out_handler.back();
-	out_handler.pop_back();
-      }
       trace.event("finish");
     }
   };
@@ -2353,6 +2381,7 @@ public:
     o->mtime = mtime;
     o->snapc = snapc;
     o->out_rval.swap(op.out_rval);
+    o->out_ec.swap(op.out_ec);
     o->reqid = reqid;
     return o;
   }
@@ -2368,6 +2397,7 @@ public:
     op_submit(o, &tid);
     return tid;
   }
+
   Op *prepare_read_op(
     const object_t& oid, const object_locator_t& oloc,
     ObjectOperation& op,
@@ -2386,6 +2416,7 @@ public:
     o->out_bl.swap(op.out_bl);
     o->out_handler.swap(op.out_handler);
     o->out_rval.swap(op.out_rval);
+    o->out_ec.swap(op.out_ec);
     return o;
   }
   ceph_tid_t read(

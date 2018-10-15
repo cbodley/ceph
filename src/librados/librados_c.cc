@@ -3723,7 +3723,7 @@ extern "C" void _rados_read_op_getxattrs(rados_read_op_t read_op,
   tracepoint(librados, rados_read_op_getxattrs_enter, read_op, prval);
   librados::RadosXattrsIter *xattrs_iter = new librados::RadosXattrsIter;
   ((::ObjectOperation *)read_op)->getxattrs(&xattrs_iter->attrset, prval);
-  ((::ObjectOperation *)read_op)->add_handler(new C_XattrsIter(xattrs_iter));
+  ((::ObjectOperation *)read_op)->set_handler(new C_XattrsIter(xattrs_iter));
   *iter = xattrs_iter;
   tracepoint(librados, rados_read_op_getxattrs_exit, *iter);
 }
@@ -3747,7 +3747,7 @@ extern "C" void _rados_read_op_omap_get_vals(rados_read_op_t read_op,
     &omap_iter->values,
     nullptr,
     prval);
-  ((::ObjectOperation *)read_op)->add_handler(new C_OmapIter(omap_iter));
+  ((::ObjectOperation *)read_op)->set_handler(new C_OmapIter(omap_iter));
   *iter = omap_iter;
   tracepoint(librados, rados_read_op_omap_get_vals_exit, *iter);
 }
@@ -3772,7 +3772,7 @@ extern "C" void _rados_read_op_omap_get_vals2(rados_read_op_t read_op,
     &omap_iter->values,
     (bool*)pmore,
     prval);
-  ((::ObjectOperation *)read_op)->add_handler(new C_OmapIter(omap_iter));
+  ((::ObjectOperation *)read_op)->set_handler(new C_OmapIter(omap_iter));
   *iter = omap_iter;
   tracepoint(librados, rados_read_op_omap_get_vals_exit, *iter);
 }
@@ -3804,7 +3804,7 @@ extern "C" void _rados_read_op_omap_get_keys(rados_read_op_t read_op,
   ((::ObjectOperation *)read_op)->omap_get_keys(
     start_after ? start_after : "",
     max_return, &ctx->keys, nullptr, prval);
-  ((::ObjectOperation *)read_op)->add_handler(ctx);
+  ((::ObjectOperation *)read_op)->set_handler(ctx);
   *iter = omap_iter;
   tracepoint(librados, rados_read_op_omap_get_keys_exit, *iter);
 }
@@ -3824,7 +3824,7 @@ extern "C" void _rados_read_op_omap_get_keys2(rados_read_op_t read_op,
     start_after ? start_after : "",
     max_return, &ctx->keys,
     (bool*)pmore, prval);
-  ((::ObjectOperation *)read_op)->add_handler(ctx);
+  ((::ObjectOperation *)read_op)->set_handler(ctx);
   *iter = omap_iter;
   tracepoint(librados, rados_read_op_omap_get_keys_exit, *iter);
 }
@@ -3839,7 +3839,7 @@ static void internal_rados_read_op_omap_get_vals_by_keys(rados_read_op_t read_op
   ((::ObjectOperation *)read_op)->omap_get_vals_by_keys(to_get,
                                                         &omap_iter->values,
                                                         prval);
-  ((::ObjectOperation *)read_op)->add_handler(new C_OmapIter(omap_iter));
+  ((::ObjectOperation *)read_op)->set_handler(new C_OmapIter(omap_iter));
   *iter = omap_iter;
 }
 
