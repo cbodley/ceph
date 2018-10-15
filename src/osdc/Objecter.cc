@@ -537,7 +537,7 @@ void Objecter::_send_linger(LingerOp *info,
   watchl.unlock();
   Op *o = new Op(info->target.base_oid, info->target.base_oloc,
 		 opv, info->target.flags | CEPH_OSD_FLAG_READ,
-		 oncommit, info->pobjver);
+		 OpContextVert(oncommit), info->pobjver);
   o->outbl = poutbl;
   o->snapid = info->snap;
   o->snapc = info->snapc;
@@ -673,7 +673,7 @@ void Objecter::_send_linger_ping(LingerOp *info)
   C_Linger_Ping *onack = new C_Linger_Ping(this, info);
   Op *o = new Op(info->target.base_oid, info->target.base_oloc,
 		 opv, info->target.flags | CEPH_OSD_FLAG_READ,
-		 onack, NULL, NULL);
+		 OpContextVert(onack), NULL, NULL);
   o->target = info->target;
   o->should_resend = false;
   _send_op_account(o);
@@ -1528,7 +1528,9 @@ void Objecter::_check_op_pool_dne(Op *op, unique_lock *sl)
 		     << " dne" << dendl;
       if (op->onfinish) {
 	num_in_flight--;
-	op->onfinish->complete(-ENOENT);
+	std::move(op->onfinish)(
+	  boost::system::errc::make_error_code(
+	    boost::system::errc::no_such_file_or_directory));
       }
 
       OSDSession *s = op->session;
@@ -2451,8 +2453,7 @@ int Objecter::op_cancel(OSDSession *s, ceph_tid_t tid, int r)
   Op *op = p->second;
   if (op->onfinish) {
     num_in_flight--;
-    op->onfinish->complete(r);
-    op->onfinish = NULL;
+    std::move(op->onfinish)(ceph::to_error_code(r));
   }
   _op_cancel_map_check(op);
   _finish_op(op, r);
@@ -3066,7 +3067,7 @@ void Objecter::_cancel_linger_op(Op *op)
 
   ceph_assert(!op->should_resend);
   if (op->onfinish) {
-    delete op->onfinish;
+    op->onfinish = nullptr;
     num_in_flight--;
   }
 
@@ -3356,7 +3357,7 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
     // have, but that is better than doing callbacks out of order.
   }
 
-  Context *onfinish = 0;
+  fu2::unique_function<void(boost::system::error_code)> onfinish;
 
   int rc = m->get_result();
 
@@ -3470,8 +3471,8 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
 
   if (op->onfinish) {
     num_in_flight--;
-    onfinish = op->onfinish;
-    op->onfinish = NULL;
+    onfinish = std::move(op->onfinish);
+    op->onfinish = nullptr;
   }
   logger->inc(l_osdc_op_reply);
 
@@ -3491,7 +3492,7 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
 
   // do callbacks
   if (onfinish) {
-    onfinish->complete(rc);
+    std::move(onfinish)(ceph::to_error_code(rc));
   }
   if (completion_lock.mutex()) {
     completion_lock.unlock();
