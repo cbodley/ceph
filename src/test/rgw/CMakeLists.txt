@@ -123,3 +123,7 @@ target_link_libraries(unittest_rgw_iam_policy
 
 add_executable(unittest_rgw_string test_rgw_string.cc)
 add_ceph_unittest(unittest_rgw_string)
+
+add_executable(unittest_rgw_http_client test_http_client.cc)
+add_ceph_unittest(unittest_rgw_http_client)
+target_link_libraries(unittest_rgw_http_client common Boost::coroutine Boost::context)
