@@ -21,18 +21,17 @@
 #include <type_traits>
 #include <variant>
 
-
 #include <boost/asio.hpp>
 
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
+#include <boost/uuid/uuid.hpp>
 
 
 // HATE. LET ME TELL YOU HOW MUCH I'VE COME TO HATE BOOST.SYSTEM SINCE
 // I BEGAN TO LIVE.
 
 #include <boost/system/error_code.hpp>
-
 // Needed for type erasure and template support. We can't really avoid
 // it.
 
@@ -43,6 +42,8 @@
 
 #include "include/rados/rados_types.hpp"
 #include "include/buffer.h"
+#include "include/object.h"
+
 #include "common/ceph_time.h"
 
 #ifndef RADOS_UNLEASHED_HPP
@@ -195,7 +196,7 @@ public:
 			      bool>,
 		   std::vector<obj_watch_t>,
 		   librados::snap_set_t,
-		   size_t>>>;
+		   std::size_t>>>;
 
   using Signature = void(boost::system::error_code, Result);
   using Completion = ceph::async::Completion<Signature>;
@@ -273,7 +274,7 @@ public:
   void create(bool exclusive);
   void write(uint64_t off, bufferlist&& bl);
   void write_full(bufferlist&& bl);
-  void writesame(uint64_t off, uint64_t write_len,
+  void writesame(std::uint64_t off, std::uint64_t write_len,
 		 bufferlist&& bl);
   void append(bufferlist&& bl);
   void remove();
@@ -332,12 +333,106 @@ public:
     return init.result.get();
   }
 
-  template<typename Executor, typename CompletionToken>
+  template<typename CompletionToken>
   auto execute(const Object& o, const IOContext& ioc, WriteOp&& op,
 	       CompletionToken&& token) {
     boost::asio::async_completion<CompletionToken, Op::Signature> init(token);
     execute(o, ioc, std::move(op),
 	    Op::Completion::create(get_executor(),
+				   std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  boost::uuids::uuid get_fsid() const noexcept;
+
+  using LookupPoolSig = void(boost::system::error_code,
+			     std::int64_t);
+  using LookupPoolComp = ceph::async::Completion<LookupPoolSig>;
+  template<typename CompletionToken>
+  auto lookup_pool(std::string name,
+		   CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, LookupPoolSig> init(token);
+    lookup_pool(std::move(name),
+		LookupPoolComp::create(get_executor(),
+				       std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  std::optional<uint64_t> get_pool_alignment(int64_t pool_id);
+  std::vector<std::pair<std::int64_t, std::string>> list_pools();
+
+  using PoolOpSig = void(boost::system::error_code);
+  using PoolOpComp = ceph::async::Completion<PoolOpSig>;
+  template<typename CompletionToken>
+  auto create_pool_snap(int64_t pool, std::string_view snapName,
+			CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    create_pool_snap(pool, snapName,
+		     PoolOpComp::create(get_executor(),
+					std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  using SMSnapSig = void(boost::system::error_code, snapid_t);
+  using SMSnapComp = ceph::async::Completion<SMSnapSig>;
+  template<typename CompletionToken>
+  auto allocate_selfmanaged_snap(int64_t pool,
+				 CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, SMSnapSig> init(token);
+    allocate_selfmanaged_snap(pool,
+			      SMSnapComp::create(
+				get_executor(),
+				std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
+  auto delete_pool_snap(int64_t pool, std::string_view snapName,
+			CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    delete_pool_snap(pool, snapName,
+		     PoolOpComp::create(get_executor(),
+					std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
+  auto delete_selfmanaged_snap(int64_t pool, std::string_view snapName,
+			       CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    delete_selfmanaged_snap(pool, snapName,
+			    PoolOpComp::create(
+			      get_executor(),
+			      std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
+  auto create_pool(std::string_view name, std::optional<int> crush_rule,
+		   CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    create_pool(name, crush_rule,
+		PoolOpComp::create(get_executor(),
+				   std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
+  auto delete_pool(std::string_view name,
+		   CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    delete_pool(name,
+		PoolOpComp::create(get_executor(),
+				   std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
+  auto delete_pool(int64_t pool,
+		   CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    delete_pool(pool,
+		PoolOpComp::create(get_executor(),
 				   std::move(init.completion_handler)));
     return init.result.get();
   }
@@ -349,6 +444,20 @@ private:
 
   void execute(const Object& o, const IOContext& ioc, WriteOp&& op,
 	       std::unique_ptr<Op::Completion> c);
+  void lookup_pool(std::string name, std::unique_ptr<LookupPoolComp> c);
+  void create_pool_snap(int64_t pool, std::string_view snapName,
+			std::unique_ptr<PoolOpComp> c);
+  void allocate_selfmanaged_snap(int64_t pool, std::unique_ptr<SMSnapComp> c);
+  void delete_pool_snap(int64_t pool, std::string_view snapName,
+			std::unique_ptr<PoolOpComp> c);
+  void delete_selfmanaged_snap(int64_t pool, snapid_t snap,
+			       std::unique_ptr<PoolOpComp> c);
+  void create_pool(std::string_view name, std::optional<int> crush_rule,
+		   std::unique_ptr<PoolOpComp> c);
+  void delete_pool(std::string_view name,
+		   std::unique_ptr<PoolOpComp> c);
+  void delete_pool(int64_t pool,
+		   std::unique_ptr<PoolOpComp> c);
 
   static constexpr std::size_t impl_size = 512 * 8;
   std::aligned_storage_t<impl_size> impl;

@@ -788,6 +788,150 @@ void RADOS::execute(const Object& o, const IOContext& _ioc, WriteOp&& _op,
     DarnIt(std::move(c), std::move(op->res)));
   op->clear();
 }
+
+boost::uuids::uuid RADOS::get_fsid() const noexcept {
+  auto rados = reinterpret_cast<const _::RADOS*>(&impl);
+  return rados->monclient.get_fsid().uuid;
+}
+
+
+void RADOS::lookup_pool(std::string name, std::unique_ptr<LookupPoolComp> c)
+{
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  int64_t ret = objecter->with_osdmap(std::mem_fn(&OSDMap::lookup_pg_pool_name),
+				      name);
+  if (-ENOENT == ret) {
+    objecter->wait_for_latest_osdmap(
+      [name = std::move(name), c = std::move(c), objecter]
+      (boost::system::error_code ec) mutable {
+	int64_t ret =
+	  objecter->with_osdmap(std::mem_fn(&OSDMap::lookup_pg_pool_name),
+				name);
+	if (ret < 0)
+	  ceph::async::dispatch(std::move(c), ceph::to_error_code(ret),
+				std::int64_t(0));
+	else
+	  ceph::async::dispatch(std::move(c), boost::system::error_code{}, ret);
+      });
+    ret = objecter->with_osdmap(std::mem_fn(&OSDMap::lookup_pg_pool_name),
+                                 name);
+  } else if (ret < 0) {
+    ceph::async::dispatch(std::move(c), ceph::to_error_code(ret),
+			  std::int64_t(0));
+  } else {
+    ceph::async::dispatch(std::move(c), boost::system::error_code{}, ret);
+  }
+}
+
+
+std::optional<uint64_t> RADOS::get_pool_alignment(int64_t pool_id)
+{
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  return objecter->with_osdmap(
+    [pool_id](const OSDMap &o) -> std::optional<uint64_t> {
+      if (!o.have_pg_pool(pool_id)) {
+	throw boost::system::system_error(
+	  ENOENT, boost::system::system_category(),
+	  "Cannot find pool in OSDMap.");
+      } else if (o.get_pg_pool(pool_id)->requires_aligned_append()) {
+	return o.get_pg_pool(pool_id)->required_alignment();
+      } else {
+	return std::nullopt;
+      }
+    });
+}
+
+std::vector<std::pair<std::int64_t, std::string>> RADOS::list_pools() {
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  return objecter->with_osdmap(
+    [&](const OSDMap& o) {
+      std::vector<std::pair<std::int64_t, std::string>> v;
+      for (auto p : o.get_pools())
+	v.push_back(std::make_pair(p.first, o.get_pool_name(p.first)));
+      return v;
+    });
+}
+
+void RADOS::create_pool_snap(std::int64_t pool,
+			     std::string_view snapName,
+			     std::unique_ptr<PoolOpComp> c)
+{
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  objecter->create_pool_snap(
+    pool, snapName,
+    [c = std::move(c)](boost::system::error_code e, const bufferlist&) mutable {
+      ceph::async::dispatch(std::move(c), e);
+    });
+}
+
+void RADOS::allocate_selfmanaged_snap(int64_t pool,
+				      std::unique_ptr<SMSnapComp> c) {
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  objecter->allocate_selfmanaged_snap(
+    pool,
+    [c = std::move(c)](boost::system::error_code e, snapid_t snap) mutable {
+      ceph::async::dispatch(std::move(c), e, snap);
+    });
+}
+
+void RADOS::delete_pool_snap(std::int64_t pool,
+			     std::string_view snapName,
+			     std::unique_ptr<PoolOpComp> c)
+{
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  objecter->delete_pool_snap(
+    pool, snapName,
+    [c = std::move(c)](boost::system::error_code e, const bufferlist&) mutable {
+      ceph::async::dispatch(std::move(c), e);
+    });
+}
+
+void RADOS::delete_selfmanaged_snap(std::int64_t pool,
+				    snapid_t snap,
+				    std::unique_ptr<PoolOpComp> c)
+{
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  objecter->delete_selfmanaged_snap(
+    pool, snap,
+    [c = std::move(c)](boost::system::error_code e, const bufferlist&) mutable {
+      ceph::async::dispatch(std::move(c), e);
+    });
+}
+
+void RADOS::create_pool(std::string_view name,
+			std::optional<int> crush_rule,
+			std::unique_ptr<PoolOpComp> c)
+{
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  objecter->create_pool(
+    name,
+    [c = std::move(c)](boost::system::error_code e, const bufferlist&) mutable {
+      ceph::async::dispatch(std::move(c), e);
+    },
+    crush_rule.value_or(-1));
+}
+
+void RADOS::delete_pool(std::string_view name,
+			std::unique_ptr<PoolOpComp> c)
+{
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  objecter->delete_pool(
+    name,
+    [c = std::move(c)](boost::system::error_code e, const bufferlist&) mutable {
+      ceph::async::dispatch(std::move(c), e);
+    });
+}
+
+void RADOS::delete_pool(std::int64_t pool,
+			std::unique_ptr<PoolOpComp> c)
+{
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  objecter->delete_pool(
+    pool,
+    [c = std::move(c)](boost::system::error_code e, const bufferlist&) mutable {
+      ceph::async::dispatch(std::move(c), e);
+    });
+}
 }
 
 namespace std {

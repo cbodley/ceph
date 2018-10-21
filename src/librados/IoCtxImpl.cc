@@ -371,16 +371,12 @@ int librados::IoCtxImpl::snap_create(const char *snapName)
   Cond cond;
   bool done;
   Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &reply);
-  reply = objecter->create_pool_snap(poolid, sName, onfinish);
+  objecter->create_pool_snap(poolid, sName, onfinish);
 
-  if (reply < 0) {
-    delete onfinish;
-  } else {
-    mylock.Lock();
-    while (!done)
-      cond.Wait(mylock);
-    mylock.Unlock();
-  }
+  mylock.Lock();
+  while (!done)
+    cond.Wait(mylock);
+  mylock.Unlock();
   return reply;
 }
 
@@ -393,18 +389,14 @@ int librados::IoCtxImpl::selfmanaged_snap_create(uint64_t *psnapid)
   bool done;
   Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &reply);
   snapid_t snapid;
-  reply = objecter->allocate_selfmanaged_snap(poolid, &snapid, onfinish);
+  objecter->allocate_selfmanaged_snap(poolid, &snapid, onfinish);
 
-  if (reply < 0) {
-    delete onfinish;
-  } else {
-    mylock.Lock();
-    while (!done)
-      cond.Wait(mylock);
-    mylock.Unlock();
-    if (reply == 0)
-      *psnapid = snapid;
-  }
+  mylock.Lock();
+  while (!done)
+    cond.Wait(mylock);
+  mylock.Unlock();
+  if (reply == 0)
+    *psnapid = snapid;
   return reply;
 }
 
@@ -413,11 +405,8 @@ void librados::IoCtxImpl::aio_selfmanaged_snap_create(uint64_t *snapid,
 {
   C_aio_selfmanaged_snap_create_Complete *onfinish =
     new C_aio_selfmanaged_snap_create_Complete(client, c, snapid);
-  int r = objecter->allocate_selfmanaged_snap(poolid, &onfinish->snapid,
-                                              onfinish);
-  if (r < 0) {
-    onfinish->complete(r);
-  }
+  objecter->allocate_selfmanaged_snap(poolid, &onfinish->snapid,
+				      onfinish);
 }
 
 int librados::IoCtxImpl::snap_remove(const char *snapName)
@@ -429,16 +418,12 @@ int librados::IoCtxImpl::snap_remove(const char *snapName)
   Cond cond;
   bool done;
   Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &reply);
-  reply = objecter->delete_pool_snap(poolid, sName, onfinish);
+  objecter->delete_pool_snap(poolid, sName, onfinish);
 
-  if (reply < 0) {
-    delete onfinish; 
-  } else {
-    mylock.Lock();
-    while(!done)
-      cond.Wait(mylock);
-    mylock.Unlock();
-  }
+  mylock.Lock();
+  while(!done)
+    cond.Wait(mylock);
+  mylock.Unlock();
   return reply;
 }
 

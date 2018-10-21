@@ -698,16 +698,12 @@ int librados::RadosClient::pool_create(string& name,
   Cond cond;
   bool done;
   Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &reply);
-  reply = objecter->create_pool(name, onfinish, crush_rule);
+  objecter->create_pool(name, onfinish, crush_rule);
 
-  if (reply < 0) {
-    delete onfinish;
-  } else {
-    mylock.Lock();
-    while(!done)
-      cond.Wait(mylock);
-    mylock.Unlock();
-  }
+  mylock.Lock();
+  while(!done)
+    cond.Wait(mylock);
+  mylock.Unlock();
   return reply;
 }
 
@@ -720,10 +716,7 @@ int librados::RadosClient::pool_create_async(string& name,
     return r;
 
   Context *onfinish = make_lambda_context(CB_PoolAsync_Safe(c));
-  r = objecter->create_pool(name, onfinish, crush_rule);
-  if (r < 0) {
-    delete onfinish;
-  }
+  objecter->create_pool(name, onfinish, crush_rule);
   return r;
 }
 
@@ -762,16 +755,12 @@ int librados::RadosClient::pool_delete(const char *name)
   bool done;
   int ret;
   Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &ret);
-  ret = objecter->delete_pool(name, onfinish);
+  objecter->delete_pool(name, onfinish);
 
-  if (ret < 0) {
-    delete onfinish;
-  } else {
-    mylock.Lock();
-    while (!done)
-      cond.Wait(mylock);
-    mylock.Unlock();
-  }
+  mylock.Lock();
+  while (!done)
+    cond.Wait(mylock);
+  mylock.Unlock();
   return ret;
 }
 
@@ -782,10 +771,7 @@ int librados::RadosClient::pool_delete_async(const char *name, PoolAsyncCompleti
     return r;
 
   Context *onfinish = make_lambda_context(CB_PoolAsync_Safe(c));
-  r = objecter->delete_pool(name, onfinish);
-  if (r < 0) {
-    delete onfinish;
-  }
+  objecter->delete_pool(name, onfinish);
   return r;
 }
 

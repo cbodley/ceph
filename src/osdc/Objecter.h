@@ -130,7 +130,7 @@ struct ObjectOperation {
     if (c)
       set_handler([c = std::unique_ptr<Context>(c)](boost::system::error_code,
 						    int r,
-						    const buffer::list&) mutable {
+						    const ceph::buffer::list&) mutable {
 		    c.release()->complete(r);
 		  });
 
@@ -418,7 +418,7 @@ struct ObjectOperation {
 				   int* prval,
 				   boost::system::error_code* pec)
       : data_bl(data_bl), extents(extents), prval(prval), pec(pec) {}
-    void operator()(boost::system::error_code ec, int r, const buffer::list& bl) {
+    void operator()(boost::system::error_code ec, int r, const ceph::buffer::list& bl) {
       auto iter = bl.cbegin();
       if (r >= 0) {
         // NOTE: it's possible the sub-op has not been executed but the result
@@ -444,7 +444,7 @@ struct ObjectOperation {
     }
   };
   void sparse_read(uint64_t off, uint64_t len, std::map<uint64_t, uint64_t>* m,
-		   buffer::list* data_bl, int* prval) {
+		   ceph::buffer::list* data_bl, int* prval) {
     ceph::buffer::list bl;
     add_data(CEPH_OSD_OP_SPARSE_READ, off, len, bl);
     set_handler(CB_ObjectOperation_sparse_read(data_bl, m, prval, nullptr));
@@ -453,7 +453,7 @@ struct ObjectOperation {
   void sparse_read(uint64_t off, uint64_t len,
 		   boost::system::error_code* ec,
 		   std::vector<std::pair<uint64_t, uint64_t>>* m,
-		   buffer::list* data_bl) {
+		   ceph::buffer::list* data_bl) {
     ceph::buffer::list bl;
     add_data(CEPH_OSD_OP_SPARSE_READ, off, len, bl);
     set_handler(CB_ObjectOperation_sparse_read(data_bl, m, nullptr, ec));
@@ -717,7 +717,7 @@ struct ObjectOperation {
   void setxattr(std::string_view name, const ceph::buffer::list& bl) {
     add_xattr(CEPH_OSD_OP_SETXATTR, name, bl);
   }
-  void setxattr(const char *name, const string& s) {
+  void setxattr(const char *name, const std::string& s) {
     ceph::buffer::list bl;
     bl.append(s);
     add_xattr(CEPH_OSD_OP_SETXATTR, name, bl);
@@ -824,9 +824,9 @@ struct ObjectOperation {
 		     bool *ptruncated) {
     OSDOp &op = add_op(CEPH_OSD_OP_OMAPGETVALS);
     ceph::buffer::list bl;
-    encode(start_after ? *start_after : string_view{}, bl);
+    encode(start_after ? *start_after : std::string_view{}, bl);
     encode(max_to_get, bl);
-    encode(filter_prefix ? *start_after : string_view{}, bl);
+    encode(filter_prefix ? *start_after : std::string_view{}, bl);
     op.op.extent.offset = 0;
     op.op.extent.length = bl.length();
     op.indata.claim_append(bl);
@@ -1828,19 +1828,17 @@ public:
   };
 
   struct PoolOp {
-    ceph_tid_t tid;
-    int64_t pool;
+    ceph_tid_t tid = 0;
+    int64_t pool = 0;
     std::string name;
-    Context *onfinish;
-    uint64_t ontimeout;
-    int pool_op;
-    int16_t crush_rule;
-    snapid_t snapid;
-    ceph::buffer::list *blp;
-
+    fu2::unique_function<void(boost::system::error_code, const ceph::buffer::list&) &&> onfinish;
+    uint64_t ontimeout = 0;
+    int pool_op = 0;
+    int16_t crush_rule = 0;
+    snapid_t snapid = 0;
     ceph::coarse_mono_time last_submit;
-    PoolOp() : tid(0), pool(0), onfinish(NULL), ontimeout(0), pool_op(0),
-	       crush_rule(0), snapid(0), blp(NULL) {}
+
+    PoolOp() {}
   };
 
   // -- osd commands --
@@ -3270,18 +3268,113 @@ private:
   void pool_op_submit(PoolOp *op);
   void _pool_op_submit(PoolOp *op);
   void _finish_pool_op(PoolOp *op, int r);
-  void _do_delete_pool(int64_t pool, Context *onfinish);
-public:
-  int create_pool_snap(int64_t pool, std::string& snapName, Context *onfinish);
-  int allocate_selfmanaged_snap(int64_t pool, snapid_t *psnapid,
-				Context *onfinish);
-  int delete_pool_snap(int64_t pool, std::string& snapName, Context *onfinish);
-  int delete_selfmanaged_snap(int64_t pool, snapid_t snap, Context *onfinish);
+  void _do_delete_pool(int64_t pool,
+		       fu2::unique_function<void(
+			 boost::system::error_code,
+			 const ceph::buffer::list&) &&> onfinish);
 
-  int create_pool(std::string& name, Context *onfinish,
-		  int crush_rule=-1);
-  int delete_pool(int64_t pool, Context *onfinish);
-  int delete_pool(const std::string& name, Context *onfinish);
+public:
+  void create_pool_snap(int64_t pool, std::string_view snapName,
+			fu2::unique_function<
+			void(boost::system::error_code,
+			     const ceph::buffer::list&) &&> onfinish);
+  void create_pool_snap(int64_t pool, std::string_view snapName,
+			Context* c) {
+    create_pool_snap(pool, snapName,
+		     [c = std::unique_ptr<Context>(c)]
+		     (boost::system::error_code e,
+		      const ceph::buffer::list&) mutable {
+		       c.release()->complete(e);
+		     });
+  }
+  void allocate_selfmanaged_snap(int64_t pool,
+				 fu2::unique_function<
+				 void(boost::system::error_code,
+				      snapid_t) &&> onfinish);
+  void allocate_selfmanaged_snap(int64_t pool, snapid_t* psnapid,
+				 Context* c) {
+    allocate_selfmanaged_snap(pool,
+			      [psnapid,
+			       c = std::unique_ptr<Context>(c)]
+			      (boost::system::error_code ec,
+				snapid_t snapid) mutable {
+				*psnapid = snapid;
+				c.release()->complete(ec);
+			      });
+  }
+  void delete_pool_snap(int64_t pool, std::string_view snapName,
+			fu2::unique_function<
+			void(boost::system::error_code,
+			     const ceph::buffer::list&) &&> onfinish);
+  void delete_pool_snap(int64_t pool, std::string_view snapName,
+			Context* c) {
+    delete_pool_snap(pool, snapName,
+		     [c = std::unique_ptr<Context>(c)](
+		       boost::system::error_code ec,
+		       const ceph::buffer::list&) mutable {
+      c.release()->complete(ec);
+    });
+  }
+
+  void delete_selfmanaged_snap(int64_t pool, snapid_t snap,
+			      fu2::unique_function<
+			       void(boost::system::error_code,
+				    const ceph::buffer::list&) &&> onfinish);
+
+  void delete_selfmanaged_snap(int64_t pool, snapid_t snap,
+			       Context* c) {
+    delete_selfmanaged_snap(pool, snap,
+			    [c = std::unique_ptr<Context>(c)](
+			      boost::system::error_code ec,
+			      const ceph::buffer::list&) mutable {
+			      c.release()->complete(ec);
+			    });
+  }
+
+
+  void create_pool(std::string_view name,
+		   fu2::unique_function<
+		   void(boost::system::error_code,
+			const ceph::buffer::list&) &&> onfinish,
+		   int crush_rule=-1);
+  void create_pool(std::string_view name, Context *onfinish,
+		  int crush_rule=-1) {
+    create_pool(name,
+		[c = std::unique_ptr<Context>(onfinish)](
+		  boost::system::error_code ec,
+		  const ceph::buffer::list&) mutable {
+		  c.release()->complete(ec);
+		},
+		crush_rule);
+  }
+  void delete_pool(int64_t pool,
+		   fu2::unique_function<void(
+		     boost::system::error_code,
+		     const ceph::buffer::list&) &&> onfinish);
+  void delete_pool(int64_t pool,
+		   Context* onfinish) {
+    delete_pool(pool,
+		[c = std::unique_ptr<Context>(onfinish)](
+		  boost::system::error_code ec,
+		  const ceph::buffer::list&) mutable {
+		  c.release()->complete(ec);
+		});
+  }
+
+  void delete_pool(std::string_view name,
+		   fu2::unique_function<void(
+		     boost::system::error_code,
+		     const ceph::buffer::list&) &&> onfinish);
+
+  void delete_pool(std::string_view name,
+		   Context* onfinish) {
+    delete_pool(name,
+		[c = std::unique_ptr<Context>(onfinish)](
+		  boost::system::error_code ec,
+		  const ceph::buffer::list&) mutable {
+		  c.release()->complete(ec);
+		});
+  }
 
   void handle_pool_op_reply(MPoolOpReply *m);
   int pool_op_cancel(ceph_tid_t tid, int r);

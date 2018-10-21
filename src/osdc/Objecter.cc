@@ -3788,8 +3788,10 @@ void Objecter::put_nlist_context_budget(NListContext *list_context)
 
 // snapshots
 
-int Objecter::create_pool_snap(int64_t pool, string& snap_name,
-			       Context *onfinish)
+void Objecter::create_pool_snap(int64_t pool, std::string_view snap_name,
+				fu2::unique_function<void(
+				  boost::system::error_code,
+				  const buffer::list&) &&> onfinish)
 {
   unique_lock wl(rwlock);
   ldout(cct, 10) << "create_pool_snap; pool: " << pool << "; snap: "
@@ -3797,64 +3799,65 @@ int Objecter::create_pool_snap(int64_t pool, string& snap_name,
 
   const pg_pool_t *p = osdmap->get_pg_pool(pool);
   if (!p)
-    return -EINVAL;
-  if (p->snap_exists(snap_name.c_str()))
-    return -EEXIST;
+    std::move(onfinish)(boost::system::error_code(EINVAL,
+				       boost::system::system_category()),
+			bufferlist{});
+  if (p->snap_exists(snap_name))
+    std::move(onfinish)(boost::system::error_code(EEXIST,
+				       boost::system::system_category()),
+			bufferlist{});
 
   PoolOp *op = new PoolOp;
-  if (!op)
-    return -ENOMEM;
   op->tid = ++last_tid;
   op->pool = pool;
   op->name = snap_name;
-  op->onfinish = onfinish;
+  op->onfinish = std::move(onfinish);
   op->pool_op = POOL_OP_CREATE_SNAP;
   pool_ops[op->tid] = op;
 
   pool_op_submit(op);
-
-  return 0;
 }
 
-struct C_SelfmanagedSnap : public Context {
-  ceph::buffer::list bl;
-  snapid_t *psnapid;
-  Context *fin;
-  C_SelfmanagedSnap(snapid_t *ps, Context *f) : psnapid(ps), fin(f) {}
-  void finish(int r) override {
-    if (r == 0) {
+struct CB_SelfmanagedSnap {
+  fu2::unique_function<void(boost::system::error_code, snapid_t) &&> fin;
+  CB_SelfmanagedSnap(fu2::unique_function<void(boost::system::error_code,
+					      snapid_t) &&> fin)
+    : fin(std::move(fin)) {}
+  void operator()(boost::system::error_code ec, const ceph::buffer::list& bl) {
+    snapid_t snapid = 0;
+    if (!ec) {
       try {
-        auto p = bl.cbegin();
-        decode(*psnapid, p);
-      } catch (ceph::buffer::error&) {
-        r = -EIO;
+	auto p = bl.cbegin();
+	decode(snapid, p);
+      } catch (const ceph::buffer::error& e) {
+        ec = e.code();
       }
     }
-    fin->complete(r);
+    std::move(fin)(ec, snapid);
   }
 };
 
-int Objecter::allocate_selfmanaged_snap(int64_t pool, snapid_t *psnapid,
-					Context *onfinish)
+void Objecter::allocate_selfmanaged_snap(int64_t pool,
+					 fu2::unique_function<void(
+					   boost::system::error_code,
+					   snapid_t) &&> onfinish)
 {
   unique_lock wl(rwlock);
   ldout(cct, 10) << "allocate_selfmanaged_snap; pool: " << pool << dendl;
   PoolOp *op = new PoolOp;
-  if (!op) return -ENOMEM;
   op->tid = ++last_tid;
   op->pool = pool;
-  C_SelfmanagedSnap *fin = new C_SelfmanagedSnap(psnapid, onfinish);
-  op->onfinish = fin;
-  op->blp = &fin->bl;
+  op->onfinish = CB_SelfmanagedSnap(std::move(onfinish));
   op->pool_op = POOL_OP_CREATE_UNMANAGED_SNAP;
   pool_ops[op->tid] = op;
 
   pool_op_submit(op);
-  return 0;
 }
 
-int Objecter::delete_pool_snap(int64_t pool, string& snap_name,
-			       Context *onfinish)
+void Objecter::delete_pool_snap(
+  int64_t pool, std::string_view snap_name,
+  fu2::unique_function<void(boost::system::error_code,
+			   const buffer::list&) &&> onfinish)
 {
   unique_lock wl(rwlock);
   ldout(cct, 10) << "delete_pool_snap; pool: " << pool << "; snap: "
@@ -3862,102 +3865,115 @@ int Objecter::delete_pool_snap(int64_t pool, string& snap_name,
 
   const pg_pool_t *p = osdmap->get_pg_pool(pool);
   if (!p)
-    return -EINVAL;
-  if (!p->snap_exists(snap_name.c_str()))
-    return -ENOENT;
+    std::move(onfinish)(boost::system::error_code(
+			  EINVAL,
+			  boost::system::system_category()), buffer::list{});
+
+
+  if (!p->snap_exists(snap_name))
+    std::move(onfinish)(boost::system::error_code(
+			  ENOENT,
+			  boost::system::system_category()), buffer::list{});
 
   PoolOp *op = new PoolOp;
-  if (!op)
-    return -ENOMEM;
   op->tid = ++last_tid;
   op->pool = pool;
   op->name = snap_name;
-  op->onfinish = onfinish;
+  op->onfinish = std::move(onfinish);
   op->pool_op = POOL_OP_DELETE_SNAP;
   pool_ops[op->tid] = op;
 
   pool_op_submit(op);
-
-  return 0;
 }
 
-int Objecter::delete_selfmanaged_snap(int64_t pool, snapid_t snap,
-				      Context *onfinish)
+void Objecter::delete_selfmanaged_snap(int64_t pool, snapid_t snap,
+				       fu2::unique_function<
+				       void(boost::system::error_code,
+					    const buffer::list&) &&> onfinish)
 {
   unique_lock wl(rwlock);
   ldout(cct, 10) << "delete_selfmanaged_snap; pool: " << pool << "; snap: "
 		 << snap << dendl;
   PoolOp *op = new PoolOp;
-  if (!op) return -ENOMEM;
   op->tid = ++last_tid;
   op->pool = pool;
-  op->onfinish = onfinish;
+  op->onfinish = std::move(onfinish);
   op->pool_op = POOL_OP_DELETE_UNMANAGED_SNAP;
   op->snapid = snap;
   pool_ops[op->tid] = op;
 
   pool_op_submit(op);
-
-  return 0;
 }
 
-int Objecter::create_pool(string& name, Context *onfinish,
-			  int crush_rule)
+void Objecter::create_pool(std::string_view name,
+			   fu2::unique_function<
+			   void(boost::system::error_code,
+				const bufferlist&) &&> onfinish,
+			   int crush_rule)
 {
   unique_lock wl(rwlock);
   ldout(cct, 10) << "create_pool name=" << name << dendl;
 
   if (osdmap->lookup_pg_pool_name(name) >= 0)
-    return -EEXIST;
+    std::move(onfinish)(
+      boost::system::error_code(EEXIST, boost::system::system_category()),
+      bufferlist{});
 
   PoolOp *op = new PoolOp;
-  if (!op)
-    return -ENOMEM;
   op->tid = ++last_tid;
   op->pool = 0;
   op->name = name;
-  op->onfinish = onfinish;
+  op->onfinish = std::move(onfinish);
   op->pool_op = POOL_OP_CREATE;
   pool_ops[op->tid] = op;
   op->crush_rule = crush_rule;
 
   pool_op_submit(op);
-
-  return 0;
 }
 
-int Objecter::delete_pool(int64_t pool, Context *onfinish)
+void Objecter::delete_pool(int64_t pool,
+			   fu2::unique_function<void(
+			     boost::system::error_code,
+			     const bufferlist&) &&> onfinish)
 {
   unique_lock wl(rwlock);
   ldout(cct, 10) << "delete_pool " << pool << dendl;
 
   if (!osdmap->have_pg_pool(pool))
-    return -ENOENT;
+    std::move(onfinish)(
+      boost::system::error_code(ENOENT, boost::system::system_category()),
+      bufferlist{});
 
-  _do_delete_pool(pool, onfinish);
-  return 0;
+  _do_delete_pool(pool, std::move(onfinish));
 }
 
-int Objecter::delete_pool(const string &pool_name, Context *onfinish)
+void Objecter::delete_pool(std::string_view pool_name,
+			   fu2::unique_function<void(
+			     boost::system::error_code,
+			     const bufferlist&) &&> onfinish)
 {
   unique_lock wl(rwlock);
   ldout(cct, 10) << "delete_pool " << pool_name << dendl;
 
   int64_t pool = osdmap->lookup_pg_pool_name(pool_name);
   if (pool < 0)
-    return pool;
+    std::move(onfinish)(
+      boost::system::error_code(-pool, boost::system::system_category()),
+      bufferlist{});
 
-  _do_delete_pool(pool, onfinish);
-  return 0;
+  _do_delete_pool(pool, std::move(onfinish));
 }
 
-void Objecter::_do_delete_pool(int64_t pool, Context *onfinish)
+void Objecter::_do_delete_pool(int64_t pool,
+			       fu2::unique_function<void(
+				 boost::system::error_code,
+				 const bufferlist&) &&> onfinish)
 {
   PoolOp *op = new PoolOp;
   op->tid = ++last_tid;
   op->pool = pool;
   op->name = "delete";
-  op->onfinish = onfinish;
+  op->onfinish = std::move(onfinish);
   op->pool_op = POOL_OP_DELETE;
   pool_ops[op->tid] = op;
   pool_op_submit(op);
@@ -4009,13 +4025,13 @@ void Objecter::handle_pool_op_reply(MPoolOpReply *m)
 
   ldout(cct, 10) << "handle_pool_op_reply " << *m << dendl;
   ceph_tid_t tid = m->get_tid();
-  map<ceph_tid_t, PoolOp *>::iterator iter = pool_ops.find(tid);
+  auto iter = pool_ops.find(tid);
   if (iter != pool_ops.end()) {
     PoolOp *op = iter->second;
     ldout(cct, 10) << "have request " << tid << " at " << op << " Op: "
 		   << ceph_pool_op_name(op->pool_op) << dendl;
-    if (op->blp)
-      op->blp->claim(m->response_data);
+    bufferlist bl;
+    bl.claim(m->response_data);
     if (m->version > last_seen_osdmap_version)
       last_seen_osdmap_version = m->version;
     if (osdmap->get_epoch() < m->epoch) {
@@ -4031,8 +4047,10 @@ void Objecter::handle_pool_op_reply(MPoolOpReply *m)
 		       << " before calling back" << dendl;
 	_wait_for_new_map(OpCompletion::create(
 			    service.get_executor(),
-			    [o = op->onfinish](boost::system::error_code ec) {
-			      o->complete(ceph::from_error_code(ec));
+			    [o = std::move(op->onfinish),
+			     bl = std::move(bl)](
+			      boost::system::error_code ec) mutable {
+			      std::move(o)(ec, bl);
 			    }),
 			  m->epoch,
 			  boost::system::error_code(
@@ -4043,13 +4061,13 @@ void Objecter::handle_pool_op_reply(MPoolOpReply *m)
 	// sneaked in. Do caller-specified callback now or else
 	// we lose it forever.
 	ceph_assert(op->onfinish);
-	op->onfinish->complete(m->replyCode);
+	std::move(op->onfinish)(ceph::to_error_code(m->replyCode), bl);
       }
     } else {
       ceph_assert(op->onfinish);
-      op->onfinish->complete(m->replyCode);
+      std::move(op->onfinish)(ceph::to_error_code(m->replyCode), bl);
     }
-    op->onfinish = NULL;
+    op->onfinish = nullptr;
     if (!sul.owns_lock()) {
       sul.unlock();
       sul.lock();
@@ -4086,7 +4104,7 @@ int Objecter::pool_op_cancel(ceph_tid_t tid, int r)
 
   PoolOp *op = it->second;
   if (op->onfinish)
-    op->onfinish->complete(r);
+    std::move(op->onfinish)(ceph::to_error_code(r), bufferlist{});
 
   _finish_pool_op(op, r);
   return 0;

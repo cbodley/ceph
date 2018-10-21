@@ -1696,7 +1696,7 @@ public:
    */
   void build_removed_snaps(interval_set<snapid_t>& rs) const;
   bool maybe_updated_removed_snaps(const interval_set<snapid_t>& cached) const;
-  snapid_t snap_exists(const char *s) const;
+  snapid_t snap_exists(std::string_view s) const;
   void add_snap(const char *n, utime_t stamp);
   void add_unmanaged_snap(uint64_t& snapid);
   void remove_snap(snapid_t s);
