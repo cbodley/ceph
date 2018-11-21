@@ -22,6 +22,7 @@
 #include "common/ceph_context.h"
 #include "common/ceph_argparse.h"
 #include "common/common_init.h"
+#include "common/hobject.h"
 
 #include "global/global_init.h"
 
@@ -1072,6 +1073,107 @@ void RADOS::notify(const Object& o, const IOContext& _ioc, bufferlist&& bl,
     [x](boost::system::error_code ec, bufferlist&& bl) mutable {
       x->handle_ack(ec, std::move(bl));
     }, nullptr);
+}
+
+// Enumeration
+
+EnumerationCursor::EnumerationCursor() {
+};
+
+EnumerationCursor EnumerationCursor::begin() {
+  EnumerationCursor e;
+  static_assert(impl_size >= sizeof(hobject_t));
+  new (&e.impl) hobject_t();
+  return e;
+}
+
+EnumerationCursor EnumerationCursor::end() {
+  EnumerationCursor e;
+  static_assert(impl_size >= sizeof(hobject_t));
+  new (&e.impl) hobject_t(hobject_t::get_max());
+  return e;
+}
+
+EnumerationCursor::EnumerationCursor(const EnumerationCursor& rhs) {
+  static_assert(impl_size >= sizeof(hobject_t));
+  new (&impl) hobject_t(*reinterpret_cast<const hobject_t*>(&rhs.impl));
+}
+
+EnumerationCursor& EnumerationCursor::operator =(const EnumerationCursor& rhs) {
+  static_assert(impl_size >= sizeof(hobject_t));
+  reinterpret_cast<hobject_t*>(&impl)->~hobject_t();
+  new (&impl) hobject_t(*reinterpret_cast<const hobject_t*>(&rhs.impl));
+  return *this;
+}
+
+EnumerationCursor::EnumerationCursor(EnumerationCursor&& rhs) {
+  static_assert(impl_size >= sizeof(hobject_t));
+  new (&impl) hobject_t(std::move(*reinterpret_cast<hobject_t*>(&rhs.impl)));
+}
+
+EnumerationCursor& EnumerationCursor::operator =(EnumerationCursor&& rhs) {
+  static_assert(impl_size >= sizeof(hobject_t));
+  reinterpret_cast<hobject_t*>(&impl)->~hobject_t();
+  new (&impl) hobject_t(std::move(*reinterpret_cast<hobject_t*>(&rhs.impl)));
+  return *this;
+}
+EnumerationCursor::~EnumerationCursor() {
+  reinterpret_cast<hobject_t*>(&impl)->~hobject_t();
+}
+
+bool operator ==(const EnumerationCursor& lhs, const EnumerationCursor& rhs) {
+  return (*reinterpret_cast<const hobject_t*>(&lhs.impl) ==
+	  *reinterpret_cast<const hobject_t*>(&rhs.impl));
+}
+
+bool operator !=(const EnumerationCursor& lhs, const EnumerationCursor& rhs) {
+  return (*reinterpret_cast<const hobject_t*>(&lhs.impl) !=
+	  *reinterpret_cast<const hobject_t*>(&rhs.impl));
+}
+
+bool operator <(const EnumerationCursor& lhs, const EnumerationCursor& rhs) {
+  return (*reinterpret_cast<const hobject_t*>(&lhs.impl) <
+	  *reinterpret_cast<const hobject_t*>(&rhs.impl));
+}
+
+bool operator <=(const EnumerationCursor& lhs, const EnumerationCursor& rhs) {
+  return (*reinterpret_cast<const hobject_t*>(&lhs.impl) <=
+	  *reinterpret_cast<const hobject_t*>(&rhs.impl));
+}
+
+bool operator >=(const EnumerationCursor& lhs, const EnumerationCursor& rhs) {
+  return (*reinterpret_cast<const hobject_t*>(&lhs.impl) >=
+	  *reinterpret_cast<const hobject_t*>(&rhs.impl));
+}
+
+bool operator >(const EnumerationCursor& lhs, const EnumerationCursor& rhs) {
+  return (*reinterpret_cast<const hobject_t*>(&lhs.impl) >
+	  *reinterpret_cast<const hobject_t*>(&rhs.impl));
+}
+
+void RADOS::enumerate_objects(const IOContext& _ioc,
+			      const EnumerationCursor& begin,
+			      const EnumerationCursor& end,
+			      const std::uint32_t max,
+			      const bufferlist& filter,
+			      std::unique_ptr<EnumerateComp> c) {
+  auto rados = reinterpret_cast<_::RADOS*>(&impl);
+  auto ioc = reinterpret_cast<const IOContextImpl*>(&_ioc.impl);
+
+  rados->objecter->enumerate_objects(
+    ioc->oloc.pool,
+    ioc->oloc.nspace,
+    *reinterpret_cast<const hobject_t*>(&begin.impl),
+    *reinterpret_cast<const hobject_t*>(&end.impl),
+    max,
+    filter,
+    [c = std::move(c)]
+    (boost::system::error_code ec, std::vector<EnumeratedObject>&& v,
+     hobject_t&& n) mutable {
+      EnumerationCursor next;
+      new (&next.impl) hobject_t(std::move(n));
+      ceph::async::dispatch(std::move(c), ec, std::move(v), std::move(next));
+    });
 }
 }
 

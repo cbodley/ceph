@@ -49,6 +49,8 @@
 
 #include "common/ceph_time.h"
 
+#include "librados/ListObjectImpl.h"
+
 #ifndef RADOS_UNLEASHED_HPP
 #define RADOS_UNLEASHED_HPP
 
@@ -72,6 +74,8 @@ class RADOS;
 class Object {
   friend RADOS;
   friend std::hash<Object>;
+
+public:
   Object(std::string_view s);
   Object(std::string&& s);
   Object(const std::string& s);
@@ -300,6 +304,39 @@ private:
   WriteOp();
 };
 
+// Come back and refactor this layer properly at some point.
+using EnumeratedObject = librados::ListObjectImpl;
+class EnumerationCursor {
+public:
+  static EnumerationCursor begin();
+  static EnumerationCursor end();
+
+  EnumerationCursor(const EnumerationCursor&);
+  EnumerationCursor& operator =(const EnumerationCursor&);
+  EnumerationCursor(EnumerationCursor&&);
+  EnumerationCursor& operator =(EnumerationCursor&&);
+  ~EnumerationCursor();
+
+  friend bool operator ==(const EnumerationCursor& lhs,
+			  const EnumerationCursor& rhs);
+  friend bool operator !=(const EnumerationCursor& lhs,
+			  const EnumerationCursor& rhs);
+  friend bool operator <(const EnumerationCursor& lhs,
+			 const EnumerationCursor& rhs);
+  friend bool operator <=(const EnumerationCursor& lhs,
+			  const EnumerationCursor& rhs);
+  friend bool operator >=(const EnumerationCursor& lhs,
+			  const EnumerationCursor& rhs);
+  friend bool operator >(const EnumerationCursor& lhs,
+			 const EnumerationCursor& rhs);
+
+private:
+  EnumerationCursor();
+  friend RADOS;
+  static constexpr std::size_t impl_size = 16 * 8;
+  std::aligned_storage_t<impl_size> impl;
+};
+
 class RADOS
 {
 public:
@@ -499,6 +536,22 @@ public:
     return init.result.get();
   }
 
+  using EnumerateSig = void(boost::system::error_code,
+			    std::vector<EnumeratedObject>,
+			    EnumerationCursor);
+  using EnumerateComp = ceph::async::Completion<EnumerateSig>;
+
+  template<typename CompletionToken>
+  auto enumerate_objects(const IOContext& ioc, const EnumerationCursor& begin,
+			 const EnumerationCursor& end, const std::uint32_t max,
+			 const bufferlist& filter, CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, EnumerateSig> init(token);
+    enumerate_objects(ioc, begin, end, max, filter,
+		      EnumerateComp::create(get_executor(),
+					    std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
 private:
 
   void execute(const Object& o, const IOContext& ioc, ReadOp&& op,
@@ -536,6 +589,11 @@ private:
   void notify(const Object& oid, const IOContext& ioc, bufferlist&& bl,
 	      std::optional<std::chrono::milliseconds> timeout,
 	      std::unique_ptr<NotifyComp> c);
+
+  void enumerate_objects(const IOContext& ioc, const EnumerationCursor& begin,
+			 const EnumerationCursor& end, const std::uint32_t max,
+			 const bufferlist& filter,
+			 std::unique_ptr<EnumerateComp> c);
 
   static constexpr std::size_t impl_size = 512 * 8;
   std::aligned_storage_t<impl_size> impl;

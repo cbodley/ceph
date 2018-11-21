@@ -10,6 +10,7 @@
 #include "common/common_init.h"
 #include "common/TracepointProvider.h"
 #include "common/hobject.h"
+#include "common/waiter.h"
 #include "include/rados/librados.h"
 #include "include/types.h"
 #include <include/stringify.h>
@@ -1953,15 +1954,13 @@ extern "C" int _rados_object_list(rados_ioctx_t io,
   // Zero out items so that they will be safe to free later
   memset(result_items, 0, sizeof(rados_object_list_item) * result_item_count);
 
-  std::list<librados::ListObjectImpl> result;
-  hobject_t next_hash;
-
   bufferlist filter_bl;
   if (filter_buf != nullptr) {
     filter_bl.append(filter_buf, filter_buf_len);
   }
 
-  C_SaferCond cond;
+  waiter<boost::system::error_code, std::vector<librados::ListObjectImpl>,
+	 hobject_t>  w;
   ctx->objecter->enumerate_objects(
       ctx->poolid,
       ctx->oloc.nspace,
@@ -1969,24 +1968,22 @@ extern "C" int _rados_object_list(rados_ioctx_t io,
       *((hobject_t*)finish),
       result_item_count,
       filter_bl,
-      &result,
-      &next_hash,
-      &cond);
+      w.ref());
 
   hobject_t *next_hobj = (hobject_t*)(*next);
   ceph_assert(next_hobj);
 
-  int r = cond.wait();
-  if (r < 0) {
+  auto [ec, result, next_hash] = w.wait();
+
+  if (ec) {
     *next_hobj = hobject_t::get_max();
-    return r;
+    return ceph::from_error_code(ec);
   }
 
   ceph_assert(result.size() <= result_item_count);  // Don't overflow!
 
   int k = 0;
-  for (std::list<librados::ListObjectImpl>::iterator i = result.begin();
-       i != result.end(); ++i) {
+  for (auto i = result.begin(); i != result.end(); ++i) {
     rados_object_list_item &item = result_items[k++];
     do_out_buffer(i->oid, &item.oid, &item.oid_length);
     do_out_buffer(i->nspace, &item.nspace, &item.nspace_length);

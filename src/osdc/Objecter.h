@@ -1651,7 +1651,7 @@ public:
     ZTracer::Trace trace;
 
     Op(const object_t& o, const object_locator_t& ol, vector<OSDOp>&& _ops,
-       int f, fu2::unique_function<void(boost::system::error_code)> fin,
+       int f, fu2::unique_function<void(boost::system::error_code) &&> fin,
        version_t *ov, int *offset = nullptr,
        ZTracer::Trace *parent_trace = nullptr) :
       target(o, ol, f),
@@ -2694,6 +2694,36 @@ public:
     return tid;
   }
 
+  ceph_tid_t pg_read(
+    uint32_t hash, object_locator_t oloc,
+    ObjectOperation& op, bufferlist *pbl, int flags,
+    fu2::unique_function<void(boost::system::error_code) &&> onack,
+    epoch_t *reply_epoch, int *ctx_budget) {
+    ceph_tid_t tid;
+    Op *o = new Op(object_t(), oloc,
+		   std::move(op.ops),
+		   flags | global_op_flags | CEPH_OSD_FLAG_READ |
+		   CEPH_OSD_FLAG_IGNORE_OVERLAY,
+		   std::move(onack), nullptr);
+    o->target.precalc_pgid = true;
+    o->target.base_pgid = pg_t(hash, oloc.pool);
+    o->priority = op.priority;
+    o->snapid = CEPH_NOSNAP;
+    o->outbl = pbl;
+    o->out_bl.swap(op.out_bl);
+    o->out_handler.swap(op.out_handler);
+    o->out_rval.swap(op.out_rval);
+    o->out_ec.swap(op.out_ec);
+    o->reply_epoch = reply_epoch;
+    if (ctx_budget) {
+      // budget is tracked by listing context
+      o->ctx_budgeted = true;
+    }
+    op_submit(o, &tid, ctx_budget);
+    op.clear();
+    return tid;
+  }
+
   // caller owns a ref
   LingerOp *linger_register(const object_t& oid, const object_locator_t& oloc,
 			    int flags);
@@ -3265,29 +3295,29 @@ public:
 
   hobject_t enumerate_objects_begin();
   hobject_t enumerate_objects_end();
-  //hobject_t enumerate_objects_begin(int n, int m);
+
+  friend struct CB_EnumerateReply;
+
   void enumerate_objects(
     int64_t pool_id,
-    const std::string &ns,
-    const hobject_t &start,
-    const hobject_t &end,
+    std::string_view ns,
+    const hobject_t& start,
+    const hobject_t& end,
     const uint32_t max,
-    const ceph::buffer::list &filter_bl,
-    std::list<librados::ListObjectImpl> *result, 
-    hobject_t *next,
-    Context *on_finish);
-
+    const ceph::buffer::list& filter_bl,
+    fu2::unique_function<void(boost::system::error_code,
+			     std::vector<librados::ListObjectImpl>&&,
+			     hobject_t&&) &&> on_finish);
   void _enumerate_reply(
-      ceph::buffer::list &bl,
-      int r,
-      const hobject_t &end,
-      const int64_t pool_id,
-      int budget,
-      epoch_t reply_epoch,
-      std::list<librados::ListObjectImpl> *result, 
-      hobject_t *next,
-      Context *on_finish);
-  friend class C_EnumerateReply;
+    ceph::buffer::list&& bl,
+    boost::system::error_code ec,
+    const hobject_t& end,
+    const int64_t pool_id,
+    int budget,
+    epoch_t reply_epoch,
+    fu2::unique_function<void(boost::system::error_code,
+			     std::vector<librados::ListObjectImpl>&&,
+			     hobject_t&&) &&> on_finish);
 
   // -------------------------
   // pool ops

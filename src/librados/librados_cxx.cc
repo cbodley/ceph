@@ -21,6 +21,7 @@
 #include "common/common_init.h"
 #include "common/TracepointProvider.h"
 #include "common/hobject.h"
+#include "common/waiter.h"
 #include "include/rados/librados.h"
 #include "include/rados/librados.hpp"
 #include "include/types.h"
@@ -2960,9 +2961,8 @@ int librados::IoCtx::object_list(const ObjectCursor &start,
   ceph_assert(next != nullptr);
   result->clear();
 
-  C_SaferCond cond;
-  hobject_t next_hash;
-  std::list<librados::ListObjectImpl> obj_result;
+  waiter<boost::system::error_code, std::vector<librados::ListObjectImpl>,
+	 hobject_t>  w;
   io_ctx_impl->objecter->enumerate_objects(
       io_ctx_impl->poolid,
       io_ctx_impl->oloc.nspace,
@@ -2970,19 +2970,17 @@ int librados::IoCtx::object_list(const ObjectCursor &start,
       *((hobject_t*)finish.c_cursor),
       result_item_count,
       filter,
-      &obj_result,
-      &next_hash,
-      &cond);
+      w.ref());
 
-  int r = cond.wait();
-  if (r < 0) {
+  auto [ec, obj_result, next_hash] = w.wait();
+  if (ec) {
     next->set((rados_object_list_cursor)(new hobject_t(hobject_t::get_max())));
-    return r;
+    return ceph::from_error_code(ec);
   }
 
   next->set((rados_object_list_cursor)(new hobject_t(next_hash)));
 
-  for (std::list<librados::ListObjectImpl>::iterator i = obj_result.begin();
+  for (auto i = obj_result.begin();
        i != obj_result.end(); ++i) {
     ObjectItem oi;
     oi.oid = i->oid;
