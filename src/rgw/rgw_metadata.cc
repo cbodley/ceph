@@ -372,7 +372,7 @@ int read_history(RGWRados *store, RGWMetadataLogHistory *state,
     /* bad history object, remove it */
     rgw_raw_obj obj(pool, oid);
     auto sysobj = obj_ctx.get_obj(obj);
-    ret = sysobj.wop().remove();
+    ret = sysobj.wop().remove(null_yield);
     if (ret < 0) {
       ldout(store->ctx(), 0) << "ERROR: meta history is empty, but cannot remove it (" << cpp_strerror(-ret) << ")" << dendl;
       return ret;
@@ -1078,7 +1078,7 @@ int RGWMetadataManager::remove_from_heap(RGWMetadataHandler *handler, const stri
   rgw_raw_obj obj(heap_pool, oid);
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
   auto sysobj = obj_ctx.get_obj(obj);
-  int ret = sysobj.wop().remove();
+  int ret = sysobj.wop().remove(null_yield);
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: sysobj.wop().remove() oid=" << oid << " returned ret=" << ret << dendl;
     return ret;
@@ -1145,7 +1145,7 @@ int RGWMetadataManager::remove_entry(RGWMetadataHandler *handler, string& key, R
   auto sysobj = obj_ctx.get_obj(obj);
   ret = sysobj.wop()
               .set_objv_tracker(objv_tracker)
-              .remove();
+              .remove(null_yield);
   /* cascading ret into post_modify() */
 
   ret = post_modify(handler, section, key, log_data, objv_tracker, ret);
