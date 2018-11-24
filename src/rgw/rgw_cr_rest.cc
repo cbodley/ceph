@@ -79,7 +79,7 @@ RGWStreamReadHTTPResourceCRF::~RGWStreamReadHTTPResourceCRF()
 {
   if (req) {
     req->cancel();
-    req->wait();
+    req->wait(null_yield);
     delete req;
   }
 }
@@ -183,7 +183,7 @@ RGWStreamWriteHTTPResourceCRF::~RGWStreamWriteHTTPResourceCRF()
 {
   if (req) {
     req->cancel();
-    req->wait();
+    req->wait(null_yield);
     delete req;
   }
 }

@@ -95,7 +95,7 @@ TokenEngine::get_from_keystone(const DoutPrefixProvider* dpp, const std::string&
 
   validate.set_url(url);
 
-  int ret = validate.process();
+  int ret = validate.process(null_yield);
   if (ret < 0) {
     throw ret;
   }
@@ -352,7 +352,7 @@ EC2Engine::get_from_keystone(const DoutPrefixProvider* dpp, const boost::string_
   validate.set_send_length(os.str().length());
 
   /* send request */
-  ret = validate.process();
+  ret = validate.process(null_yield);
   if (ret < 0) {
     ldpp_dout(dpp, 2) << "s3 keystone: token validation ERROR: "
                   << token_body_bl.c_str() << dendl;
