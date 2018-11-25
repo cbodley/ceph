@@ -98,11 +98,6 @@ int RGWSI_SysObj_Cache::read(RGWSysObjectCtxBase& obj_ctx,
 {
   rgw_pool pool;
   string oid;
-  if (ofs != 0) {
-    return RGWSI_SysObj_Core::read(obj_ctx, read_state, objv_tracker,
-                                   obj, psize, pmtime, obl, ofs, end,
-                                   attrs, cache_info, refresh_version, y);
-  }
 
   normalize_pool_and_obj(obj.pool, obj.oid, pool, oid);
   string name = normal_name(pool, oid);
@@ -122,13 +117,12 @@ int RGWSI_SysObj_Cache::read(RGWSysObjectCtxBase& obj_ctx,
     if (info.status < 0)
       return info.status;
 
-    bufferlist& bl = info.data;
-
-    bufferlist::iterator i = bl.begin();
-
     obl->clear();
-
-    i.copy_all(*obl);
+    if (end > ofs) {
+      info.data.copy(ofs, end - ofs, *obl);
+    } else {
+      info.data.begin().copy_all(*obl);
+    }
     if (objv_tracker)
       objv_tracker->read_version = info.version;
     if (psize)
@@ -155,10 +149,12 @@ int RGWSI_SysObj_Cache::read(RGWSysObjectCtxBase& obj_ctx,
     return r;
   }
 
-  bufferlist& bl = info.data;
-  bl.clear();
-  bufferlist::iterator o = obl->begin();
-  o.copy_all(bl);
+  info.data.clear();
+  if (ofs) { // don't cache partial data
+    flags &= ~CACHE_FLAG_DATA;
+  } else {
+    obl->begin().copy_all(info.data);
+  }
   info.status = 0;
   info.flags = flags;
   if (objv_tracker) {
