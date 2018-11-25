@@ -35,7 +35,7 @@ int RGWRole::store_info(bool exclusive)
   bufferlist bl;
   encode(*this, bl);
   return rgw_put_system_obj(store, store->svc.zone->get_zone_params().roles_pool, oid,
-                bl, exclusive, NULL, real_time(), NULL);
+                            bl, exclusive, NULL, real_time(), null_yield);
 }
 
 int RGWRole::store_name(bool exclusive)
@@ -49,7 +49,7 @@ int RGWRole::store_name(bool exclusive)
   using ceph::encode;
   encode(nameToId, bl);
   return rgw_put_system_obj(store, store->svc.zone->get_zone_params().roles_pool, oid,
-              bl, exclusive, NULL, real_time(), NULL);
+                            bl, exclusive, NULL, real_time(), null_yield);
 }
 
 int RGWRole::store_path(bool exclusive)
@@ -58,7 +58,7 @@ int RGWRole::store_path(bool exclusive)
 
   bufferlist bl;
   return rgw_put_system_obj(store, store->svc.zone->get_zone_params().roles_pool, oid,
-              bl, exclusive, NULL, real_time(), NULL);
+                            bl, exclusive, NULL, real_time(), null_yield);
 }
 
 int RGWRole::create(bool exclusive)

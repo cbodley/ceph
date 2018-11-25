@@ -216,7 +216,7 @@ int rgw_store_user_info(RGWRados *store,
     if (!old_info ||
         old_info->user_email.compare(info.user_email) != 0) { /* only if new index changed */
       ret = rgw_put_system_obj(store, store->svc.zone->get_zone_params().user_email_pool, info.user_email,
-                               link_bl, exclusive, NULL, real_time());
+                               link_bl, exclusive, NULL, real_time(), null_yield);
       if (ret < 0)
         return ret;
     }
@@ -230,7 +230,7 @@ int rgw_store_user_info(RGWRados *store,
 	continue;
 
       ret = rgw_put_system_obj(store, store->svc.zone->get_zone_params().user_keys_pool, k.id,
-                               link_bl, exclusive, NULL, real_time());
+                               link_bl, exclusive, NULL, real_time(), null_yield);
       if (ret < 0)
         return ret;
     }
@@ -243,7 +243,7 @@ int rgw_store_user_info(RGWRados *store,
       continue;
 
     ret = rgw_put_system_obj(store, store->svc.zone->get_zone_params().user_swift_pool, k.id,
-                             link_bl, exclusive, NULL, real_time());
+                             link_bl, exclusive, NULL, real_time(), null_yield);
     if (ret < 0)
       return ret;
   }

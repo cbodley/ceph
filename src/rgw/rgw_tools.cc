@@ -23,24 +23,24 @@
 
 static std::map<std::string, std::string>* ext_mime_map;
 
-int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool, const string& oid, bufferlist& data, bool exclusive,
-                       RGWObjVersionTracker *objv_tracker, real_time set_mtime, map<string, bufferlist> *pattrs)
+int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool,
+                       const string& oid, bufferlist& data, bool exclusive,
+                       RGWObjVersionTracker *objv_tracker, real_time set_mtime,
+                       optional_yield y, map<string, bufferlist> *pattrs)
 {
   map<string,bufferlist> no_attrs;
   if (!pattrs) {
     pattrs = &no_attrs;
   }
 
-  rgw_raw_obj obj(pool, oid);
-
   auto obj_ctx = rgwstore->svc.sysobj->init_obj_ctx();
-  auto sysobj = obj_ctx.get_obj(obj);
+  auto sysobj = obj_ctx.get_obj({pool, oid});
   int ret = sysobj.wop()
                   .set_objv_tracker(objv_tracker)
                   .set_exclusive(exclusive)
                   .set_mtime(set_mtime)
                   .set_attrs(*pattrs)
-                  .write(data, null_yield);
+                  .write(data, y);
 
   if (ret == -ENOENT) {
     ret = rgwstore->create_pool(pool);
@@ -50,7 +50,7 @@ int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool, const string& o
                   .set_exclusive(exclusive)
                   .set_mtime(set_mtime)
                   .set_attrs(*pattrs)
-                  .write(data, null_yield);
+                  .write(data, y);
     }
   }
 
