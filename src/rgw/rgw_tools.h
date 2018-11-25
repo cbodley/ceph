@@ -23,9 +23,10 @@ int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool,
                        optional_yield y, map<string, bufferlist> *pattrs = NULL);
 int rgw_get_system_obj(RGWSysObjectCtx& obj_ctx, const rgw_pool& pool,
                        const string& key, bufferlist& bl,
-                       RGWObjVersionTracker *objv_tracker, real_time *pmtime,
-                       map<string, bufferlist> *pattrs = NULL,
-                       rgw_cache_entry_info *cache_info = NULL,
+                       RGWObjVersionTracker *objv_tracker,
+                       optional_yield y, real_time *pmtime = nullptr,
+                       map<string, bufferlist> *pattrs = nullptr,
+                       rgw_cache_entry_info *cache_info = nullptr,
 		       boost::optional<obj_version> refresh_version = boost::none);
 int rgw_delete_system_obj(RGWRados *rgwstore, const rgw_pool& pool, const string& oid,
                           RGWObjVersionTracker *objv_tracker);

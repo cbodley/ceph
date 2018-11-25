@@ -302,7 +302,7 @@ int RGWRole::read_id(const string& role_name, const string& tenant, string& role
   bufferlist bl;
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
 
-  int ret = rgw_get_system_obj(obj_ctx, pool, oid, bl, NULL, NULL);
+  int ret = rgw_get_system_obj(obj_ctx, pool, oid, bl, nullptr, null_yield);
   if (ret < 0) {
     return ret;
   }
@@ -328,7 +328,7 @@ int RGWRole::read_info()
   bufferlist bl;
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
 
-  int ret = rgw_get_system_obj(obj_ctx, pool, oid, bl, NULL, NULL);
+  int ret = rgw_get_system_obj(obj_ctx, pool, oid, bl, nullptr, null_yield);
   if (ret < 0) {
     ldout(cct, 0) << "ERROR: failed reading role info from pool: " << pool.name <<
                   ": " << id << ": " << cpp_strerror(-ret) << dendl;
@@ -355,7 +355,7 @@ int RGWRole::read_name()
   bufferlist bl;
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
 
-  int ret = rgw_get_system_obj(obj_ctx, pool, oid, bl, NULL, NULL);
+  int ret = rgw_get_system_obj(obj_ctx, pool, oid, bl, nullptr, null_yield);
   if (ret < 0) {
     ldout(cct, 0) << "ERROR: failed reading role name from pool: " << pool.name << ": "
                   << name << ": " << cpp_strerror(-ret) << dendl;

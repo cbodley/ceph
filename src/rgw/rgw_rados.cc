@@ -8117,7 +8117,7 @@ int RGWRados::get_bucket_instance_from_oid(RGWSysObjectCtx& obj_ctx, const strin
   bufferlist epbl;
 
   int ret = rgw_get_system_obj(obj_ctx, domain_root, oid, epbl,
-                               &info.objv_tracker, pmtime, pattrs,
+                               &info.objv_tracker, null_yield, pmtime, pattrs,
                                cache_info, refresh_version);
   if (ret < 0) {
     return ret;
@@ -8149,8 +8149,8 @@ int RGWRados::get_bucket_entrypoint_info(RGWSysObjectCtx& obj_ctx,
 
   rgw_make_bucket_entry_name(tenant_name, bucket_name, bucket_entry);
   int ret = rgw_get_system_obj(obj_ctx, svc.zone->get_zone_params().domain_root,
-			       bucket_entry, bl, objv_tracker, pmtime, pattrs,
-			       cache_info, refresh_version);
+			       bucket_entry, bl, objv_tracker, null_yield,
+                               pmtime, pattrs, cache_info, refresh_version);
   if (ret < 0) {
     return ret;
   }

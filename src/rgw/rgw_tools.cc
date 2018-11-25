@@ -59,7 +59,8 @@ int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool,
 
 int rgw_get_system_obj(RGWSysObjectCtx& obj_ctx, const rgw_pool& pool,
                        const string& key, bufferlist& bl,
-                       RGWObjVersionTracker *objv_tracker, real_time *pmtime,
+                       RGWObjVersionTracker *objv_tracker,
+                       optional_yield y, real_time *pmtime,
                        map<string, bufferlist> *pattrs,
                        rgw_cache_entry_info *cache_info,
                        boost::optional<obj_version> refresh_version)
@@ -79,13 +80,13 @@ int rgw_get_system_obj(RGWSysObjectCtx& obj_ctx, const rgw_pool& pool,
     ret = rop.set_attrs(pattrs)
              .set_last_mod(pmtime)
              .set_objv_tracker(objv_tracker)
-             .stat(null_yield);
+             .stat(y);
     if (ret < 0)
       return ret;
 
     ret = rop.set_cache_info(cache_info)
              .set_refresh_version(refresh_version)
-             .read(&bl, null_yield);
+             .read(&bl, y);
     if (ret == -ECANCELED) {
       /* raced, restart */
       if (!original_readv.empty()) {

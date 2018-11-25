@@ -364,7 +364,7 @@ int read_history(RGWRados *store, RGWMetadataLogHistory *state,
   auto& pool = store->svc.zone->get_zone_params().log_pool;
   const auto& oid = RGWMetadataLogHistory::oid;
   bufferlist bl;
-  int ret = rgw_get_system_obj(obj_ctx, pool, oid, bl, objv_tracker, nullptr);
+  int ret = rgw_get_system_obj(obj_ctx, pool, oid, bl, objv_tracker, null_yield);
   if (ret < 0) {
     return ret;
   }
@@ -804,7 +804,7 @@ int RGWMetadataManager::prepare_mutate(RGWRados *store,
   real_time orig_mtime;
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
   int ret = rgw_get_system_obj(obj_ctx, pool, oid, bl, objv_tracker,
-                               &orig_mtime, nullptr, nullptr);
+                               null_yield, &orig_mtime);
   if (ret < 0 && ret != -ENOENT) {
     return ret;
   }
