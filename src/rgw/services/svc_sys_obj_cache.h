@@ -41,6 +41,7 @@ protected:
            GetObjState& read_state,
            RGWObjVersionTracker *objv_tracker,
            const rgw_raw_obj& obj,
+           uint64_t *psize, real_time *pmtime,
            bufferlist *bl, off_t ofs, off_t end,
            map<string, bufferlist> *attrs,
            rgw_cache_entry_info *cache_info,

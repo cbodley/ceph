@@ -89,6 +89,7 @@ int RGWSI_SysObj_Cache::read(RGWSysObjectCtxBase& obj_ctx,
                              GetObjState& read_state,
                              RGWObjVersionTracker *objv_tracker,
                              const rgw_raw_obj& obj,
+                             uint64_t *psize, real_time *pmtime,
                              bufferlist *obl, off_t ofs, off_t end,
                              map<string, bufferlist> *attrs,
                              rgw_cache_entry_info *cache_info,
@@ -99,8 +100,8 @@ int RGWSI_SysObj_Cache::read(RGWSysObjectCtxBase& obj_ctx,
   string oid;
   if (ofs != 0) {
     return RGWSI_SysObj_Core::read(obj_ctx, read_state, objv_tracker,
-                                   obj, obl, ofs, end, attrs,
-                                   cache_info, refresh_version, y);
+                                   obj, psize, pmtime, obl, ofs, end,
+                                   attrs, cache_info, refresh_version, y);
   }
 
   normalize_pool_and_obj(obj.pool, obj.oid, pool, oid);
@@ -111,6 +112,8 @@ int RGWSI_SysObj_Cache::read(RGWSysObjectCtxBase& obj_ctx,
   uint32_t flags = CACHE_FLAG_DATA;
   if (objv_tracker)
     flags |= CACHE_FLAG_OBJV;
+  if (psize || pmtime)
+    flags |= CACHE_FLAG_META;
   if (attrs)
     flags |= CACHE_FLAG_XATTRS;
 
@@ -128,14 +131,17 @@ int RGWSI_SysObj_Cache::read(RGWSysObjectCtxBase& obj_ctx,
     i.copy_all(*obl);
     if (objv_tracker)
       objv_tracker->read_version = info.version;
+    if (psize)
+      *psize = info.meta.size;
+    if (pmtime)
+      *pmtime = info.meta.mtime;
     if (attrs)
       *attrs = info.xattrs;
     return obl->length();
   }
   int r = RGWSI_SysObj_Core::read(obj_ctx, read_state, objv_tracker,
-                                  obj, obl, ofs, end,
-                                  attrs, cache_info,
-                                  refresh_version, y);
+                                  obj, psize, pmtime, obl, ofs, end,
+                                  attrs, cache_info, refresh_version, y);
   if (r < 0) {
     if (r == -ENOENT) { // only update ENOENT, we'd rather retry other errors
       info.status = r;
@@ -149,7 +155,6 @@ int RGWSI_SysObj_Cache::read(RGWSysObjectCtxBase& obj_ctx,
     return r;
   }
 
-  bufferptr p(r);
   bufferlist& bl = info.data;
   bl.clear();
   bufferlist::iterator o = obl->begin();
@@ -159,6 +164,10 @@ int RGWSI_SysObj_Cache::read(RGWSysObjectCtxBase& obj_ctx,
   if (objv_tracker) {
     info.version = objv_tracker->read_version;
   }
+  if (psize)
+    info.meta.size = *psize;
+  if (pmtime)
+    info.meta.mtime = *pmtime;
   if (attrs) {
     info.xattrs = *attrs;
   }
