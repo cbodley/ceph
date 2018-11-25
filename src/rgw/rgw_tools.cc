@@ -74,19 +74,12 @@ int rgw_get_system_obj(RGWSysObjectCtx& obj_ctx, const rgw_pool& pool,
 
   int ret = 0;
   do {
-    auto rop = sysobj.rop();
-
-    // TODO: avoid separate stat() request for mtime
-    ret = rop.set_attrs(pattrs)
-             .set_last_mod(pmtime)
-             .set_objv_tracker(objv_tracker)
-             .stat(y);
-    if (ret < 0)
-      return ret;
-
-    ret = rop.set_cache_info(cache_info)
-             .set_refresh_version(refresh_version)
-             .read(&bl, y);
+    ret = sysobj.rop().set_attrs(pattrs)
+                      .set_last_mod(pmtime)
+                      .set_objv_tracker(objv_tracker)
+                      .set_cache_info(cache_info)
+                      .set_refresh_version(refresh_version)
+                      .read(&bl, y);
     if (ret == -ECANCELED) {
       /* raced, restart */
       if (!original_readv.empty()) {
