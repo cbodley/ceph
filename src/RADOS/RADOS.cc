@@ -12,6 +12,8 @@
  *
  */
 
+#define BOOST_BIND_NO_PLACEHOLDERS
+
 #include <optional>
 #include <string_view>
 
@@ -27,7 +29,6 @@
 
 #include "RADOS/RADOSImpl.h"
 #include "include/RADOS/RADOS.hpp"
-
 
 namespace RADOS {
 // Object
@@ -727,29 +728,14 @@ RADOS::RADOS(boost::asio::io_context& ioctx, CephContext* cct) {
   new (&impl) _::RADOS(ioctx, cct);
 }
 
-struct DarnIt {
-  std::unique_ptr<Op::Completion> c;
-  std::unique_ptr<Op::Result> r;
+auto resulter(std::unique_ptr<Op::Completion> c,
+	      std::unique_ptr<Op::Result> r) {
 
-  DarnIt(std::unique_ptr<Op::Completion> c, std::unique_ptr<Op::Result> r)
-    : c(std::move(c)), r(std::move(r)) {}
-  DarnIt(const DarnIt& rhs)
-    : DarnIt(std::move(const_cast<DarnIt&>(rhs))) {}
-  DarnIt& operator =(const DarnIt& rhs) {
-    return *this = std::move(const_cast<DarnIt&>(rhs));
-  }
-  DarnIt(DarnIt&& rhs) = default;
-  DarnIt& operator =(DarnIt&& rhs) = default;
-  ~DarnIt() = default;
-
-  void operator()(boost::system::error_code ec) {
-    if (r && c) {
-      ceph::async::dispatch(std::move(c), ec, std::move(*r));
-      r.reset();
-      c.reset();
-    }
-  }
-};
+  return [c = std::move(c), r = std::move(r)]
+    (boost::system::error_code ec) mutable {
+	   ceph::async::dispatch(std::move(c), ec, std::move(*r));
+	 };
+}
 
 RADOS::executor_type RADOS::get_executor() {
   return reinterpret_cast<_::RADOS*>(&impl)->ioctx.get_executor();
@@ -765,7 +751,7 @@ void RADOS::execute(const Object& o, const IOContext& _ioc, ReadOp&& _op,
 
   rados->objecter->read(
     *oid, ioc->oloc, std::move(op->op), ioc->snap_seq, nullptr, flags,
-    DarnIt(std::move(c), std::move(op->res)));
+    resulter(std::move(c), std::move(op->res)));
   op->clear();
 }
 
@@ -785,7 +771,7 @@ void RADOS::execute(const Object& o, const IOContext& _ioc, WriteOp&& _op,
   rados->objecter->mutate(
     *oid, ioc->oloc, std::move(op->op), ioc->snapc,
     mtime, flags,
-    DarnIt(std::move(c), std::move(op->res)));
+    resulter(std::move(c), std::move(op->res)));
   op->clear();
 }
 
@@ -854,7 +840,7 @@ std::vector<std::pair<std::int64_t, std::string>> RADOS::list_pools() {
 
 void RADOS::create_pool_snap(std::int64_t pool,
 			     std::string_view snapName,
-			     std::unique_ptr<PoolOpComp> c)
+			     std::unique_ptr<SimpleOpComp> c)
 {
   auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
   objecter->create_pool_snap(
@@ -876,7 +862,7 @@ void RADOS::allocate_selfmanaged_snap(int64_t pool,
 
 void RADOS::delete_pool_snap(std::int64_t pool,
 			     std::string_view snapName,
-			     std::unique_ptr<PoolOpComp> c)
+			     std::unique_ptr<SimpleOpComp> c)
 {
   auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
   objecter->delete_pool_snap(
@@ -888,7 +874,7 @@ void RADOS::delete_pool_snap(std::int64_t pool,
 
 void RADOS::delete_selfmanaged_snap(std::int64_t pool,
 				    snapid_t snap,
-				    std::unique_ptr<PoolOpComp> c)
+				    std::unique_ptr<SimpleOpComp> c)
 {
   auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
   objecter->delete_selfmanaged_snap(
@@ -900,7 +886,7 @@ void RADOS::delete_selfmanaged_snap(std::int64_t pool,
 
 void RADOS::create_pool(std::string_view name,
 			std::optional<int> crush_rule,
-			std::unique_ptr<PoolOpComp> c)
+			std::unique_ptr<SimpleOpComp> c)
 {
   auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
   objecter->create_pool(
@@ -912,7 +898,7 @@ void RADOS::create_pool(std::string_view name,
 }
 
 void RADOS::delete_pool(std::string_view name,
-			std::unique_ptr<PoolOpComp> c)
+			std::unique_ptr<SimpleOpComp> c)
 {
   auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
   objecter->delete_pool(
@@ -923,7 +909,7 @@ void RADOS::delete_pool(std::string_view name,
 }
 
 void RADOS::delete_pool(std::int64_t pool,
-			std::unique_ptr<PoolOpComp> c)
+			std::unique_ptr<SimpleOpComp> c)
 {
   auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
   objecter->delete_pool(
@@ -931,6 +917,161 @@ void RADOS::delete_pool(std::int64_t pool,
     [c = std::move(c)](boost::system::error_code e, const bufferlist&) mutable {
       ceph::async::dispatch(std::move(c), e);
     });
+}
+
+void RADOS::watch(const Object& o, const IOContext& _ioc,
+		  std::optional<std::chrono::seconds> timeout, WatchCB&& cb,
+		  std::unique_ptr<WatchComp> c) {
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  auto oid = reinterpret_cast<const object_t*>(&o.impl);
+  auto ioc = reinterpret_cast<const IOContextImpl*>(&_ioc.impl);
+
+  ObjectOperation op;
+
+  Objecter::LingerOp *linger_op = objecter->linger_register(*oid, ioc->oloc, 0);
+  uint64_t cookie = linger_op->get_cookie();
+  linger_op->handle = std::move(cb);
+  op.watch(cookie, CEPH_OSD_WATCH_OP_WATCH, timeout.value_or(0s).count());
+  bufferlist bl;
+  objecter->linger_watch(linger_op, op,
+			 ioc->snapc, ceph::real_clock::now(), bl,
+			 [c = std::move(c), cookie](boost::system::error_code e,
+						    const bufferlist&) mutable {
+			   ceph::async::dispatch(std::move(c), e, cookie);
+			 }, nullptr);
+
+}
+
+void RADOS::notify_ack(const Object& o,
+		       const IOContext& _ioc,
+		       uint64_t notify_id,
+		       uint64_t cookie,
+		       bufferlist&& bl,
+		       std::unique_ptr<SimpleOpComp> c)
+{
+  auto rados = reinterpret_cast<_::RADOS*>(&impl);
+  auto oid = reinterpret_cast<const object_t*>(&o.impl);
+  auto ioc = reinterpret_cast<const IOContextImpl*>(&_ioc.impl);
+
+  ObjectOperation op;
+  op.notify_ack(notify_id, cookie, bl);
+
+  rados->objecter->read(
+    *oid, ioc->oloc, std::move(op), ioc->snap_seq, nullptr, 0,
+    [c = std::move(c)](boost::system::error_code e) mutable {
+      ceph::async::dispatch(std::move(c), e);
+    });
+}
+
+boost::system::error_code RADOS::watch_check(uint64_t cookie)
+{
+  auto rados = reinterpret_cast<_::RADOS*>(&impl);
+  Objecter::LingerOp *linger_op = reinterpret_cast<Objecter::LingerOp*>(cookie);
+  return ceph::to_error_code(rados->objecter->linger_check(linger_op));
+}
+
+void RADOS::unwatch(uint64_t cookie, const IOContext& _ioc,
+		    std::unique_ptr<SimpleOpComp> c)
+{
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  auto ioc = reinterpret_cast<const IOContextImpl*>(&_ioc.impl);
+
+  Objecter::LingerOp *linger_op = reinterpret_cast<Objecter::LingerOp*>(cookie);
+
+  ObjectOperation op;
+  op.watch(cookie, CEPH_OSD_WATCH_OP_UNWATCH);
+  objecter->mutate(linger_op->target.base_oid, ioc->oloc, std::move(op),
+		   ioc->snapc, ceph::real_clock::now(), 0,
+		   [objecter, linger_op, c = std::move(c)]
+		   (boost::system::error_code ec) mutable {
+		     objecter->linger_cancel(linger_op);
+		     ceph::async::dispatch(std::move(c), ec);
+		   });
+}
+
+struct NotifyHandler {
+  boost::asio::io_context& ioc;
+  boost::asio::io_context::strand strand;
+  Objecter* objecter;
+  Objecter::LingerOp* op;
+  std::unique_ptr<RADOS::NotifyComp> c;
+
+  bool acked = false;
+  bool finished = false;
+  boost::system::error_code res;
+  bufferlist rbl;
+
+  NotifyHandler(boost::asio::io_context& ioc,
+		Objecter* objecter,
+		Objecter::LingerOp* op,
+		std::unique_ptr<RADOS::NotifyComp> c)
+    : ioc(ioc), strand(ioc), objecter(objecter), op(op), c(std::move(c)) {}
+
+  // Use bind or a lambda to pass this in.
+  void handle_ack(boost::system::error_code ec,
+		  bufferlist&&) {
+    boost::asio::post(
+      strand,
+      [this, ec]() mutable {
+	acked = true;
+	maybe_cleanup(ec);
+      });
+  }
+
+  // Notify finish callback. It can actually own the object's storage.
+
+  void operator()(boost::system::error_code ec,
+		  bufferlist&& bl) {
+    boost::asio::post(
+      strand,
+      [this, ec]() mutable {
+	finished = true;
+	maybe_cleanup(ec);
+      });
+  }
+
+  // Should be called from strand.
+  void maybe_cleanup(boost::system::error_code ec) {
+    if (!res && ec)
+      res = ec;
+    if ((acked && finished) || res)
+      boost::asio::defer(
+	ioc.get_executor(),
+	[this]() mutable {
+	  auto bl = std::move(rbl);
+	  objecter->linger_cancel(op);
+	  ceph::async::dispatch(std::move(c), res, std::move(bl));
+	});
+  }
+};
+
+void RADOS::notify(const Object& o, const IOContext& _ioc, bufferlist&& bl,
+		   std::optional<std::chrono::milliseconds> timeout,
+		   std::unique_ptr<NotifyComp> c)
+{
+  auto rados = reinterpret_cast<_::RADOS*>(&impl);
+  auto oid = reinterpret_cast<const object_t*>(&o.impl);
+  auto ioc = reinterpret_cast<const IOContextImpl*>(&_ioc.impl);
+  auto linger_op = rados->objecter->linger_register(*oid, ioc->oloc, 0);
+
+  auto x = new NotifyHandler(rados->ioctx, rados->objecter.get(), linger_op, std::move(c));
+  linger_op->on_notify_finish =
+    [cb = std::unique_ptr<NotifyHandler>(x)](boost::system::error_code ec,
+					     ceph::bufferlist&& bl) mutable {
+      (*cb)(ec, std::move(bl));
+    };
+  ObjectOperation rd;
+  bufferlist inbl;
+  rd.notify(
+    linger_op->get_cookie(), 1,
+    timeout ? timeout->count() : rados->cct->_conf->client_notify_timeout,
+    bl, &inbl);
+
+  rados->objecter->linger_notify(
+    linger_op, rd, ioc->snap_seq, inbl,
+    [x](boost::system::error_code ec, bufferlist&& bl) mutable {
+      x->handle_ack(ec, std::move(bl));
+    }, nullptr);
 }
 }
 

@@ -32,6 +32,9 @@
 // I BEGAN TO LIVE.
 
 #include <boost/system/error_code.hpp>
+
+#include "include/function2.hpp"
+
 // Needed for type erasure and template support. We can't really avoid
 // it.
 
@@ -361,15 +364,15 @@ public:
   std::optional<uint64_t> get_pool_alignment(int64_t pool_id);
   std::vector<std::pair<std::int64_t, std::string>> list_pools();
 
-  using PoolOpSig = void(boost::system::error_code);
-  using PoolOpComp = ceph::async::Completion<PoolOpSig>;
+  using SimpleOpSig = void(boost::system::error_code);
+  using SimpleOpComp = ceph::async::Completion<SimpleOpSig>;
   template<typename CompletionToken>
   auto create_pool_snap(int64_t pool, std::string_view snapName,
 			CompletionToken&& token) {
-    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
     create_pool_snap(pool, snapName,
-		     PoolOpComp::create(get_executor(),
-					std::move(init.completion_handler)));
+		     SimpleOpComp::create(get_executor(),
+					  std::move(init.completion_handler)));
     return init.result.get();
   }
 
@@ -389,19 +392,19 @@ public:
   template<typename CompletionToken>
   auto delete_pool_snap(int64_t pool, std::string_view snapName,
 			CompletionToken&& token) {
-    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
     delete_pool_snap(pool, snapName,
-		     PoolOpComp::create(get_executor(),
-					std::move(init.completion_handler)));
+		     SimpleOpComp::create(get_executor(),
+					  std::move(init.completion_handler)));
     return init.result.get();
   }
 
   template<typename CompletionToken>
   auto delete_selfmanaged_snap(int64_t pool, std::string_view snapName,
 			       CompletionToken&& token) {
-    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
     delete_selfmanaged_snap(pool, snapName,
-			    PoolOpComp::create(
+			    SimpleOpComp::create(
 			      get_executor(),
 			      std::move(init.completion_handler)));
     return init.result.get();
@@ -410,30 +413,89 @@ public:
   template<typename CompletionToken>
   auto create_pool(std::string_view name, std::optional<int> crush_rule,
 		   CompletionToken&& token) {
-    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
     create_pool(name, crush_rule,
-		PoolOpComp::create(get_executor(),
-				   std::move(init.completion_handler)));
+		SimpleOpComp::create(get_executor(),
+				     std::move(init.completion_handler)));
     return init.result.get();
   }
 
   template<typename CompletionToken>
   auto delete_pool(std::string_view name,
 		   CompletionToken&& token) {
-    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
     delete_pool(name,
-		PoolOpComp::create(get_executor(),
-				   std::move(init.completion_handler)));
+		SimpleOpComp::create(get_executor(),
+				     std::move(init.completion_handler)));
     return init.result.get();
   }
 
   template<typename CompletionToken>
   auto delete_pool(int64_t pool,
 		   CompletionToken&& token) {
-    boost::asio::async_completion<CompletionToken, PoolOpSig> init(token);
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
     delete_pool(pool,
-		PoolOpComp::create(get_executor(),
-				   std::move(init.completion_handler)));
+		SimpleOpComp::create(get_executor(),
+				     std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  using WatchCB = fu2::unique_function<void(boost::system::error_code,
+					    uint64_t notify_id,
+					    uint64_t cookie,
+					    uint64_t notifier_id,
+					    bufferlist&& bl)>;
+
+  using WatchSig = void(boost::system::error_code ec,
+			uint64_t cookie);
+  using WatchComp = ceph::async::Completion<WatchSig>;
+  template<typename CompletionToken>
+  auto watch(const Object& o, const IOContext& ioc,
+	     std::optional<std::chrono::seconds> timeout,
+	     WatchCB&& cb, CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, WatchSig> init(token);
+    watch(o, ioc, timeout, std::move(cb),
+	  WatchComp::create(get_executor(),
+			    std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
+  auto notify_ack(const Object& o,
+		  const IOContext& ioc,
+		  uint64_t notify_id,
+		  uint64_t cookie,
+		  bufferlist&& bl,
+		  CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, WatchSig> init(token);
+    notify_ack(o, ioc, notify_id, cookie, std::move(bl),
+	       SimpleOpComp::create(get_executor(),
+				    std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
+  auto unwatch(uint64_t cookie, const IOContext& ioc,
+	       CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, WatchSig> init(token);
+    unwatch(cookie, ioc,
+	    SimpleOpComp::create(get_executor(),
+				 std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+  using NotifySig = void(boost::system::error_code, bufferlist);
+  using NotifyComp = ceph::async::Completion<NotifySig>;
+
+  template<typename CompletionToken>
+  auto notify(const Object& oid, const IOContext& ioc, bufferlist&& bl,
+	      std::optional<std::chrono::milliseconds> timeout,
+	      CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, NotifySig> init(token);
+    notify(oid, ioc, std::move(bl), timeout,
+	   NotifyComp::create(get_executor(),
+			      std::move(init.completion_handler)));
+
     return init.result.get();
   }
 
@@ -446,18 +508,34 @@ private:
 	       std::unique_ptr<Op::Completion> c);
   void lookup_pool(std::string name, std::unique_ptr<LookupPoolComp> c);
   void create_pool_snap(int64_t pool, std::string_view snapName,
-			std::unique_ptr<PoolOpComp> c);
+			std::unique_ptr<SimpleOpComp> c);
   void allocate_selfmanaged_snap(int64_t pool, std::unique_ptr<SMSnapComp> c);
   void delete_pool_snap(int64_t pool, std::string_view snapName,
-			std::unique_ptr<PoolOpComp> c);
+			std::unique_ptr<SimpleOpComp> c);
   void delete_selfmanaged_snap(int64_t pool, snapid_t snap,
-			       std::unique_ptr<PoolOpComp> c);
+			       std::unique_ptr<SimpleOpComp> c);
   void create_pool(std::string_view name, std::optional<int> crush_rule,
-		   std::unique_ptr<PoolOpComp> c);
+		   std::unique_ptr<SimpleOpComp> c);
   void delete_pool(std::string_view name,
-		   std::unique_ptr<PoolOpComp> c);
+		   std::unique_ptr<SimpleOpComp> c);
   void delete_pool(int64_t pool,
-		   std::unique_ptr<PoolOpComp> c);
+		   std::unique_ptr<SimpleOpComp> c);
+
+  void watch(const Object& o, const IOContext& ioc,
+	     std::optional<std::chrono::seconds> timeout,
+	     WatchCB&& cb, std::unique_ptr<WatchComp> c);
+  boost::system::error_code watch_check(uint64_t cookie);
+  void notify_ack(const Object& o,
+		  const IOContext& _ioc,
+		  uint64_t notify_id,
+		  uint64_t cookie,
+		  bufferlist&& bl,
+		  std::unique_ptr<SimpleOpComp>);
+  void unwatch(uint64_t cookie, const IOContext& ioc,
+	       std::unique_ptr<SimpleOpComp>);
+  void notify(const Object& oid, const IOContext& ioc, bufferlist&& bl,
+	      std::optional<std::chrono::milliseconds> timeout,
+	      std::unique_ptr<NotifyComp> c);
 
   static constexpr std::size_t impl_size = 512 * 8;
   std::aligned_storage_t<impl_size> impl;

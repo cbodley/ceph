@@ -627,7 +627,8 @@ struct ObjectOperation {
     Watchers* pwatchers;
     int* prval;
     boost::system::error_code* pec;
-    CB_ObjectOperation_decodewatchers(Watchers* pw, int* pr, boost::system::error_code* pec)
+    CB_ObjectOperation_decodewatchers(Watchers* pw, int* pr,
+				      boost::system::error_code* pec)
       : pwatchers(pw), prval(pr), pec(pec) {}
     void operator()(boost::system::error_code ec, int r, const ceph::buffer::list& bl) {
       if (r >= 0) {
@@ -1569,12 +1570,29 @@ public:
     void dump(ceph::Formatter *f) const;
   };
 
-  static fu2::unique_function<void(boost::system::error_code)> OpContextVert(Context* c) {
+  static fu2::unique_function<void(boost::system::error_code) &&>
+  OpContextVert(Context* c) {
 
     if (c)
       return [c = std::unique_ptr<Context>(c)]
 	(boost::system::error_code e) mutable {
 	c.release()->complete(e);
+      };
+    else
+      return nullptr;
+  }
+
+  template<typename T>
+  static fu2::unique_function<void(boost::system::error_code, const T&) &&>
+  OpContextVert(Context* c, T* p) {
+
+    if (c || p)
+      return [c = std::unique_ptr<Context>(c),
+	      p](boost::system::error_code e, const T& r) mutable {
+	if (p)
+	  *p = r;
+	if (c)
+	  c.release()->complete(ceph::from_error_code(e));
       };
     else
       return nullptr;
@@ -1603,7 +1621,7 @@ public:
     std::vector<boost::system::error_code*> out_ec;
 
     int priority = 0;
-    fu2::unique_function<void(boost::system::error_code)> onfinish;
+    fu2::unique_function<void(boost::system::error_code) &&> onfinish;
     uint64_t ontimeout = 0;
 
     ceph_tid_t tid = 0;
@@ -1906,17 +1924,8 @@ public:
 
   // -- lingering ops --
 
-  struct WatchContext {
-    // this simply mirrors librados WatchCtx2
-    virtual void handle_notify(uint64_t notify_id,
-			       uint64_t cookie,
-			       uint64_t notifier_id,
-			       ceph::buffer::list& bl) = 0;
-    virtual void handle_error(uint64_t cookie, int err) = 0;
-    virtual ~WatchContext() {}
-  };
-
   struct LingerOp : public RefCountedObject {
+    std::unique_ptr<void, fu2::unique_function<void(void*)>> user_data;
     uint64_t linger_id{0};
     op_target_t target{object_t(), object_locator_t(), 0};
     snapid_t snap{CEPH_NOSNAP};
@@ -1925,7 +1934,6 @@ public:
 
     std::vector<OSDOp> ops;
     ceph::buffer::list inbl;
-    ceph::buffer::list* poutbl{nullptr};
     version_t *pobjver{nullptr};
 
     bool is_watch{false};
@@ -1940,14 +1948,17 @@ public:
     uint32_t register_gen{0};
     bool registered{false};
     bool canceled{false};
-    Context *on_reg_commit{nullptr};
+    fu2::unique_function<void(boost::system::error_code,
+			      ceph::buffer::list&&) &&> on_reg_commit;
 
-    Context *on_notify_finish{nullptr};
-    ceph::buffer::list* notify_result_bl{nullptr};
+    fu2::unique_function<void(boost::system::error_code, ceph::buffer::list&&) &&> on_notify_finish;
     uint64_t notify_id{0};
 
-    WatchContext *watch_context{nullptr};
-
+    fu2::unique_function<void(boost::system::error_code,
+			      uint64_t notify_id,
+			      uint64_t cookie,
+			      uint64_t notifier_id,
+			      ceph::buffer::list&& bl) > handle;
     OSDSession *session{nullptr};
 
     Objecter *objecter;
@@ -1974,11 +1985,6 @@ public:
 
     uint64_t get_cookie() {
       return reinterpret_cast<uint64_t>(this);
-    }
-
-  private:
-    ~LingerOp() override {
-      delete watch_context;
     }
   };
 
@@ -2223,7 +2229,6 @@ private:
     return op_budget;
   }
   int take_linger_budget(LingerOp *info);
-  friend class WatchContext; // to invoke put_up_budget_bytes
   void put_op_budget_bytes(int op_budget) {
     ceph_assert(op_budget >= 0);
     op_throttle_bytes.put(op_budget);
@@ -2696,14 +2701,36 @@ public:
 			  ObjectOperation& op,
 			  const SnapContext& snapc, ceph::real_time mtime,
 			  ceph::buffer::list& inbl,
-			  Context *onfinish,
+			  fu2::unique_function<void(
+			    boost::system::error_code,
+			    const ceph::buffer::list&) &&> onfinish,
 			  version_t *objver);
+  ceph_tid_t linger_watch(LingerOp *info,
+			  ObjectOperation& op,
+			  const SnapContext& snapc, ceph::real_time mtime,
+			  ceph::buffer::list& inbl,
+			  Context* onfinish,
+			  version_t *objver) {
+    return linger_watch(info, op, snapc, mtime, inbl,
+			OpContextVert<ceph::buffer::list>(onfinish, nullptr), objver);
+  }
+  ceph_tid_t linger_notify(LingerOp *info,
+			   ObjectOperation& op,
+			   snapid_t snap, ceph::buffer::list& inbl,
+			   fu2::unique_function<void(
+			     boost::system::error_code,
+			     ceph::buffer::list&& bl) &&> onack,
+			   version_t *objver);
   ceph_tid_t linger_notify(LingerOp *info,
 			   ObjectOperation& op,
 			   snapid_t snap, ceph::buffer::list& inbl,
 			   ceph::buffer::list *poutbl,
-			   Context *onack,
-			   version_t *objver);
+			   Context* onack,
+			   version_t *objver) {
+    return linger_notify(info, op, snap, inbl,
+			 OpContextVert(onack, poutbl),
+			 objver);
+  }
   int linger_check(LingerOp *info);
   void linger_cancel(LingerOp *info);  // releases a reference
   void _linger_cancel(LingerOp *info);
@@ -3281,11 +3308,7 @@ public:
   void create_pool_snap(int64_t pool, std::string_view snapName,
 			Context* c) {
     create_pool_snap(pool, snapName,
-		     [c = std::unique_ptr<Context>(c)]
-		     (boost::system::error_code e,
-		      const ceph::buffer::list&) mutable {
-		       c.release()->complete(e);
-		     });
+		     OpContextVert<ceph::buffer::list>(c, nullptr));
   }
   void allocate_selfmanaged_snap(int64_t pool,
 				 fu2::unique_function<
@@ -3294,13 +3317,7 @@ public:
   void allocate_selfmanaged_snap(int64_t pool, snapid_t* psnapid,
 				 Context* c) {
     allocate_selfmanaged_snap(pool,
-			      [psnapid,
-			       c = std::unique_ptr<Context>(c)]
-			      (boost::system::error_code ec,
-				snapid_t snapid) mutable {
-				*psnapid = snapid;
-				c.release()->complete(ec);
-			      });
+			      OpContextVert(c, psnapid));
   }
   void delete_pool_snap(int64_t pool, std::string_view snapName,
 			fu2::unique_function<
@@ -3309,11 +3326,7 @@ public:
   void delete_pool_snap(int64_t pool, std::string_view snapName,
 			Context* c) {
     delete_pool_snap(pool, snapName,
-		     [c = std::unique_ptr<Context>(c)](
-		       boost::system::error_code ec,
-		       const ceph::buffer::list&) mutable {
-      c.release()->complete(ec);
-    });
+		     OpContextVert<ceph::buffer::list>(c, nullptr));
   }
 
   void delete_selfmanaged_snap(int64_t pool, snapid_t snap,
@@ -3324,11 +3337,7 @@ public:
   void delete_selfmanaged_snap(int64_t pool, snapid_t snap,
 			       Context* c) {
     delete_selfmanaged_snap(pool, snap,
-			    [c = std::unique_ptr<Context>(c)](
-			      boost::system::error_code ec,
-			      const ceph::buffer::list&) mutable {
-			      c.release()->complete(ec);
-			    });
+			    OpContextVert<ceph::buffer::list>(c, nullptr));
   }
 
 
@@ -3340,11 +3349,7 @@ public:
   void create_pool(std::string_view name, Context *onfinish,
 		  int crush_rule=-1) {
     create_pool(name,
-		[c = std::unique_ptr<Context>(onfinish)](
-		  boost::system::error_code ec,
-		  const ceph::buffer::list&) mutable {
-		  c.release()->complete(ec);
-		},
+		OpContextVert<ceph::buffer::list>(onfinish, nullptr),
 		crush_rule);
   }
   void delete_pool(int64_t pool,
@@ -3353,12 +3358,7 @@ public:
 		     const ceph::buffer::list&) &&> onfinish);
   void delete_pool(int64_t pool,
 		   Context* onfinish) {
-    delete_pool(pool,
-		[c = std::unique_ptr<Context>(onfinish)](
-		  boost::system::error_code ec,
-		  const ceph::buffer::list&) mutable {
-		  c.release()->complete(ec);
-		});
+    delete_pool(pool, OpContextVert<ceph::buffer::list>(onfinish, nullptr));
   }
 
   void delete_pool(std::string_view name,
@@ -3368,12 +3368,7 @@ public:
 
   void delete_pool(std::string_view name,
 		   Context* onfinish) {
-    delete_pool(name,
-		[c = std::unique_ptr<Context>(onfinish)](
-		  boost::system::error_code ec,
-		  const ceph::buffer::list&) mutable {
-		  c.release()->complete(ec);
-		});
+    delete_pool(name, OpContextVert<ceph::buffer::list>(onfinish, nullptr));
   }
 
   void handle_pool_op_reply(MPoolOpReply *m);

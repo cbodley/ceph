@@ -571,11 +571,11 @@ void Objecter::_linger_commit(LingerOp *info, int r, ceph::buffer::list& outbl)
   std::unique_lock wl(info->watch_lock);
   ldout(cct, 10) << "_linger_commit " << info->linger_id << dendl;
   if (info->on_reg_commit) {
-    info->on_reg_commit->complete(r);
-    info->on_reg_commit = NULL;
+    std::move(info->on_reg_commit)(ceph::to_error_code(r), {});
+    info->on_reg_commit = nullptr;
   }
   if (r < 0 && info->on_notify_finish) {
-    info->on_notify_finish->complete(r);
+    std::move(info->on_notify_finish)(ceph::to_error_code(r), {});
     info->on_notify_finish = nullptr;
   }
 
@@ -611,7 +611,7 @@ struct CB_DoWatchError {
     wl.unlock();
 
     if (!canceled) {
-      info->watch_context->handle_error(info->get_cookie(), err);
+      info->handle(ceph::to_error_code(err), 0, info->get_cookie(), 0, {});
     }
 
     info->finished_async();
@@ -638,8 +638,8 @@ void Objecter::_linger_reconnect(LingerOp *info, int r)
     if (!info->last_error) {
       r = _normalize_watch_error(r);
       info->last_error = r;
-      if (info->watch_context) {
-        boost::asio::defer(finish_strand, CB_DoWatchError(this, info, r));
+      if (info->handle) {
+	boost::asio::defer(finish_strand, CB_DoWatchError(this, info, r));
       }
     }
     wl.unlock();
@@ -700,8 +700,8 @@ void Objecter::_linger_ping(LingerOp *info, int r, ceph::coarse_mono_time sent,
     } else if (r < 0 && !info->last_error) {
       r = _normalize_watch_error(r);
       info->last_error = r;
-      if (info->watch_context) {
-        boost::asio::defer(finish_strand, CB_DoWatchError(this, info, r));
+      if (info->handle) {
+	boost::asio::defer(finish_strand, CB_DoWatchError(this, info, r));
       }
     }
   } else {
@@ -791,7 +791,9 @@ ceph_tid_t Objecter::linger_watch(LingerOp *info,
 				  const SnapContext& snapc,
 				  real_time mtime,
 				  ceph::buffer::list& inbl,
-				  Context *oncommit,
+				  fu2::unique_function<void(
+				    boost::system::error_code,
+				    const bufferlist&) &&> oncommit,
 				  version_t *objver)
 {
   info->is_watch = true;
@@ -800,9 +802,8 @@ ceph_tid_t Objecter::linger_watch(LingerOp *info,
   info->target.flags |= CEPH_OSD_FLAG_WRITE;
   info->ops = op.ops;
   info->inbl = inbl;
-  info->poutbl = NULL;
   info->pobjver = objver;
-  info->on_reg_commit = oncommit;
+  info->on_reg_commit = std::move(oncommit);
 
   info->ctx_budget = take_linger_budget(info);
 
@@ -816,21 +817,20 @@ ceph_tid_t Objecter::linger_watch(LingerOp *info,
 
 ceph_tid_t Objecter::linger_notify(LingerOp *info,
 				   ObjectOperation& op,
-				   snapid_t snap, ceph::buffer::list& inbl,
-				   ceph::buffer::list *poutbl,
-				   Context *onfinish,
+				   snapid_t snap, bufferlist& inbl,
+				   fu2::unique_function<void(
+				     boost::system::error_code,
+				     ceph::buffer::list&&) &&> onfinish,
 				   version_t *objver)
 {
   info->snap = snap;
   info->target.flags |= CEPH_OSD_FLAG_READ;
   info->ops = op.ops;
   info->inbl = inbl;
-  info->poutbl = poutbl;
   info->pobjver = objver;
-  info->on_reg_commit = onfinish;
-
+  info->on_reg_commit = std::move(onfinish);
   info->ctx_budget = take_linger_budget(info);
-  
+
   shunique_lock sul(rwlock, ceph::acquire_unique);
   _linger_submit(info, sul);
   logger->inc(l_osdc_linger_active);
@@ -891,8 +891,8 @@ void Objecter::handle_watch_notify(MWatchNotify *m)
   if (m->opcode == CEPH_WATCH_EVENT_DISCONNECT) {
     if (!info->last_error) {
       info->last_error = -ENOTCONN;
-      if (info->watch_context) {
-        boost::asio::defer(finish_strand, CB_DoWatchError(this, info, -ENOTCONN));
+      if (info->handle) {
+	boost::asio::defer(finish_strand, CB_DoWatchError(this, info, -ENOTCONN));
       }
     }
   } else if (!info->is_watch) {
@@ -904,12 +904,12 @@ void Objecter::handle_watch_notify(MWatchNotify *m)
       ldout(cct, 10) << __func__ << " reply notify " << m->notify_id
 		     << " != " << info->notify_id << ", ignoring" << dendl;
     } else if (info->on_notify_finish) {
-      info->notify_result_bl->claim(m->get_data());
-      info->on_notify_finish->complete(m->return_code);
+      std::move(info->on_notify_finish)(ceph::to_error_code(m->return_code),
+					std::move(m->get_data()));
 
       // if we race with reconnect we might get a second notify; only
       // notify the caller once!
-      info->on_notify_finish = NULL;
+      info->on_notify_finish = nullptr;
     }
   } else {
     boost::asio::defer(finish_strand, CB_DoWatchNotify(this, info, m));
@@ -930,15 +930,14 @@ void Objecter::_do_watch_notify(LingerOp *info, MWatchNotify *m)
 
   // notify completion?
   ceph_assert(info->is_watch);
-  ceph_assert(info->watch_context);
+  ceph_assert(info->handle);
   ceph_assert(m->opcode != CEPH_WATCH_EVENT_DISCONNECT);
 
   l.unlock();
 
   switch (m->opcode) {
   case CEPH_WATCH_EVENT_NOTIFY:
-    info->watch_context->handle_notify(m->notify_id, m->cookie,
-				       m->notifier_gid, m->bl);
+    info->handle({}, m->notify_id, m->cookie, m->notifier_gid, std::move(m->bl));
     break;
   }
 
@@ -1636,11 +1635,11 @@ void Objecter::_check_linger_pool_dne(LingerOp *op, bool *need_unregister)
     if (osdmap->get_epoch() >= op->map_dne_bound) {
       std::unique_lock wl{op->watch_lock};
       if (op->on_reg_commit) {
-	op->on_reg_commit->complete(-ENOENT);
+	std::move(op->on_reg_commit)(ceph::to_error_code(ENOENT), {});
 	op->on_reg_commit = nullptr;
       }
       if (op->on_notify_finish) {
-        op->on_notify_finish->complete(-ENOENT);
+	std::move(op->on_notify_finish)(ceph::to_error_code(ENOENT), {});
         op->on_notify_finish = nullptr;
       }
       *need_unregister = true;
@@ -3359,7 +3358,7 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
     // have, but that is better than doing callbacks out of order.
   }
 
-  fu2::unique_function<void(boost::system::error_code)> onfinish;
+  decltype(op->onfinish) onfinish;
 
   int rc = m->get_result();
 
@@ -3791,7 +3790,7 @@ void Objecter::put_nlist_context_budget(NListContext *list_context)
 void Objecter::create_pool_snap(int64_t pool, std::string_view snap_name,
 				fu2::unique_function<void(
 				  boost::system::error_code,
-				  const buffer::list&) &&> onfinish)
+				  const ceph::buffer::list&) &&> onfinish)
 {
   unique_lock wl(rwlock);
   ldout(cct, 10) << "create_pool_snap; pool: " << pool << "; snap: "
@@ -3857,7 +3856,7 @@ void Objecter::allocate_selfmanaged_snap(int64_t pool,
 void Objecter::delete_pool_snap(
   int64_t pool, std::string_view snap_name,
   fu2::unique_function<void(boost::system::error_code,
-			   const buffer::list&) &&> onfinish)
+			    const ceph::buffer::list&) &&> onfinish)
 {
   unique_lock wl(rwlock);
   ldout(cct, 10) << "delete_pool_snap; pool: " << pool << "; snap: "
@@ -3867,13 +3866,13 @@ void Objecter::delete_pool_snap(
   if (!p)
     std::move(onfinish)(boost::system::error_code(
 			  EINVAL,
-			  boost::system::system_category()), buffer::list{});
+			  boost::system::system_category()), ceph::buffer::list{});
 
 
   if (!p->snap_exists(snap_name))
     std::move(onfinish)(boost::system::error_code(
 			  ENOENT,
-			  boost::system::system_category()), buffer::list{});
+			  boost::system::system_category()), ceph::buffer::list{});
 
   PoolOp *op = new PoolOp;
   op->tid = ++last_tid;
@@ -3889,7 +3888,7 @@ void Objecter::delete_pool_snap(
 void Objecter::delete_selfmanaged_snap(int64_t pool, snapid_t snap,
 				       fu2::unique_function<
 				       void(boost::system::error_code,
-					    const buffer::list&) &&> onfinish)
+					    const ceph::buffer::list&) &&> onfinish)
 {
   unique_lock wl(rwlock);
   ldout(cct, 10) << "delete_selfmanaged_snap; pool: " << pool << "; snap: "
