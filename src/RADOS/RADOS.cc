@@ -920,6 +920,21 @@ void RADOS::delete_pool(std::int64_t pool,
     });
 }
 
+void RADOS::stat_pools(const std::vector<std::string>& pools,
+		       std::unique_ptr<PoolStatComp> c) {
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  objecter->get_pool_stats(
+    pools,
+    [c = std::move(c)]
+    (boost::system::error_code ec,
+     boost::container::flat_map<std::string, pool_stat_t> s) mutable {
+      ceph::async::dispatch(std::move(c), ec, std::move(s));
+    });
+}
+
+
+// --- Watch/Notify
+
 void RADOS::watch(const Object& o, const IOContext& _ioc,
 		  std::optional<std::chrono::seconds> timeout, WatchCB&& cb,
 		  std::unique_ptr<WatchComp> c) {

@@ -19,7 +19,7 @@
 class MGetPoolStatsReply : public PaxosServiceMessage {
 public:
   uuid_d fsid;
-  std::map<std::string,pool_stat_t> pool_stats;
+  boost::container::flat_map<std::string, pool_stat_t> pool_stats;
 
   MGetPoolStatsReply() : PaxosServiceMessage{MSG_GETPOOLSTATSREPLY, 0} {}
   MGetPoolStatsReply(uuid_d& f, ceph_tid_t t, version_t v) :

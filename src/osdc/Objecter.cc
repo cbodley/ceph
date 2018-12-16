@@ -2153,41 +2153,34 @@ void Objecter::resend_mon_ops()
 
   ldout(cct, 10) << "resend_mon_ops" << dendl;
 
-  for (map<ceph_tid_t,PoolStatOp*>::iterator p = poolstat_ops.begin();
-       p != poolstat_ops.end();
-       ++p) {
+  for (auto p = poolstat_ops.begin(); p != poolstat_ops.end(); ++p) {
     _poolstat_submit(p->second);
     logger->inc(l_osdc_poolstat_resend);
   }
 
-  for (map<ceph_tid_t,StatfsOp*>::iterator p = statfs_ops.begin();
-       p != statfs_ops.end();
-       ++p) {
+  for (auto p = statfs_ops.begin(); p != statfs_ops.end(); ++p) {
     _fs_stats_submit(p->second);
     logger->inc(l_osdc_statfs_resend);
   }
 
-  for (map<ceph_tid_t,PoolOp*>::iterator p = pool_ops.begin();
-       p != pool_ops.end();
-       ++p) {
+  for (auto p = pool_ops.begin(); p != pool_ops.end(); ++p) {
     _pool_op_submit(p->second);
     logger->inc(l_osdc_poolop_resend);
   }
 
-  for (map<ceph_tid_t, Op*>::iterator p = check_latest_map_ops.begin();
+  for (auto p = check_latest_map_ops.begin();
        p != check_latest_map_ops.end();
        ++p) {
     monc->get_version("osdmap", CB_Op_Map_Latest(this, p->second->tid));
   }
 
-  for (map<uint64_t, LingerOp*>::iterator p = check_latest_map_lingers.begin();
+  for (auto p = check_latest_map_lingers.begin();
        p != check_latest_map_lingers.end();
        ++p) {
     monc->get_version("osdmap", CB_Linger_Map_Latest(this, p->second->linger_id));
   }
 
-  for (map<uint64_t, CommandOp*>::iterator p
-	 = check_latest_map_commands.begin();
+  for (auto p = check_latest_map_commands.begin();
        p != check_latest_map_commands.end();
        ++p) {
     monc->get_version("osdmap", CB_Command_Map_Latest(this, p->second->tid));
@@ -4125,17 +4118,19 @@ void Objecter::_finish_pool_op(PoolOp *op, int r)
 
 // pool stats
 
-void Objecter::get_pool_stats(list<string>& pools,
-			      map<string,pool_stat_t> *result,
-			      Context *onfinish)
+void Objecter::get_pool_stats(
+  const std::vector<std::string>& pools,
+  fu2::unique_function<
+    void(boost::system::error_code,
+	 boost::container::flat_map<
+	   std::string, pool_stat_t>) &&> onfinish)
 {
   ldout(cct, 10) << "get_pool_stats " << pools << dendl;
 
   PoolStatOp *op = new PoolStatOp;
   op->tid = ++last_tid;
   op->pools = pools;
-  op->pool_stats = result;
-  op->onfinish = onfinish;
+  op->onfinish = std::move(onfinish);
   if (mon_timeout > timespan(0)) {
     op->ontimeout = timer.add_event(mon_timeout,
 				    [this, op]() {
@@ -4176,15 +4171,14 @@ void Objecter::handle_get_pool_stats_reply(MGetPoolStatsReply *m)
     return;
   }
 
-  map<ceph_tid_t, PoolStatOp *>::iterator iter = poolstat_ops.find(tid);
+  auto iter = poolstat_ops.find(tid);
   if (iter != poolstat_ops.end()) {
     PoolStatOp *op = poolstat_ops[tid];
     ldout(cct, 10) << "have request " << tid << " at " << op << dendl;
-    *op->pool_stats = m->pool_stats;
     if (m->version > last_seen_pgmap_version) {
       last_seen_pgmap_version = m->version;
     }
-    op->onfinish->complete(0);
+    std::move(op->onfinish)({}, std::move(m->pool_stats));
     _finish_pool_stat_op(op, 0);
   } else {
     ldout(cct, 10) << "unknown request " << tid << dendl;
@@ -4199,7 +4193,7 @@ int Objecter::pool_stat_op_cancel(ceph_tid_t tid, int r)
 
   unique_lock wl(rwlock);
 
-  map<ceph_tid_t, PoolStatOp*>::iterator it = poolstat_ops.find(tid);
+  auto it = poolstat_ops.find(tid);
   if (it == poolstat_ops.end()) {
     ldout(cct, 10) << __func__ << " tid " << tid << " dne" << dendl;
     return -ENOENT;
@@ -4209,7 +4203,7 @@ int Objecter::pool_stat_op_cancel(ceph_tid_t tid, int r)
 
   PoolStatOp *op = it->second;
   if (op->onfinish)
-    op->onfinish->complete(r);
+    std::move(op->onfinish)(ceph::to_error_code(r), {});
   _finish_pool_stat_op(op, r);
   return 0;
 }
@@ -4616,7 +4610,7 @@ void Objecter::dump_pool_ops(Formatter *fmt) const
 void Objecter::dump_pool_stat_ops(Formatter *fmt) const
 {
   fmt->open_array_section("pool_stat_ops");
-  for (map<ceph_tid_t, PoolStatOp*>::const_iterator p = poolstat_ops.begin();
+  for (auto p = poolstat_ops.begin();
        p != poolstat_ops.end();
        ++p) {
     PoolStatOp *op = p->second;
@@ -4625,10 +4619,8 @@ void Objecter::dump_pool_stat_ops(Formatter *fmt) const
     fmt->dump_stream("last_sent") << op->last_submit;
 
     fmt->open_array_section("pools");
-    for (list<string>::const_iterator it = op->pools.begin();
-	 it != op->pools.end();
-	 ++it) {
-      fmt->dump_string("pool", *it);
+    for (const auto& it : op->pools) {
+      fmt->dump_string("pool", it);
     }
     fmt->close_section(); // pools array
 

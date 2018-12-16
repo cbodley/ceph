@@ -49,6 +49,11 @@
 
 #include "common/ceph_time.h"
 
+// Figure out exactly what pool stat info we want to expose to clients
+// and get rid of this.
+
+#include "osd/osd_types.h"
+
 #include "librados/ListObjectImpl.h"
 
 #ifndef RADOS_UNLEASHED_HPP
@@ -477,6 +482,21 @@ public:
     return init.result.get();
   }
 
+  using PoolStatSig = void(boost::system::error_code,
+			   boost::container::flat_map<std::string,
+			                              pool_stat_t>);
+  using PoolStatComp = ceph::async::Completion<PoolStatSig>;
+  template<typename CompletionToken>
+  auto stat_pools(const std::vector<std::string>& pools,
+		  CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, PoolStatSig> init(token);
+    stat_pools(pools,
+	       PoolStatComp::create(get_executor(),
+				    std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
+
   using WatchCB = fu2::unique_function<void(boost::system::error_code,
 					    uint64_t notify_id,
 					    uint64_t cookie,
@@ -573,6 +593,8 @@ private:
 		   std::unique_ptr<SimpleOpComp> c);
   void delete_pool(int64_t pool,
 		   std::unique_ptr<SimpleOpComp> c);
+  void stat_pools(const std::vector<std::string>& pools,
+		  std::unique_ptr<PoolStatComp> c);
 
   void watch(const Object& o, const IOContext& ioc,
 	     std::optional<std::chrono::seconds> timeout,

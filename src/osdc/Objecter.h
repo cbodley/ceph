@@ -1834,12 +1834,12 @@ public:
 
   struct PoolStatOp {
     ceph_tid_t tid;
-    std::list<std::string> pools;
+    std::vector<std::string> pools;
 
-    std::map<std::string,pool_stat_t> *pool_stats;
-    Context *onfinish;
-    uint64_t ontimeout;
-
+    fu2::unique_function<void(
+      boost::system::error_code,
+      boost::container::flat_map<std::string, pool_stat_t>) &&> onfinish;
+    std::uint64_t ontimeout;
     ceph::coarse_mono_time last_submit;
   };
 
@@ -3418,8 +3418,11 @@ private:
   void _poolstat_submit(PoolStatOp *op);
 public:
   void handle_get_pool_stats_reply(MGetPoolStatsReply *m);
-  void get_pool_stats(std::list<std::string>& pools, std::map<std::string,pool_stat_t> *result,
-		      Context *onfinish);
+  void get_pool_stats(const std::vector<std::string>& pools,
+		      fu2::unique_function<void(
+			boost::system::error_code,
+			boost::container::flat_map<
+			  std::string, pool_stat_t>) &&> onfinish);
   int pool_stat_op_cancel(ceph_tid_t tid, int r);
   void _finish_pool_stat_op(PoolStatOp *op, int r);
 

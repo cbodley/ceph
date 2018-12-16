@@ -622,20 +622,19 @@ int librados::RadosClient::pool_list(std::list<std::pair<int64_t, string> >& v)
 int librados::RadosClient::get_pool_stats(std::list<string>& pools,
 					  map<string,::pool_stat_t>& result)
 {
-  Mutex mylock("RadosClient::get_pool_stats::mylock");
-  Cond cond;
-  bool done;
-  int ret = 0;
+  ceph::waiter<boost::system::error_code,
+	       boost::container::flat_map<std::string, ::pool_stat_t>> w;
 
-  objecter->get_pool_stats(pools, &result, new C_SafeCond(&mylock, &cond, &done,
-							  &ret));
+  std::vector<std::string> v(pools.begin(), pools.end());
+  objecter->get_pool_stats(v, w.ref());
 
-  mylock.Lock();
-  while (!done)
-    cond.Wait(mylock);
-  mylock.Unlock();
+  auto [ec, res] = w.wait();
+  if (ec)
+    return ceph::from_error_code(ec);
 
-  return ret;
+  result.insert(res.begin(), res.end());
+
+  return 0;
 }
 
 bool librados::RadosClient::get_pool_is_selfmanaged_snaps_mode(
