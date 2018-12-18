@@ -1530,9 +1530,7 @@ void Objecter::_check_op_pool_dne(Op *op, unique_lock *sl)
 		     << " dne" << dendl;
       if (op->onfinish) {
 	num_in_flight--;
-	std::move(op->onfinish)(
-	  boost::system::errc::make_error_code(
-	    boost::system::errc::no_such_file_or_directory));
+	std::move(op->onfinish)(ceph::to_error_code(ENOENT), -ENOENT);
       }
 
       OSDSession *s = op->session;
@@ -2455,7 +2453,7 @@ int Objecter::op_cancel(OSDSession *s, ceph_tid_t tid, int r)
   Op *op = p->second;
   if (op->onfinish) {
     num_in_flight--;
-    std::move(op->onfinish)(ceph::to_error_code(r));
+    std::move(op->onfinish)(ceph::to_error_code(r), r);
   }
   _op_cancel_map_check(op);
   _finish_op(op, r);
@@ -3498,7 +3496,7 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
 
   // do callbacks
   if (onfinish) {
-    std::move(onfinish)(ceph::to_error_code(rc));
+    std::move(onfinish)(ceph::to_error_code(rc), rc);
   }
   if (completion_lock.mutex()) {
     completion_lock.unlock();
@@ -5073,7 +5071,7 @@ void Objecter::enumerate_objects(
   // later.
   pg_read(start.get_hash(), oloc, op, &on_ack->bl, 0,
 	  [c = std::move(on_ack)]
-	  (boost::system::error_code ec) mutable {
+	  (boost::system::error_code ec, int) mutable {
 	    (*c)(ec);
 	  }, epoch, budget);
 }

@@ -73,7 +73,7 @@ struct ObjectOperation {
 
   std::vector<ceph::buffer::list*> out_bl;
   std::vector<fu2::unique_function<void(boost::system::error_code, int,
-				   const ceph::buffer::list& bl) &&>> out_handler;
+				        const ceph::buffer::list& bl) &&>> out_handler;
   std::vector<int*> out_rval;
   std::vector<boost::system::error_code*> out_ec;
 
@@ -1616,12 +1616,12 @@ public:
     ceph::buffer::list *outbl = nullptr;
     std::vector<ceph::buffer::list*> out_bl;
     std::vector<fu2::unique_function<void(boost::system::error_code, int,
-				     const ceph::buffer::list& bl) &&>> out_handler;
+					  const ceph::buffer::list& bl) &&>> out_handler;
     std::vector<int*> out_rval;
     std::vector<boost::system::error_code*> out_ec;
 
     int priority = 0;
-    fu2::unique_function<void(boost::system::error_code) &&> onfinish;
+    fu2::unique_function<void(boost::system::error_code, int) &&> onfinish;
     uint64_t ontimeout = 0;
 
     ceph_tid_t tid = 0;
@@ -1651,7 +1651,7 @@ public:
     ZTracer::Trace trace;
 
     Op(const object_t& o, const object_locator_t& ol, vector<OSDOp>&& _ops,
-       int f, fu2::unique_function<void(boost::system::error_code) &&> fin,
+       int f, fu2::unique_function<void(boost::system::error_code, int) &&> fin,
        version_t *ov, int *offset = nullptr,
        ZTracer::Trace *parent_trace = nullptr) :
       target(o, ol, f),
@@ -1684,9 +1684,17 @@ public:
       out_handler(ops.size()),
       out_rval(ops.size(), nullptr),
       out_ec(ops.size(), nullptr),
-      onfinish(OpContextVert(fin)),
       objver(ov),
       data_offset(offset) {
+      if (fin)
+	onfinish =
+	  [fin = std::unique_ptr<Context>(fin)](boost::system::error_code,
+						int r) mutable {
+	    fin.release()->complete(r);
+	  };
+      else
+	onfinish = nullptr;
+
       if (target.base_oloc.key == o)
 	target.base_oloc.key.clear();
       if (parent_trace && parent_trace->valid()) {
@@ -2575,7 +2583,7 @@ public:
   void mutate(const object_t& oid, const object_locator_t& oloc,
 	      ObjectOperation&& op, const SnapContext& snapc,
 	      ceph::real_time mtime, int flags,
-	      fu2::unique_function<void(boost::system::error_code)> oncommit,
+	      fu2::unique_function<void(boost::system::error_code, int)> oncommit,
 	      version_t *objver = NULL, osd_reqid_t reqid = osd_reqid_t()) {
     Op *o = new Op(oid, oloc, std::move(op.ops), flags | global_op_flags |
 		   CEPH_OSD_FLAG_WRITE, std::move(oncommit), objver,
@@ -2632,8 +2640,8 @@ public:
   }
 
   void read(const object_t& oid, const object_locator_t& oloc,
-	    ObjectOperation&& op, snapid_t snapid, ceph::buffer::list *pbl, int flags,
-	    fu2::unique_function<void(boost::system::error_code)> onack,
+	    ObjectOperation&& op, snapid_t snapid, ceph::buffer::list *pbl,
+	    int flags, fu2::unique_function<void(boost::system::error_code, int)> onack,
 	    version_t *objver = nullptr, int *data_offset = nullptr,
 	    uint64_t features = 0) {
     Op *o = new Op(oid, oloc, std::move(op.ops), flags | global_op_flags |
@@ -2697,7 +2705,7 @@ public:
   ceph_tid_t pg_read(
     uint32_t hash, object_locator_t oloc,
     ObjectOperation& op, bufferlist *pbl, int flags,
-    fu2::unique_function<void(boost::system::error_code) &&> onack,
+    fu2::unique_function<void(boost::system::error_code, int) &&> onack,
     epoch_t *reply_epoch, int *ctx_budget) {
     ceph_tid_t tid;
     Op *o = new Op(object_t(), oloc,

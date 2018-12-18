@@ -733,7 +733,7 @@ auto resulter(std::unique_ptr<Op::Completion> c,
 	      std::unique_ptr<Op::Result> r) {
 
   return [c = std::move(c), r = std::move(r)]
-    (boost::system::error_code ec) mutable {
+    (boost::system::error_code ec, int) mutable {
 	   ceph::async::dispatch(std::move(c), ec, std::move(*r));
 	 };
 }
@@ -959,7 +959,7 @@ void RADOS::notify_ack(const Object& o,
 
   rados->objecter->read(
     *oid, ioc->oloc, std::move(op), ioc->snap_seq, nullptr, 0,
-    [c = std::move(c)](boost::system::error_code e) mutable {
+    [c = std::move(c)](boost::system::error_code e, int) mutable {
       ceph::async::dispatch(std::move(c), e);
     });
 }
@@ -984,7 +984,7 @@ void RADOS::unwatch(uint64_t cookie, const IOContext& _ioc,
   objecter->mutate(linger_op->target.base_oid, ioc->oloc, std::move(op),
 		   ioc->snapc, ceph::real_clock::now(), 0,
 		   [objecter, linger_op, c = std::move(c)]
-		   (boost::system::error_code ec) mutable {
+		   (boost::system::error_code ec, int) mutable {
 		     objecter->linger_cancel(linger_op);
 		     ceph::async::dispatch(std::move(c), ec);
 		   });
