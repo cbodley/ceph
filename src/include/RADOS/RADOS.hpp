@@ -43,6 +43,7 @@
 // These are needed for RGW, but in general as a 'shiny new interface'
 // we should try to use forward declarations and provide standard alternatives.
 
+#include "include/ceph_fs.h"
 #include "include/rados/rados_types.hpp"
 #include "include/buffer.h"
 #include "include/object.h"
@@ -496,6 +497,17 @@ public:
     return init.result.get();
   }
 
+  using StatFSSig = void(boost::system::error_code,
+			 ceph_statfs);
+  using StatFSComp = ceph::async::Completion<StatFSSig>;
+  template<typename CompletionToken>
+  auto statfs(std::optional<int64_t> pool,
+	      CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, StatFSSig> init(token);
+    ceph_statfs(pool, StatFSComp::create(get_executor(),
+					 std::move(init.completion_handler)));
+    return init.result.get();
+  }
 
   using WatchCB = fu2::unique_function<void(boost::system::error_code,
 					    uint64_t notify_id,
@@ -595,6 +607,8 @@ private:
 		   std::unique_ptr<SimpleOpComp> c);
   void stat_pools(const std::vector<std::string>& pools,
 		  std::unique_ptr<PoolStatComp> c);
+  void stat_fs(std::optional<std::int64_t> pool,
+	       std::unique_ptr<StatFSComp> c);
 
   void watch(const Object& o, const IOContext& ioc,
 	     std::optional<std::chrono::seconds> timeout,

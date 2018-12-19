@@ -4221,18 +4221,18 @@ void Objecter::_finish_pool_stat_op(PoolStatOp *op, int r)
   delete op;
 }
 
-void Objecter::get_fs_stats(ceph_statfs& result,
-			    boost::optional<int64_t> data_pool,
-			    Context *onfinish)
+void Objecter::get_fs_stats(boost::optional<int64_t> poolid,
+			    fu2::unique_function<void(
+			      boost::system::error_code,
+			      const ceph_statfs&) &&> onfinish)
 {
   ldout(cct, 10) << "get_fs_stats" << dendl;
   unique_lock l(rwlock);
 
   StatfsOp *op = new StatfsOp;
   op->tid = ++last_tid;
-  op->stats = &result;
-  op->data_pool = data_pool;
-  op->onfinish = onfinish;
+  op->data_pool = poolid;
+  op->onfinish = std::move(onfinish);
   if (mon_timeout > timespan(0)) {
     op->ontimeout = timer.add_event(mon_timeout,
 				    [this, op]() {
@@ -4275,10 +4275,9 @@ void Objecter::handle_fs_stats_reply(MStatfsReply *m)
   if (statfs_ops.count(tid)) {
     StatfsOp *op = statfs_ops[tid];
     ldout(cct, 10) << "have request " << tid << " at " << op << dendl;
-    *(op->stats) = m->h.st;
     if (m->h.version > last_seen_pgmap_version)
       last_seen_pgmap_version = m->h.version;
-    op->onfinish->complete(0);
+    std::move(op->onfinish)({}, m->h.st);
     _finish_statfs_op(op, 0);
   } else {
     ldout(cct, 10) << "unknown request " << tid << dendl;
@@ -4303,7 +4302,7 @@ int Objecter::statfs_op_cancel(ceph_tid_t tid, int r)
 
   StatfsOp *op = it->second;
   if (op->onfinish)
-    op->onfinish->complete(r);
+    std::move(op->onfinish)(ceph::to_error_code(r), {});
   _finish_statfs_op(op, r);
   return 0;
 }

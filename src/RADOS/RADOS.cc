@@ -19,6 +19,7 @@
 
 #include <boost/intrusive_ptr.hpp>
 
+#include "include/ceph_fs.h"
 #include "common/ceph_context.h"
 #include "common/ceph_argparse.h"
 #include "common/common_init.h"
@@ -932,6 +933,19 @@ void RADOS::stat_pools(const std::vector<std::string>& pools,
     });
 }
 
+void RADOS::stat_fs(std::optional<std::int64_t> _pool,
+		    std::unique_ptr<StatFSComp> c) {
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  boost::optional<int64_t> pool;
+  if (_pool)
+    pool = *pool;
+  objecter->get_fs_stats(
+    pool,
+    [c = std::move(c)] (boost::system::error_code ec,
+			ceph_statfs s) mutable {
+      ceph::async::dispatch(std::move(c), ec, std::move(s));
+    });
+}
 
 // --- Watch/Notify
 
