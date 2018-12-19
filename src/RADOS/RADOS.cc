@@ -1204,6 +1204,33 @@ void RADOS::enumerate_objects(const IOContext& _ioc,
       ceph::async::dispatch(std::move(c), ec, std::move(v), std::move(next));
     });
 }
+
+void RADOS::osd_command(int osd, std::vector<std::string>&& cmd,
+			ceph::bufferlist&& in, std::unique_ptr<CommandComp> c) {
+  auto rados = reinterpret_cast<_::RADOS*>(&impl);
+  rados->objecter->osd_command(osd, std::move(cmd), std::move(in), nullptr,
+			       [c = std::move(c)]
+			       (boost::system::error_code ec,
+				std::string&& s,
+				ceph::bufferlist&& b) mutable {
+				 ceph::async::dispatch(std::move(c), ec,
+						       std::move(s),
+						       std::move(b));
+    });
+}
+void RADOS::pg_command(pg_t pg, std::vector<std::string>&& cmd,
+		       ceph::bufferlist&& in, std::unique_ptr<CommandComp> c) {
+  auto rados = reinterpret_cast<_::RADOS*>(&impl);
+  rados->objecter->pg_command(pg, std::move(cmd), std::move(in), nullptr,
+			      [c = std::move(c)]
+			      (boost::system::error_code ec,
+			       std::string&& s,
+			       ceph::bufferlist&& b) mutable {
+				ceph::async::dispatch(std::move(c), ec,
+						      std::move(s),
+						      std::move(b));
+			      });
+}
 }
 
 namespace std {

@@ -584,6 +584,29 @@ public:
     return init.result.get();
   }
 
+  using CommandSig = void(boost::system::error_code,
+			  std::string, ceph::bufferlist);
+  using CommandComp = ceph::async::Completion<CommandSig>;
+
+  template<typename CompletionToken>
+  auto osd_command(int osd, std::vector<std::string>&& cmd,
+		   ceph::bufferlist&& in, CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, CommandSig> init(token);
+    osd_command(osd, std::move(cmd), std::move(in),
+		CommandComp::create(get_executor(),
+				      std::move(init.completion_handler)));
+    return init.result.get();
+  }
+  template<typename CompletionToken>
+  auto pg_command(pg_t pg, std::vector<std::string>&& cmd,
+		  ceph::bufferlist&& in, CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, CommandSig> init(token);
+    pg_command(pg, std::move(cmd), std::move(in),
+	       CommandComp::create(get_executor(),
+				      std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
 private:
 
   void execute(const Object& o, const IOContext& ioc, ReadOp&& op,
@@ -630,6 +653,11 @@ private:
 			 const EnumerationCursor& end, const std::uint32_t max,
 			 const bufferlist& filter,
 			 std::unique_ptr<EnumerateComp> c);
+  void osd_command(int osd, std::vector<std::string>&& cmd,
+		   ceph::bufferlist&& in, std::unique_ptr<CommandComp> c);
+  void pg_command(pg_t pg, std::vector<std::string>&& cmd,
+		  ceph::bufferlist&& in, std::unique_ptr<CommandComp> c);
+
 
   static constexpr std::size_t impl_size = 512 * 8;
   std::aligned_storage_t<impl_size> impl;

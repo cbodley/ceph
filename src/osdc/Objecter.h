@@ -1887,8 +1887,6 @@ public:
     ceph_tid_t tid = 0;
     std::vector<std::string> cmd;
     ceph::buffer::list inbl;
-    ceph::buffer::list *poutbl = nullptr;
-    std::string *prs = nullptr;
 
     // target_osd == -1 means target_pg is valid
     const int target_osd = -1;
@@ -1900,9 +1898,50 @@ public:
     int map_check_error = 0; // error to return if std::map check fails
     const char *map_check_error_str = nullptr;
 
-    Context *onfinish = nullptr;
+    fu2::unique_function<void(boost::system::error_code, std::string&&,
+			      ceph::buffer::list&&)> onfinish;
     uint64_t ontimeout = 0;
     ceph::coarse_mono_time last_submit;
+
+    static decltype(onfinish) vert(Context* c, std::string* s,
+				   ceph::buffer::list* bl) {
+
+      if (c || s || bl) {
+	return [c = std::unique_ptr<Context>(c), s, bl]
+	  (boost::system::error_code ec, std::string&& outs,
+	   ceph::buffer::list&& outbl) mutable {
+		 if (c)
+		   c.release()->complete(ceph::from_error_code(ec));
+		 if (s)
+		   *s = std::move(outs);
+		 if (bl)
+		   *bl = std::move(outbl);
+	       };
+      } else {
+	return nullptr;
+      }
+    }
+
+    CommandOp(
+      int target_osd,
+      std::vector<string>&& cmd,
+      ceph::buffer::list&& inbl,
+      decltype(onfinish)&& onfinish)
+      : cmd(std::move(cmd)),
+	inbl(std::move(inbl)),
+	target_osd(target_osd),
+	onfinish(std::move(onfinish)) {}
+
+    CommandOp(
+      pg_t pgid,
+      std::vector<string>&& cmd,
+      ceph::buffer::list&& inbl,
+      decltype(onfinish)&& onfinish)
+      : cmd(std::move(cmd)),
+	inbl(std::move(inbl)),
+	target_pg(pgid),
+	target(pgid),
+	onfinish(std::move(onfinish)) {}
 
     CommandOp(
       int target_osd,
@@ -1913,10 +1952,8 @@ public:
       Context *onfinish)
       : cmd(cmd),
 	inbl(inbl),
-	poutbl(poutbl),
-	prs(prs),
 	target_osd(target_osd),
-	onfinish(onfinish) {}
+	onfinish(vert(onfinish, prs, poutbl)) {}
 
     CommandOp(
       pg_t pgid,
@@ -1927,20 +1964,19 @@ public:
       Context *onfinish)
       : cmd(cmd),
 	inbl(inbl),
-	poutbl(poutbl),
-	prs(prs),
 	target_pg(pgid),
 	target(pgid),
-	onfinish(onfinish) {}
-
+	onfinish(vert(onfinish, prs, poutbl)) {}
   };
 
   void submit_command(CommandOp *c, ceph_tid_t *ptid);
   int _calc_command_target(CommandOp *c, shunique_lock &sul);
   void _assign_command_session(CommandOp *c, shunique_lock &sul);
   void _send_command(CommandOp *c);
-  int command_op_cancel(OSDSession *s, ceph_tid_t tid, int r);
-  void _finish_command(CommandOp *c, int r, std::string rs);
+  int command_op_cancel(OSDSession *s, ceph_tid_t tid,
+			boost::system::error_code ec);
+  void _finish_command(CommandOp *c, boost::system::error_code ec,
+		       std::string&& rs, ceph::buffer::list&& bl);
   void handle_command_reply(MCommandReply *m);
 
 
@@ -2535,11 +2571,32 @@ public:
   epoch_t op_cancel_writes(int r, int64_t pool=-1);
 
   // commands
-  void osd_command(int osd, const std::vector<std::string>& cmd,
-		  const ceph::buffer::list& inbl, ceph_tid_t *ptid,
-		  ceph::buffer::list *poutbl, std::string *prs, Context *onfinish) {
+  void osd_command(int osd, std::vector<std::string>&& cmd,
+		   ceph::buffer::list&& inbl, ceph_tid_t *ptid,
+		   decltype(CommandOp::onfinish)&& onfinish) {
     ceph_assert(osd >= 0);
-    CommandOp *c = new CommandOp(
+    auto c = new CommandOp(
+      osd,
+      std::move(cmd),
+      std::move(inbl),
+      std::move(onfinish));
+    submit_command(c, ptid);
+  }
+  void pg_command(pg_t pgid, std::vector<std::string>&& cmd,
+		  ceph::buffer::list&& inbl, ceph_tid_t *ptid,
+		  decltype(CommandOp::onfinish)&& onfinish) {
+    auto *c = new CommandOp(
+      pgid,
+      std::move(cmd),
+      std::move(inbl),
+      std::move(onfinish));
+    submit_command(c, ptid);
+  }
+  void osd_command(int osd, const std::vector<std::string>& cmd,
+		   const ceph::buffer::list& inbl, ceph_tid_t *ptid,
+		   ceph::buffer::list *poutbl, string *prs, Context *onfinish) {
+    ceph_assert(osd >= 0);
+    auto c = new CommandOp(
       osd,
       cmd,
       inbl,
@@ -2718,7 +2775,7 @@ public:
 
   ceph_tid_t pg_read(
     uint32_t hash, object_locator_t oloc,
-    ObjectOperation& op, bufferlist *pbl, int flags,
+    ObjectOperation& op, ceph::buffer::list *pbl, int flags,
     fu2::unique_function<void(boost::system::error_code, int) &&> onack,
     epoch_t *reply_epoch, int *ctx_budget) {
     ceph_tid_t tid;

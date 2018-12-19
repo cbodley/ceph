@@ -1714,7 +1714,8 @@ void Objecter::_check_command_map_dne(CommandOp *c)
 		 << dendl;
   if (c->map_dne_bound > 0) {
     if (osdmap->get_epoch() >= c->map_dne_bound) {
-      _finish_command(c, c->map_check_error, c->map_check_error_str);
+      _finish_command(c, ceph::to_error_code(c->map_check_error),
+		      std::move(c->map_check_error_str), {});
     }
   } else {
     _send_command_map_check(c);
@@ -4722,14 +4723,12 @@ void Objecter::handle_command_reply(MCommandReply *m)
     sl.unlock();
     return;
   }
-  if (c->poutbl) {
-    c->poutbl->claim(m->get_data());
-  }
 
   sl.unlock();
 
   OSDSession::unique_lock sul(s->lock);
-  _finish_command(c, m->r, m->rs);
+  _finish_command(c, ceph::to_error_code(m->r), std::move(m->rs),
+		  std::move(m->get_data()));
   sul.unlock();
 
   m->put();
@@ -4753,8 +4752,9 @@ void Objecter::submit_command(CommandOp *c, ceph_tid_t *ptid)
   if (osd_timeout > timespan(0)) {
     c->ontimeout = timer.add_event(osd_timeout,
 				   [this, c, tid]() {
-				     command_op_cancel(c->session, tid,
-						       -ETIMEDOUT); });
+				     command_op_cancel(
+				       c->session, tid,
+				       ceph::to_error_code(-ETIMEDOUT)); });
   }
 
   if (!c->session->is_homeless()) {
@@ -4764,7 +4764,8 @@ void Objecter::submit_command(CommandOp *c, ceph_tid_t *ptid)
   }
   if (c->map_check_error)
     _send_command_map_check(c);
-  *ptid = tid;
+  if (ptid)
+    *ptid = tid;
 
   logger->inc(l_osdc_command_active);
 }
@@ -4860,7 +4861,8 @@ void Objecter::_send_command(CommandOp *c)
   logger->inc(l_osdc_command_send);
 }
 
-int Objecter::command_op_cancel(OSDSession *s, ceph_tid_t tid, int r)
+int Objecter::command_op_cancel(OSDSession *s, ceph_tid_t tid,
+				boost::system::error_code ec)
 {
   ceph_assert(initialized);
 
@@ -4877,24 +4879,24 @@ int Objecter::command_op_cancel(OSDSession *s, ceph_tid_t tid, int r)
   CommandOp *op = it->second;
   _command_cancel_map_check(op);
   OSDSession::unique_lock sl(op->session->lock);
-  _finish_command(op, r, "");
+  _finish_command(op, ec, {}, {});
   sl.unlock();
   return 0;
 }
 
-void Objecter::_finish_command(CommandOp *c, int r, string rs)
+void Objecter::_finish_command(CommandOp *c, boost::system::error_code ec,
+			       string&& rs, bufferlist&& bl)
 {
   // rwlock is locked unique
   // session lock is locked
 
-  ldout(cct, 10) << "_finish_command " << c->tid << " = " << r << " "
+  ldout(cct, 10) << "_finish_command " << c->tid << " = " << ec << " "
 		 << rs << dendl;
-  if (c->prs)
-    *c->prs = rs;
-  if (c->onfinish)
-    c->onfinish->complete(r);
 
-  if (c->ontimeout && r != -ETIMEDOUT)
+  if (c->onfinish)
+    std::move(c->onfinish)(ec, std::move(rs), std::move(bl));
+
+  if (c->ontimeout && ec != boost::system::errc::timed_out)
     timer.cancel_event(c->ontimeout);
 
   _session_command_op_remove(c->session, c);
