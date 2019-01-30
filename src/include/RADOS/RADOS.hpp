@@ -389,6 +389,33 @@ public:
     return init.result.get();
   }
 
+  template<typename CompletionToken>
+  auto execute(const Object& o, std::int64_t pool,
+	       ReadOp&& op,
+	       CompletionToken&& token,
+	       std::optional<std::string_view> ns = {},
+	       std::optional<std::string_view> key = {}) {
+    boost::asio::async_completion<CompletionToken, Op::Signature> init(token);
+    execute(o, pool, std::move(op),
+	    ReadOp::Completion::create(get_executor(),
+				       std::move(init.completion_handler)),
+	    ns, key);
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
+  auto execute(const Object& o, std::int64_t pool, WriteOp&& op,
+	       CompletionToken&& token,
+	       std::optional<std::string_view> ns = {},
+	       std::optional<std::string_view> key = {}) {
+    boost::asio::async_completion<CompletionToken, Op::Signature> init(token);
+    execute(o, pool, std::move(op),
+	    Op::Completion::create(get_executor(),
+				   std::move(init.completion_handler)),
+	    ns, key);
+    return init.result.get();
+  }
+
   boost::uuids::uuid get_fsid() const noexcept;
 
   using LookupPoolSig = void(boost::system::error_code,
@@ -530,6 +557,20 @@ public:
   }
 
   template<typename CompletionToken>
+  auto watch(const Object& o, std::int64_t pool,
+	     std::optional<std::chrono::seconds> timeout,
+	     WatchCB&& cb, CompletionToken&& token,
+	     std::optional<std::string_view> ns = {},
+	     std::optional<std::string_view> key = {}) {
+    boost::asio::async_completion<CompletionToken, WatchSig> init(token);
+    watch(o, pool, timeout, std::move(cb),
+	  WatchComp::create(get_executor(),
+			    std::move(init.completion_handler)),
+	  ns, key);
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
   auto notify_ack(const Object& o,
 		  const IOContext& ioc,
 		  uint64_t notify_id,
@@ -544,7 +585,24 @@ public:
   }
 
   template<typename CompletionToken>
-  auto unwatch(uint64_t cookie, const IOContext& ioc,
+  auto notify_ack(const Object& o,
+		  std::int64_t pool,
+		  uint64_t notify_id,
+		  uint64_t cookie,
+		  bufferlist&& bl,
+		  CompletionToken&& token,
+		  std::optional<std::string_view> ns = {},
+		  std::optional<std::string_view> key = {}) {
+    boost::asio::async_completion<CompletionToken, WatchSig> init(token);
+    notify_ack(o, pool, notify_id, cookie, std::move(bl),
+	       SimpleOpComp::create(get_executor(),
+				    std::move(init.completion_handler)),
+	       ns, key);
+    return init.result.get();
+  }
+
+  template<typename CompletionToken>
+  auto unwatch(uint64_t cookie, IOContext& ioc,
 	       CompletionToken&& token) {
     boost::asio::async_completion<CompletionToken, WatchSig> init(token);
     unwatch(cookie, ioc,
@@ -553,9 +611,21 @@ public:
     return init.result.get();
   }
 
+  template<typename CompletionToken>
+  auto unwatch(uint64_t cookie, std::int64_t pool,
+	       CompletionToken&& token,
+	       std::optional<std::string_view> ns = {},
+	       std::optional<std::string_view> key = {}) {
+    boost::asio::async_completion<CompletionToken, WatchSig> init(token);
+    unwatch(cookie, pool,
+	    SimpleOpComp::create(get_executor(),
+				 std::move(init.completion_handler)),
+	    ns, key);
+    return init.result.get();
+  }
+
   using NotifySig = void(boost::system::error_code, bufferlist);
   using NotifyComp = ceph::async::Completion<NotifySig>;
-
   template<typename CompletionToken>
   auto notify(const Object& oid, const IOContext& ioc, bufferlist&& bl,
 	      std::optional<std::chrono::milliseconds> timeout,
@@ -568,11 +638,25 @@ public:
     return init.result.get();
   }
 
+  template<typename CompletionToken>
+  auto notify(const Object& oid, std::int64_t pool, bufferlist&& bl,
+	      std::optional<std::chrono::milliseconds> timeout,
+	      CompletionToken&& token,
+	      std::optional<std::string_view> ns = {},
+	      std::optional<std::string_view> key = {}) {
+    boost::asio::async_completion<CompletionToken, NotifySig> init(token);
+    notify(oid, pool, bl, timeout,
+	   NotifyComp::create(get_executor(),
+			      std::move(init.completion_handler)),
+	   ns, key);
+
+    return init.result.get();
+  }
+
   using EnumerateSig = void(boost::system::error_code,
 			    std::vector<EnumeratedObject>,
 			    EnumerationCursor);
   using EnumerateComp = ceph::async::Completion<EnumerateSig>;
-
   template<typename CompletionToken>
   auto enumerate_objects(const IOContext& ioc, const EnumerationCursor& begin,
 			 const EnumerationCursor& end, const std::uint32_t max,
@@ -584,10 +668,23 @@ public:
     return init.result.get();
   }
 
+  template<typename CompletionToken>
+  auto enumerate_objects(std::int64_t pool, const EnumerationCursor& begin,
+			 const EnumerationCursor& end, const std::uint32_t max,
+			 const bufferlist& filter, CompletionToken&& token,
+			 std::optional<std::string_view> ns = {},
+			 std::optional<std::string_view> key = {}) {
+    boost::asio::async_completion<CompletionToken, EnumerateSig> init(token);
+    enumerate_objects(pool, begin, end, max, filter,
+		      EnumerateComp::create(get_executor(),
+					    std::move(init.completion_handler)),
+		      ns, key);
+    return init.result.get();
+  }
+
   using CommandSig = void(boost::system::error_code,
 			  std::string, ceph::bufferlist);
   using CommandComp = ceph::async::Completion<CommandSig>;
-
   template<typename CompletionToken>
   auto osd_command(int osd, std::vector<std::string>&& cmd,
 		   ceph::bufferlist&& in, CompletionToken&& token) {
@@ -614,6 +711,17 @@ private:
 
   void execute(const Object& o, const IOContext& ioc, WriteOp&& op,
 	       std::unique_ptr<Op::Completion> c);
+
+  void execute(const Object& o, std::int64_t pool, ReadOp&& op,
+	       std::unique_ptr<Op::Completion> c,
+	       std::optional<std::string_view> ns,
+	       std::optional<std::string_view> key);
+
+  void execute(const Object& o, std::int64_t pool, WriteOp&& op,
+	       std::unique_ptr<Op::Completion> c,
+	       std::optional<std::string_view> ns,
+	       std::optional<std::string_view> key);
+
   void lookup_pool(std::string name, std::unique_ptr<LookupPoolComp> c);
   void create_pool_snap(int64_t pool, std::string_view snapName,
 			std::unique_ptr<SimpleOpComp> c);
@@ -636,6 +744,11 @@ private:
   void watch(const Object& o, const IOContext& ioc,
 	     std::optional<std::chrono::seconds> timeout,
 	     WatchCB&& cb, std::unique_ptr<WatchComp> c);
+  void watch(const Object& o, std::int64_t pool,
+	     std::optional<std::chrono::seconds> timeout,
+	     WatchCB&& cb, std::unique_ptr<WatchComp> c,
+	     std::optional<std::string_view> ns,
+	     std::optional<std::string_view> key);
   boost::system::error_code watch_check(uint64_t cookie);
   void notify_ack(const Object& o,
 		  const IOContext& _ioc,
@@ -643,16 +756,38 @@ private:
 		  uint64_t cookie,
 		  bufferlist&& bl,
 		  std::unique_ptr<SimpleOpComp>);
+  void notify_ack(const Object& o,
+		  std::int64_t pool,
+		  uint64_t notify_id,
+		  uint64_t cookie,
+		  bufferlist&& bl,
+		  std::unique_ptr<SimpleOpComp>,
+		  std::optional<std::string_view> ns,
+		  std::optional<std::string_view> key);
   void unwatch(uint64_t cookie, const IOContext& ioc,
 	       std::unique_ptr<SimpleOpComp>);
-  void notify(const Object& oid, const IOContext& ioc, bufferlist&& bl,
+  void unwatch(uint64_t cookie, std::int64_t pool,
+	       std::unique_ptr<SimpleOpComp>,
+	       std::optional<std::string_view> ns,
+	       std::optional<std::string_view> key);
+  void notify(const Object& oid, const IOContext& ioctx, bufferlist&& bl,
 	      std::optional<std::chrono::milliseconds> timeout,
 	      std::unique_ptr<NotifyComp> c);
-
+  void notify(const Object& oid, std::int64_t pool, bufferlist&& bl,
+	      std::optional<std::chrono::milliseconds> timeout,
+	      std::unique_ptr<NotifyComp> c,
+	      std::optional<std::string_view> ns,
+	      std::optional<std::string_view> key);
   void enumerate_objects(const IOContext& ioc, const EnumerationCursor& begin,
 			 const EnumerationCursor& end, const std::uint32_t max,
 			 const bufferlist& filter,
 			 std::unique_ptr<EnumerateComp> c);
+  void enumerate_objects(std::int64_t pool, const EnumerationCursor& begin,
+			 const EnumerationCursor& end, const std::uint32_t max,
+			 const bufferlist& filter,
+			 std::unique_ptr<EnumerateComp> c,
+			 std::optional<std::string_view> ns,
+			 std::optional<std::string_view> key);
   void osd_command(int osd, std::vector<std::string>&& cmd,
 		   ceph::bufferlist&& in, std::unique_ptr<CommandComp> c);
   void pg_command(pg_t pg, std::vector<std::string>&& cmd,
