@@ -78,7 +78,7 @@ public:
    * @return true if the name provided is in the form of a multipart meta
    *         object, false otherwise
    */
-  bool filter(const string& name, string& key) override;
+  bool filter(std::string_view name, std::string_view key) override;
 }; // class MultipartMetaFilter
 
 extern bool is_v2_upload_id(const string& upload_id);

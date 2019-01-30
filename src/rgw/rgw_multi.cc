@@ -18,7 +18,7 @@
 
 
 
-bool MultipartMetaFilter::filter(const string& name, string& key) {
+bool MultipartMetaFilter::filter(std::string_view name, std::string_view key) {
   // the length of the suffix so we can skip past it
   static const size_t MP_META_SUFFIX_LEN = MP_META_SUFFIX.length();
 
