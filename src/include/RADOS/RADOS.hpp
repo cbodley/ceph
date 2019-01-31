@@ -624,6 +624,20 @@ public:
     return init.result.get();
   }
 
+  // This is one of those places where having to force everything into
+  // a .cc file is really infuriating. If we had modules, that would
+  // let us separate out the implementation details without
+  // sacrificing all the benefits of templates.
+  using VoidOpSig = void();
+  using VoidOpComp = ceph::async::Completion<VoidOpSig>;
+  template<typename CompletionToken>
+  auto flush_watch(CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, VoidOpSig> init(token);
+    flush_watch(VoidOpComp::create(get_executor(),
+				   std::move(init.completion_handler)));
+    return init.result.get();
+  }
+
   using NotifySig = void(boost::system::error_code, bufferlist);
   using NotifyComp = ceph::async::Completion<NotifySig>;
   template<typename CompletionToken>
@@ -778,6 +792,8 @@ private:
 	      std::unique_ptr<NotifyComp> c,
 	      std::optional<std::string_view> ns,
 	      std::optional<std::string_view> key);
+  void flush_watch(std::unique_ptr<VoidOpComp>);
+
   void enumerate_objects(const IOContext& ioc, const EnumerationCursor& begin,
 			 const EnumerationCursor& end, const std::uint32_t max,
 			 const bufferlist& filter,

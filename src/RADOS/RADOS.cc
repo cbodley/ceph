@@ -1150,6 +1150,14 @@ void RADOS::unwatch(uint64_t cookie, std::int64_t pool,
 		   });
 }
 
+void RADOS::flush_watch(std::unique_ptr<VoidOpComp> c)
+{
+  auto objecter = reinterpret_cast<_::RADOS*>(&impl)->objecter.get();
+  objecter->linger_callback_flush([c = std::move(c)]() mutable {
+				    ceph::async::post(std::move(c));
+				  });
+}
+
 struct NotifyHandler {
   boost::asio::io_context& ioc;
   boost::asio::io_context::strand strand;
