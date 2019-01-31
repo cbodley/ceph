@@ -92,8 +92,6 @@ static void forward_req_info(CephContext *cct, req_info& info, const std::string
 static int forward_request_to_master(struct req_state *s, obj_version *objv, RGWRados *store,
                                      bufferlist& in_data, JSONParser *jp, req_info *forward_info = nullptr);
 
-static MultipartMetaFilter mp_filter;
-
 // this probably should belong in the rgw_iam_policy_keywords, I'll get it to it
 // at some point
 static constexpr auto S3_EXISTING_OBJTAG = "s3:ExistingObjectTag";

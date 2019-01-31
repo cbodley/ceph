@@ -17,31 +17,23 @@
 #define dout_subsys ceph_subsys_rgw
 
 
-
-bool MultipartMetaFilter::filter(std::string_view name, std::string_view key) {
-  // the length of the suffix so we can skip past it
-  static const size_t MP_META_SUFFIX_LEN = MP_META_SUFFIX.length();
-
-  size_t len = name.size();
-
-  // make sure there's room for suffix plus at least one more
-  // character
-  if (len <= MP_META_SUFFIX_LEN)
+bool MultipartMetaFilter(std::string_view name, std::string_view key) {
+  int len = name.size();
+  if (len < 6)
     return false;
 
-  size_t pos = name.find(MP_META_SUFFIX, len - MP_META_SUFFIX_LEN);
-  if (pos == string::npos)
+  std::size_t pos = name.find(MP_META_SUFFIX, len - 5);
+  if (pos == std::string::npos)
     return false;
 
   pos = name.rfind('.', pos - 1);
-  if (pos == string::npos)
+  if (pos == std::string::npos)
     return false;
 
   key = name.substr(0, pos);
 
   return true;
 }
-
 
 bool RGWMultiPart::xml_end(const char *el)
 {
@@ -284,13 +276,12 @@ int list_bucket_multiparts(RGWRados *store, RGWBucketInfo& bucket_info,
 {
   RGWRados::Bucket target(store, bucket_info);
   RGWRados::Bucket::List list_op(&target);
-  MultipartMetaFilter mp_filter;
 
   list_op.params.prefix = prefix;
   list_op.params.delim = delim;
   list_op.params.marker = marker;
   list_op.params.ns = RGW_OBJ_NS_MULTIPART;
-  list_op.params.filter = &mp_filter;
+  list_op.params.filter = MultipartMetaFilter;
 
   return(list_op.list_objects(max_uploads, objs, common_prefixes,is_truncated));
 }

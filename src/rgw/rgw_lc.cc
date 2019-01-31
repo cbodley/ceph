@@ -336,7 +336,6 @@ static bool obj_has_expired(CephContext *cct, ceph::real_time mtime, int days, c
 
 int RGWLC::handle_multipart_expiration(RGWRados::Bucket *target, const map<string, lc_op>& prefix_map)
 {
-  MultipartMetaFilter mp_filter;
   vector<rgw_bucket_dir_entry> objs;
   RGWMPObj mp_obj;
   bool is_truncated;
@@ -350,7 +349,8 @@ int RGWLC::handle_multipart_expiration(RGWRados::Bucket *target, const map<strin
    * operating on one shard at a time */
   list_op.params.allow_unordered = true;
   list_op.params.ns = RGW_OBJ_NS_MULTIPART;
-  list_op.params.filter = &mp_filter;
+ list_op.params.filter = &MultipartMetaFilter;
+
   for (auto prefix_iter = prefix_map.begin(); prefix_iter != prefix_map.end(); ++prefix_iter) {
     if (!prefix_iter->second.status || prefix_iter->second.mp_expiration <= 0) {
       continue;

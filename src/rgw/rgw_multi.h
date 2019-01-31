@@ -56,30 +56,7 @@ public:
   ~RGWMultiXMLParser() override {}
 };
 
-/**
- * A filter to a) test whether an object name is a multipart meta
- * object, and b) filter out just the key used to determine the bucket
- * index shard.
- *
- * Objects for multipart meta have names adorned with an upload id and
- * other elements -- specifically a ".", MULTIPART_UPLOAD_ID_PREFIX,
- * unique id, and MP_META_SUFFIX. This filter will return true when
- * the name provided is such. It will also extract the key used for
- * bucket index shard calculation from the adorned name.
- */
-class MultipartMetaFilter : public RGWAccessListFilter {
-public:
-  MultipartMetaFilter() {}
-
-  /**
-   * @param name [in] The object name as it appears in the bucket index.
-   * @param key [out] An output parameter that will contain the bucket
-   *        index key if this entry is in the form of a multipart meta object.
-   * @return true if the name provided is in the form of a multipart meta
-   *         object, false otherwise
-   */
-  bool filter(std::string_view name, std::string_view key) override;
-}; // class MultipartMetaFilter
+bool MultipartMetaFilter(std::string_view name, std::string_view key);
 
 extern bool is_v2_upload_id(const string& upload_id);
 

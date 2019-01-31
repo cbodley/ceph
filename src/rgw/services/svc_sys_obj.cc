@@ -112,9 +112,9 @@ int RGWSI_SysObj::Pool::Op::list_prefixed_objs(const string& prefix, list<string
 
   auto op = rados_pool.op();
 
-  RGWAccessListFilterPrefix filter(prefix);
+  
 
-  int r = op.init(string(), &filter);
+  int r = op.init(string(), RGWAccessListFilterPrefix(prefix));
   if (r < 0) {
     return r;
   }
