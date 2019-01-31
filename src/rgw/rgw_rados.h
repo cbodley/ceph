@@ -67,6 +67,11 @@ class RGWSysObjectCtx;
 
 extern const std::string MP_META_SUFFIX;
 
+struct rgw_rados_ref {
+  rgw_raw_obj obj;
+  librados::IoCtx ioctx;
+};
+
 // only called by rgw_shard_id and rgw_bucket_shard_index
 static inline int rgw_shards_mod(unsigned hval, int max_shards)
 {

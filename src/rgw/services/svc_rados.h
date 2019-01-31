@@ -24,11 +24,6 @@ struct RGWAccessListFilterPrefix : public RGWAccessListFilter {
   }
 };
 
-struct rgw_rados_ref {
-  rgw_raw_obj obj;
-  librados::IoCtx ioctx;
-};
-
 class RGWSI_RADOS : public RGWServiceInstance
 {
   librados::Rados rados;
@@ -50,11 +45,16 @@ public:
 
   uint64_t instance_id();
 
+  struct ObjRef {
+    rgw_raw_obj obj;
+    librados::IoCtx ioctx;
+  };
+
   class Obj {
     friend class RGWSI_RADOS;
 
     RGWSI_RADOS *rados_svc{nullptr};
-    rgw_rados_ref ref;
+    ObjRef ref;
 
     void init(const rgw_raw_obj& obj);
 
@@ -86,8 +86,8 @@ public:
 
     uint64_t get_last_version();
 
-    rgw_rados_ref& get_ref() { return ref; }
-    const rgw_rados_ref& get_ref() const { return ref; }
+    ObjRef& get_ref() { return ref; }
+    const ObjRef& get_ref() const { return ref; }
   };
 
   class Pool {
