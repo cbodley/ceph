@@ -25,7 +25,6 @@ class RGWSI_RADOS : public RGWServiceInstance
 
   int do_start() override;
 
-  librados::Rados* get_rados_handle();
   int open_pool_ctx(const rgw_pool& pool, librados::IoCtx& io_ctx);
   int pool_iterate(librados::IoCtx& ioctx,
                    librados::NObjectIterator& iter,

@@ -20,14 +20,9 @@ int RGWSI_RADOS::do_start()
   return 0;
 }
 
-librados::Rados* RGWSI_RADOS::get_rados_handle()
-{
-  return &rados;
-}
-
 uint64_t RGWSI_RADOS::instance_id()
 {
-  return get_rados_handle()->get_instance_id();
+  return rados.get_instance_id();
 }
 
 int RGWSI_RADOS::open_pool_ctx(const rgw_pool& pool, librados::IoCtx& io_ctx)
@@ -142,7 +137,7 @@ uint64_t RGWSI_RADOS::Obj::get_last_version()
 
 int RGWSI_RADOS::Pool::create()
 {
-  librados::Rados *rad = rados_svc->get_rados_handle();
+  librados::Rados *rad = &rados_svc->rados;
   int r = rad->pool_create(pool.name.c_str());
   if (r < 0) {
     ldout(rados_svc->cct, 0) << "WARNING: pool_create returned " << r << dendl;
@@ -167,7 +162,7 @@ int RGWSI_RADOS::Pool::create(const vector<rgw_pool>& pools, vector<int> *retcod
   vector<librados::PoolAsyncCompletion *> completions;
   vector<int> rets;
 
-  librados::Rados *rad = rados_svc->get_rados_handle();
+  librados::Rados *rad = &rados_svc->rados;
   for (auto iter = pools.begin(); iter != pools.end(); ++iter) {
     librados::PoolAsyncCompletion *c = librados::Rados::pool_async_create_completion();
     completions.push_back(c);
@@ -243,7 +238,7 @@ int RGWSI_RADOS::Pool::create(const vector<rgw_pool>& pools, vector<int> *retcod
 
 int RGWSI_RADOS::Pool::lookup()
 {
-  librados::Rados *rad = rados_svc->get_rados_handle();
+  librados::Rados *rad = &rados_svc->rados;
   int ret = rad->pool_lookup(pool.name.c_str());
   if (ret < 0) {
     return ret;
