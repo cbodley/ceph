@@ -89,10 +89,9 @@ public:
 
   RADOS(boost::asio::io_context& ioctx, boost::intrusive_ptr<CephContext> cct);
   ~RADOS();
-
-private:
-
-  mon_feature_t get_required_monitor_features() const;
+  mon_feature_t get_required_monitor_features() const {
+    return monclient.with_monmap(std::mem_fn(&MonMap::get_required_features));
+  }
 };
 }
 }

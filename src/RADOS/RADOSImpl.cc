@@ -96,11 +96,5 @@ RADOS::RADOS(boost::asio::io_context& ioctx,
 }
 
 RADOS::~RADOS() = default;
-
-mon_feature_t RADOS::get_required_monitor_features() const
-{
-  return monclient.with_monmap(std::mem_fn(&MonMap::get_required_features));
-}
-
 }
 }
