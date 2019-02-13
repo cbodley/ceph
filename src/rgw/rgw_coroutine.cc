@@ -2,6 +2,7 @@
 // vim: ts=8 sw=2 smarttab
 
 #include "common/ceph_json.h"
+#include "include/Context.h"
 #include "rgw_coroutine.h"
 
 // re-include our assert to clobber the system one; fix dout:
