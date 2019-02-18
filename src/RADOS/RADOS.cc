@@ -19,6 +19,8 @@
 
 #include <boost/intrusive_ptr.hpp>
 
+#include <fmt/format.h>
+
 #include "include/ceph_fs.h"
 #include "common/ceph_context.h"
 #include "common/ceph_argparse.h"
@@ -1431,6 +1433,28 @@ void RADOS::pg_command(pg_t pg, std::vector<std::string>&& cmd,
 						      std::move(s),
 						      std::move(b));
 			      });
+}
+
+void RADOS::enable_application(std::string_view pool, std::string_view app_name,
+			       bool force, std::unique_ptr<SimpleOpComp> c) {
+  auto rados = reinterpret_cast<_::RADOS*>(&impl);
+
+  // pre-Luminous clusters will return -EINVAL and application won't be
+  // preserved until Luminous is configured as minimum version.
+  if (!rados->get_required_monitor_features().contains_all(
+	ceph::features::mon::FEATURE_LUMINOUS)) {
+    ceph::async::dispatch(std::move(c), ceph::to_error_code(-EOPNOTSUPP));
+  } else {
+    rados->monclient.start_mon_command(
+      { fmt::format("{{ \"prefix\": \"osd pool application enable\","
+		    "\"pool\": \"{}\", \"app\": \"{}\"{}}}",
+		    pool, app_name,
+		    force ? " ,\"yes_i_really_mean_it\": true" : "")},
+      {}, [c = std::move(c)](boost::system::error_code e,
+			     std::string, ceph::buffer::list) mutable {
+	    ceph::async::post(std::move(c), e);
+	  });
+  }
 }
 }
 

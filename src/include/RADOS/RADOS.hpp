@@ -717,6 +717,15 @@ public:
 				      std::move(init.completion_handler)));
     return init.result.get();
   }
+  template<typename CompletionToken>
+  auto enable_application(std::string_view pool, std::string_view app_name,
+			  bool force, CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
+    enable_application(pool, app_name, force,
+		       SimpleOpComp::create(get_executor(),
+					    std::move(init.completion_handler)));
+    return init.result.get();
+  }
 
 private:
 
@@ -808,6 +817,8 @@ private:
 		   ceph::bufferlist&& in, std::unique_ptr<CommandComp> c);
   void pg_command(pg_t pg, std::vector<std::string>&& cmd,
 		  ceph::bufferlist&& in, std::unique_ptr<CommandComp> c);
+  void enable_application(std::string_view pool, std::string_view app_name,
+			  bool force, std::unique_ptr<SimpleOpComp> c);
 
 
   static constexpr std::size_t impl_size = 512 * 8;
