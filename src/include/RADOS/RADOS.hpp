@@ -184,34 +184,16 @@ public:
   void set_fadvise_dontneed();
   void set_fadvise_nocache();
 
-  void cmpext(uint64_t off, buffer::list&& cmp_bl); // → size_t
+  void cmpext(uint64_t off, buffer::list&& cmp_bl, std::size_t* s);
   void cmpxattr(std::string_view name, uint8_t op, const bufferlist& val);
   void cmpxattr(std::string_view name, uint8_t op, std::uint64_t val);
   void assert_version(uint64_t ver);
   void assert_exists();
   void cmp_omap(const boost::container::flat_map<
-		std::string, std::pair<ceph::buffer::list, int>>& assertions);
+		  std::string,
+		  std::pair<ceph::buffer::list, int>>& assertions);
 
-
-  using Result = std::vector<
-    std::pair<
-      boost::system::error_code,
-      std::variant<std::monostate,
-		   ceph::buffer::list,
-		   std::pair<
-		     std::vector<std::pair<std::uint64_t, std::uint64_t>>,
-		     ceph::buffer::list>,
-		   std::pair<std::uint64_t, ceph::real_time>,
-		   std::pair<boost::container::flat_set<std::string>, bool>,
-		   boost::container::flat_map<std::string, ceph::buffer::list>,
-		   std::pair<boost::container::flat_map<std::string,
-							 ceph::buffer::list>,
-			      bool>,
-		   std::vector<obj_watch_t>,
-		   librados::snap_set_t,
-		   std::size_t>>>;
-
-  using Signature = void(boost::system::error_code, Result);
+  using Signature = void(boost::system::error_code);
   using Completion = ceph::async::Completion<Signature>;
 protected:
   Op();
@@ -230,40 +212,42 @@ public:
   using Op::Op;
   using Op::operator =;
 
-  void read(size_t off, uint64_t len); // → ceph::buffer::list
-  void getxattr(std::string_view name); // → ceph::buffer::list
-  void get_omap_header(); // → ceph::buffer::list
+  void read(size_t off, uint64_t len, ceph::buffer::list* out);
+  void getxattr(std::string_view name, ceph::buffer::list* out);
+  void get_omap_header(ceph::buffer::list*);
 
-  void sparse_read(uint64_t off, uint64_t len);
-  // → std::pair<ceph::buffer::list,
-  //             std::vector<std::pair<std::uint64_t, std::uint64_t>>>,
+  void sparse_read(uint64_t off, uint64_t len,
+		   ceph::buffer::list* out,
+		   std::vector<std::pair<std::uint64_t, std::uint64_t>>* extents);
 
-  void stat(); // → std::pair<std::uint64_t, ceph::real_time>
+  void stat(std::uint64_t* size, ceph::real_time* mtime);
 
   void get_omap_keys(std::optional<std::string_view> start_after,
-		     uint64_t max_return);
-  // → std::pair<boost::container::flat_set<std::string>, bool>
+		     std::uint64_t max_return,
+		     boost::container::flat_set<std::string>* keys,
+		     bool* truncated);
 
 
-  void get_xattrs();
-  // → boost::container::flat_map<std::string, ceph::buffer::list>;
+  void get_xattrs(boost::container::flat_map<std::string,
+					     ceph::buffer::list>* kv);
 
-  struct GetOmapValsRes {
-  };
   void get_omap_vals(std::optional<std::string_view> start_after,
 		     std::optional<std::string_view> filter_prefix,
-		     uint64_t max_return);
-  // → std::pair<boost::container::flat_map<std::string, ceph::buffer::list>,
-  //                                        bool>
+		     uint64_t max_return,
+		     boost::container::flat_map<std::string,
+		                                ceph::buffer::list>* kv,
+		     bool* truncated);
 
-  void get_omap_vals_by_keys(const boost::container::flat_set<std::string>& keys);
-  // → boost::container::flat_map<std::string, ceph::buffer::list>;
+  void get_omap_vals_by_keys(const boost::container::flat_set<std::string>& keys,
+			     boost::container::flat_map<std::string,
+			                                ceph::buffer::list>* kv);
 
-  void list_watchers(); // → std::vector<obj_watch_t>
-  void list_snaps(); // → librados::snap_set_t
+  void list_watchers(std::vector<obj_watch_t>* watchers);
+  void list_snaps(librados::snap_set_t* snaps);
 
   void exec(std::string_view cls, std::string_view method,
-	    const bufferlist& inbl); // → ceph::buffer::list
+	    const bufferlist& inbl,
+	    ceph::buffer::list* out);
 
 private:
   ReadOp();
@@ -287,8 +271,7 @@ public:
   void create(bool exclusive);
   void write(uint64_t off, bufferlist&& bl);
   void write_full(bufferlist&& bl);
-  void writesame(std::uint64_t off, std::uint64_t write_len,
-		 bufferlist&& bl);
+  void writesame(std::uint64_t off, std::uint64_t write_len, bufferlist&& bl);
   void append(bufferlist&& bl);
   void remove();
   void truncate(uint64_t off);
@@ -304,8 +287,7 @@ public:
   void set_alloc_hint(uint64_t expected_object_size,
 		      uint64_t expected_write_size,
 		      uint32_t flags);
-  void exec(std::string_view cls, std::string_view method,
-	    const bufferlist& inbl);
+  void exec(std::string_view cls, std::string_view method, const bufferlist& inbl);
 private:
   WriteOp();
 };
@@ -577,7 +559,7 @@ public:
 		  uint64_t cookie,
 		  bufferlist&& bl,
 		  CompletionToken&& token) {
-    boost::asio::async_completion<CompletionToken, WatchSig> init(token);
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
     notify_ack(o, ioc, notify_id, cookie, std::move(bl),
 	       SimpleOpComp::create(get_executor(),
 				    std::move(init.completion_handler)));
@@ -602,9 +584,9 @@ public:
   }
 
   template<typename CompletionToken>
-  auto unwatch(uint64_t cookie, IOContext& ioc,
+  auto unwatch(uint64_t cookie, const IOContext& ioc,
 	       CompletionToken&& token) {
-    boost::asio::async_completion<CompletionToken, WatchSig> init(token);
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
     unwatch(cookie, ioc,
 	    SimpleOpComp::create(get_executor(),
 				 std::move(init.completion_handler)));
@@ -616,7 +598,7 @@ public:
 	       CompletionToken&& token,
 	       std::optional<std::string_view> ns = {},
 	       std::optional<std::string_view> key = {}) {
-    boost::asio::async_completion<CompletionToken, WatchSig> init(token);
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
     unwatch(cookie, pool,
 	    SimpleOpComp::create(get_executor(),
 				 std::move(init.completion_handler)),
@@ -667,31 +649,35 @@ public:
     return init.result.get();
   }
 
-  using EnumerateSig = void(boost::system::error_code,
-			    std::vector<EnumeratedObject>,
-			    EnumerationCursor);
-  using EnumerateComp = ceph::async::Completion<EnumerateSig>;
   template<typename CompletionToken>
   auto enumerate_objects(const IOContext& ioc, const EnumerationCursor& begin,
 			 const EnumerationCursor& end, const std::uint32_t max,
-			 const bufferlist& filter, CompletionToken&& token) {
-    boost::asio::async_completion<CompletionToken, EnumerateSig> init(token);
+			 const bufferlist& filter,
+			 std::vector<EnumeratedObject>* ls,
+			 EnumerationCursor* cursor,
+			 CompletionToken&& token) {
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
     enumerate_objects(ioc, begin, end, max, filter,
-		      EnumerateComp::create(get_executor(),
-					    std::move(init.completion_handler)));
+		      ls, cursor,
+		      SimpleOpComp::create(get_executor(),
+					   std::move(init.completion_handler)));
     return init.result.get();
   }
 
   template<typename CompletionToken>
   auto enumerate_objects(std::int64_t pool, const EnumerationCursor& begin,
 			 const EnumerationCursor& end, const std::uint32_t max,
-			 const bufferlist& filter, CompletionToken&& token,
+			 const bufferlist& filter,
+			 std::vector<EnumeratedObject>* ls,
+			 EnumerationCursor* cursor,
+			 CompletionToken&& token,
 			 std::optional<std::string_view> ns = {},
 			 std::optional<std::string_view> key = {}) {
-    boost::asio::async_completion<CompletionToken, EnumerateSig> init(token);
+    boost::asio::async_completion<CompletionToken, SimpleOpSig> init(token);
     enumerate_objects(pool, begin, end, max, filter,
-		      EnumerateComp::create(get_executor(),
-					    std::move(init.completion_handler)),
+		      ls, cursor,
+		      SimpleOpComp::create(get_executor(),
+					   std::move(init.completion_handler)),
 		      ns, key);
     return init.result.get();
   }
@@ -806,11 +792,15 @@ private:
   void enumerate_objects(const IOContext& ioc, const EnumerationCursor& begin,
 			 const EnumerationCursor& end, const std::uint32_t max,
 			 const bufferlist& filter,
-			 std::unique_ptr<EnumerateComp> c);
+			 std::vector<EnumeratedObject>* ls,
+			 EnumerationCursor* cursor,
+			 std::unique_ptr<SimpleOpComp> c);
   void enumerate_objects(std::int64_t pool, const EnumerationCursor& begin,
 			 const EnumerationCursor& end, const std::uint32_t max,
 			 const bufferlist& filter,
-			 std::unique_ptr<EnumerateComp> c,
+			 std::vector<EnumeratedObject>* ls,
+			 EnumerationCursor* cursor,
+			 std::unique_ptr<SimpleOpComp> c,
 			 std::optional<std::string_view> ns,
 			 std::optional<std::string_view> key);
   void osd_command(int osd, std::vector<std::string>&& cmd,

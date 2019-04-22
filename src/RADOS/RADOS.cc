@@ -302,28 +302,15 @@ auto create_cct(std::optional<std::string_view> clustername,
 
 struct OpImpl {
   ObjectOperation op;
-  std::unique_ptr<Op::Result> res;
   std::optional<ceph::real_time> mtime;
 
-  OpImpl() : res(make_unique<Op::Result>()) {}
-  OpImpl(OpImpl&& rhs)
-    : op(std::move(rhs.op)),
-      res(std::move(rhs.res)),
-      mtime(std::move(rhs.mtime)) {
-    rhs.clear();
-  }
-  OpImpl& operator =(OpImpl&& rhs) {
-    op = std::move(rhs.op);
-    res = std::move(rhs.res);
-    mtime = std::move(rhs.mtime);
-    rhs.clear();
-    return *this;
-  }
+  OpImpl() = default;
 
-  void clear() {
-    op.clear();
-    res = make_unique<Op::Result>();
-  }
+  OpImpl(const OpImpl& rhs) = delete;
+  OpImpl(OpImpl&& rhs) = default;
+
+  OpImpl& operator =(const OpImpl& rhs) = delete;
+  OpImpl& operator =(OpImpl&& rhs) = default;
 };
 
 Op::Op() {
@@ -371,48 +358,34 @@ void Op::set_fadvise_nocache() {
     CEPH_OSD_OP_FLAG_FADVISE_NOCACHE);
 }
 
-void Op::cmpext(uint64_t off, bufferlist&& cmp_bl) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, std::size_t(0));
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.cmpext(off, std::move(cmp_bl), &o->res->back().first,
-	       &std::get<std::size_t>(o->res->back().second));
+void Op::cmpext(uint64_t off, bufferlist&& cmp_bl, std::size_t* s) {
+  reinterpret_cast<OpImpl*>(&impl)->op.cmpext(off, std::move(cmp_bl), nullptr,
+					      s);
 }
 void Op::cmpxattr(std::string_view name, uint8_t op, const bufferlist& val) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, std::monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.cmpxattr(name, op, CEPH_OSD_CMPXATTR_MODE_STRING, val);
+  reinterpret_cast<OpImpl*>(&impl)->
+    op.cmpxattr(name, op,CEPH_OSD_CMPXATTR_MODE_STRING, val);
 }
 void Op::cmpxattr(std::string_view name, uint8_t op, std::uint64_t val) {
   bufferlist bl;
   encode(val, bl);
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, std::monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.cmpxattr(name, op, CEPH_OSD_CMPXATTR_MODE_U64, bl);
+  reinterpret_cast<OpImpl*>(&impl)->
+    op.cmpxattr(name, op, CEPH_OSD_CMPXATTR_MODE_U64, bl);
 }
 
 void Op::assert_version(uint64_t ver) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, std::monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.assert_version(ver);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.assert_version(ver);
 }
 void Op::assert_exists() {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, std::monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.stat(nullptr, nullptr, &o->res->back().first);
+  reinterpret_cast<OpImpl*>(&impl)->op.stat(
+    nullptr,
+    static_cast<ceph::real_time*>(nullptr),
+    static_cast<boost::system::error_code*>(nullptr));
 }
 void Op::cmp_omap(const boost::container::flat_map<
 		  std::string, std::pair<ceph::buffer::list,
 		                         int>>& assertions) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, std::monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.omap_cmp(assertions, &o->res->back().first);
+  reinterpret_cast<OpImpl*>(&impl)->op.omap_cmp(assertions, nullptr);
 }
 
 // ---
@@ -429,123 +402,75 @@ WriteOp RADOS::make_WriteOp() {
 
 ReadOp::ReadOp() = default;
 
-void ReadOp::read(size_t off, uint64_t len) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, ceph::buffer::list{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.read(off, len, &o->res->back().first,
-	     &std::get<ceph::buffer::list>(o->res->back().second));
+void ReadOp::read(size_t off, uint64_t len, ceph::buffer::list* out) {
+  reinterpret_cast<OpImpl*>(&impl)->op.read(off, len, nullptr, out);
 }
 
-void ReadOp::getxattr(std::string_view name) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, ceph::buffer::list{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.getxattr(name, &o->res->back().first,
-		 &std::get<ceph::buffer::list>(o->res->back().second));
+void ReadOp::getxattr(std::string_view name, ceph::buffer::list* out) {
+  reinterpret_cast<OpImpl*>(&impl)->op.getxattr(name, nullptr, out);
 }
 
-void ReadOp::get_omap_header() {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, ceph::buffer::list{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.omap_get_header(&o->res->back().first,
-			&std::get<ceph::buffer::list>(o->res->back().second));
+void ReadOp::get_omap_header(ceph::buffer::list* out) {
+  reinterpret_cast<OpImpl*>(&impl)->op.omap_get_header(nullptr, out);
 }
 
-void ReadOp::sparse_read(uint64_t off, uint64_t len) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{},
-		       std::pair<std::vector<std::pair<uint64_t, uint64_t>>,
-		                 ceph::buffer::list>{});
-  auto& kv = std::get<std::pair<std::vector<std::pair<uint64_t, uint64_t>>,
-				ceph::buffer::list>>(o->res->back().second);
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.sparse_read(off, len, &o->res->back().first, &kv.first, &kv.second);
+void ReadOp::sparse_read(uint64_t off, uint64_t len, ceph::buffer::list* out,
+			 std::vector<std::pair<std::uint64_t,
+			                       std::uint64_t>>* extents) {
+  reinterpret_cast<OpImpl*>(&impl)->op.sparse_read(off, len, nullptr, extents,
+						   out);
 }
 
-void ReadOp::stat() {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{},
-		       std::pair<std::uint64_t, ceph::real_time>{});
-  auto& kv = std::get<std::pair<std::uint64_t, ceph::real_time>>(o->res->back().second);
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.stat(&kv.first, &kv.second, &o->res->back().first);
+void ReadOp::stat(std::uint64_t* size, ceph::real_time* mtime) {
+  reinterpret_cast<OpImpl*>(&impl)->op.stat(
+    size, mtime,
+    static_cast<boost::system::error_code*>(nullptr));
 }
 
 void ReadOp::get_omap_keys(std::optional<std::string_view> start_after,
-                           uint64_t max_return) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{},
-		       std::pair<boost::container::flat_set<std::string>,
-		                 bool>{});
-  auto& kv = std::get<std::pair<boost::container::flat_set<std::string>,
-				bool>>(o->res->back().second);
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.omap_get_keys(start_after, max_return, &o->res->back().first, &kv.first,
-		      &kv.second);
+			   std::uint64_t max_return,
+			   boost::container::flat_set<std::string>* keys,
+			   bool* done) {
+  reinterpret_cast<OpImpl*>(&impl)->op.omap_get_keys(start_after, max_return,
+						     nullptr, keys, done);
 }
 
-void ReadOp::get_xattrs() {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{},
-		       boost::container::flat_map<std::string, buffer::list>{});
-  auto& k = std::get<boost::container::flat_map<std::string, buffer::list>>(
-    o->res->back().second);
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.getxattrs(&o->res->back().first, &k);
+void ReadOp::get_xattrs(boost::container::flat_map<std::string,
+			                           ceph::buffer::list>* kv) {
+  reinterpret_cast<OpImpl*>(&impl)->op.getxattrs(nullptr, kv);
 }
 
 void ReadOp::get_omap_vals(std::optional<std::string_view> start_after,
-                           std::optional<std::string_view> filter_prefix,
-                           uint64_t max_return) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{},
-		       std::pair<boost::container::flat_map<
-		                   std::string, buffer::list>, bool>{});
-  auto& k = std::get<std::pair<boost::container::flat_map<
-                       std::string, buffer::list>, bool>>(o->res->back().second);
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.omap_get_vals(start_after, filter_prefix, max_return,
-			&o->res->back().first, &k.first, &k.second);
+			   std::optional<std::string_view> filter_prefix,
+			   uint64_t max_return,
+			   boost::container::flat_map<std::string,
+						      ceph::buffer::list>* kv,
+			   bool* done) {
+  reinterpret_cast<OpImpl*>(&impl)->op.omap_get_vals(start_after, filter_prefix,
+						     max_return,
+						     nullptr, kv, done);
 }
 
 void ReadOp::get_omap_vals_by_keys(
-  const boost::container::flat_set<std::string>& keys) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{},
-		       boost::container::flat_map<std::string, buffer::list>{});
-  auto& k = std::get<boost::container::flat_map<std::string, buffer::list>>(o->res->back().second);
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.omap_get_vals_by_keys(keys, &o->res->back().first, &k);
+  const boost::container::flat_set<std::string>& keys,
+  boost::container::flat_map<std::string, ceph::buffer::list>* kv) {
+  reinterpret_cast<OpImpl*>(&impl)->op.omap_get_vals_by_keys(keys, nullptr, kv);
 }
 
-void ReadOp::list_watchers() {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{},
-		       std::vector<obj_watch_t>{});
-  auto& k = std::get<std::vector<obj_watch_t>>(o->res->back().second);
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.list_watchers(&k, &o->res->back().first);
+void ReadOp::list_watchers(std::vector<obj_watch_t>* watchers) {
+  reinterpret_cast<OpImpl*>(&impl)->
+    op.list_watchers(watchers,
+		     static_cast<boost::system::error_code*>(nullptr));
 }
 
-void ReadOp::list_snaps() {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{},
-		       librados::snap_set_t{});
-  auto& k = std::get<librados::snap_set_t>(o->res->back().second);
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.list_snaps(&k, nullptr, &o->res->back().first);
+void ReadOp::list_snaps(librados::snap_set_t* snaps) {
+  reinterpret_cast<OpImpl*>(&impl)->op.list_snaps(snaps, nullptr, nullptr);
 }
 
 void ReadOp::exec(std::string_view cls, std::string_view method,
-		  const bufferlist& inbl) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{},
-		       buffer::list{});
-  auto& k = std::get<buffer::list>(o->res->back().second);
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.call(cls, method, inbl, &o->res->back().first, &k);
+		  const bufferlist& inbl,
+		  ceph::buffer::list* out) {
+  reinterpret_cast<OpImpl*>(&impl)->op.call(cls, method, inbl, nullptr, out);
 }
 
 // WriteOp
@@ -558,146 +483,79 @@ void WriteOp::set_mtime(ceph::real_time t) {
 }
 
 void WriteOp::create(bool exclusive) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.create(exclusive);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.create(exclusive);
 }
 
 void WriteOp::write(uint64_t off, bufferlist&& bl) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.write(off, bl);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.write(off, bl);
 }
 
 void WriteOp::write_full(bufferlist&& bl) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.write_full(bl);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.write_full(bl);
 }
 
-void WriteOp::writesame(uint64_t off, uint64_t write_len,
-                        bufferlist&& bl) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.writesame(off, write_len, bl);
-  o->op.out_ec.back() = &o->res->back().first;
+void WriteOp::writesame(uint64_t off, uint64_t write_len, bufferlist&& bl) {
+  reinterpret_cast<OpImpl*>(&impl)->op.writesame(off, write_len, bl);
 }
 
 void WriteOp::append(bufferlist&& bl) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.append(bl);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.append(bl);
 }
 
 void WriteOp::remove() {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.remove();
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.remove();
 }
 
 void WriteOp::truncate(uint64_t off) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.truncate(off);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.truncate(off);
 }
 
 void WriteOp::zero(uint64_t off, uint64_t len) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.zero(off, len);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.zero(off, len);
 }
 
 void WriteOp::rmxattr(std::string_view name) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.rmxattr(name);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.rmxattr(name);
 }
 
 void WriteOp::setxattr(std::string_view name,
                        bufferlist&& bl) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.setxattr(name, bl);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.setxattr(name, bl);
 }
 
 void WriteOp::rollback(uint64_t snapid) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.rollback(snapid);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.rollback(snapid);
 }
 
 void WriteOp::set_omap(
   const boost::container::flat_map<std::string, ceph::buffer::list>& map) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.omap_set(map);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.omap_set(map);
 }
 
 void WriteOp::set_omap_header(bufferlist&& bl) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.omap_set_header(bl);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.omap_set_header(bl);
 }
 
 void WriteOp::clear_omap() {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.omap_clear();
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.omap_clear();
 }
 
 void WriteOp::rm_omap_keys(
   const boost::container::flat_set<std::string>& to_rm) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.omap_rm_keys(to_rm);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.omap_rm_keys(to_rm);
 }
 
 void WriteOp::set_alloc_hint(uint64_t expected_object_size,
 			     uint64_t expected_write_size,
 			     uint32_t flags) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{}, monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.set_alloc_hint(expected_object_size, expected_write_size, flags);
-  o->op.out_ec.back() = &o->res->back().first;
+  reinterpret_cast<OpImpl*>(&impl)->op.set_alloc_hint(expected_object_size,
+						      expected_write_size,
+						      flags);
 }
 
 void WriteOp::exec(std::string_view cls, std::string_view method,
 		   const bufferlist& inbl) {
-  auto o = reinterpret_cast<OpImpl*>(&impl);
-  o->res->emplace_back(boost::system::error_code{},
-		       monostate{});
-  ceph_assert(o->res->size() == o->op.size());
-  o->op.call(cls, method, inbl, &o->res->back().first);
+  reinterpret_cast<OpImpl*>(&impl)->op.call(cls, method, inbl, nullptr);
 }
 
 
@@ -732,12 +590,10 @@ RADOS::RADOS(boost::asio::io_context& ioctx, CephContext* cct) {
   new (&impl) _::RADOS(ioctx, cct);
 }
 
-auto resulter(std::unique_ptr<Op::Completion> c,
-	      std::unique_ptr<Op::Result> r) {
-
-  return [c = std::move(c), r = std::move(r)]
+auto resulter(std::unique_ptr<Op::Completion> c) {
+  return [c = std::move(c)]
     (boost::system::error_code ec, int) mutable {
-	   ceph::async::dispatch(std::move(c), ec, std::move(*r));
+	   ceph::async::dispatch(std::move(c), ec);
 	 };
 }
 
@@ -755,8 +611,7 @@ void RADOS::execute(const Object& o, const IOContext& _ioc, ReadOp&& _op,
 
   rados->objecter->read(
     *oid, ioc->oloc, std::move(op->op), ioc->snap_seq, nullptr, flags,
-    resulter(std::move(c), std::move(op->res)));
-  op->clear();
+    resulter(std::move(c)));
 }
 
 void RADOS::execute(const Object& o, const IOContext& _ioc, WriteOp&& _op,
@@ -775,8 +630,7 @@ void RADOS::execute(const Object& o, const IOContext& _ioc, WriteOp&& _op,
   rados->objecter->mutate(
     *oid, ioc->oloc, std::move(op->op), ioc->snapc,
     mtime, flags,
-    resulter(std::move(c), std::move(op->res)));
-  op->clear();
+    resulter(std::move(c)));
 }
 
 void RADOS::execute(const Object& o, std::int64_t pool, ReadOp&& _op,
@@ -796,8 +650,7 @@ void RADOS::execute(const Object& o, std::int64_t pool, ReadOp&& _op,
 
   rados->objecter->read(
     *oid, oloc, std::move(op->op), CEPH_NOSNAP, nullptr, flags,
-    resulter(std::move(c), std::move(op->res)));
-  op->clear();
+    resulter(std::move(c)));
 }
 
 void RADOS::execute(const Object& o, std::int64_t pool, WriteOp&& _op,
@@ -824,8 +677,7 @@ void RADOS::execute(const Object& o, std::int64_t pool, WriteOp&& _op,
   rados->objecter->mutate(
     *oid, oloc, std::move(op->op), {},
     mtime, flags,
-    resulter(std::move(c), std::move(op->res)));
-  op->clear();
+    resulter(std::move(c)));
 }
 
 boost::uuids::uuid RADOS::get_fsid() const noexcept {
@@ -1363,7 +1215,9 @@ void RADOS::enumerate_objects(const IOContext& _ioc,
 			      const EnumerationCursor& end,
 			      const std::uint32_t max,
 			      const bufferlist& filter,
-			      std::unique_ptr<EnumerateComp> c) {
+			      std::vector<EnumeratedObject>* ls,
+			      EnumerationCursor* cursor,
+			      std::unique_ptr<SimpleOpComp> c) {
   auto rados = reinterpret_cast<_::RADOS*>(&impl);
   auto ioc = reinterpret_cast<const IOContextImpl*>(&_ioc.impl);
 
@@ -1374,12 +1228,17 @@ void RADOS::enumerate_objects(const IOContext& _ioc,
     *reinterpret_cast<const hobject_t*>(&end.impl),
     max,
     filter,
-    [c = std::move(c)]
+    [c = std::move(c), ls, cursor]
     (boost::system::error_code ec, std::vector<EnumeratedObject>&& v,
      hobject_t&& n) mutable {
-      EnumerationCursor next;
-      new (&next.impl) hobject_t(std::move(n));
-      ceph::async::dispatch(std::move(c), ec, std::move(v), std::move(next));
+      if (ls)
+	*ls = std::move(v);
+      if (cursor) {
+	EnumerationCursor next;
+	new (&next.impl) hobject_t(std::move(n));
+	*cursor = std::move(next);
+      }
+      ceph::async::dispatch(std::move(c), ec);
     });
 }
 
@@ -1388,7 +1247,9 @@ void RADOS::enumerate_objects(std::int64_t pool,
 			      const EnumerationCursor& end,
 			      const std::uint32_t max,
 			      const bufferlist& filter,
-			      std::unique_ptr<EnumerateComp> c,
+			      std::vector<EnumeratedObject>* ls,
+			      EnumerationCursor* cursor,
+			      std::unique_ptr<SimpleOpComp> c,
 			      std::optional<std::string_view> ns,
 			      std::optional<std::string_view> key) {
   auto rados = reinterpret_cast<_::RADOS*>(&impl);
@@ -1399,12 +1260,17 @@ void RADOS::enumerate_objects(std::int64_t pool,
     *reinterpret_cast<const hobject_t*>(&end.impl),
     max,
     filter,
-    [c = std::move(c)]
+    [c = std::move(c), ls, cursor]
     (boost::system::error_code ec, std::vector<EnumeratedObject>&& v,
      hobject_t&& n) mutable {
-      EnumerationCursor next;
-      new (&next.impl) hobject_t(std::move(n));
-      ceph::async::dispatch(std::move(c), ec, std::move(v), std::move(next));
+      if (ls)
+	*ls = std::move(v);
+      if (cursor) {
+	EnumerationCursor next;
+	new (&next.impl) hobject_t(std::move(n));
+	*cursor = std::move(next);
+      }
+      ceph::async::dispatch(std::move(c), ec);
     });
 }
 
