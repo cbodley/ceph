@@ -1470,7 +1470,7 @@ namespace rgw {
                       *static_cast<RGWObjectCtx *>(s->obj_ctx),
                       obj, olh_epoch, s->req_id, this, s->yield);
 
-    op_ret = processor->prepare();
+    op_ret = ceph::from_error_code(processor->prepare());
     if (op_ret < 0) {
       ldout(s->cct, 20) << "processor->prepare() returned ret=" << op_ret
 			<< dendl;
@@ -1517,7 +1517,7 @@ namespace rgw {
       return 0;
 
     hash.Update((const unsigned char *)data.c_str(), data.length());
-    op_ret = filter->process(std::move(data), ofs);
+    op_ret = ceph::from_error_code(filter->process(std::move(data), ofs));
     if (op_ret < 0) {
       goto done;
     }
@@ -1544,7 +1544,7 @@ namespace rgw {
     perfcounter->inc(l_rgw_put_b, s->obj_size);
 
     // flush data in filters
-    op_ret = filter->process({}, s->obj_size);
+    op_ret = ceph::from_error_code(filter->process({}, s->obj_size));
     if (op_ret < 0) {
       goto done;
     }

@@ -5,6 +5,7 @@
 #define CEPH_RGW_TOOLS_H
 
 #include <string>
+#include <boost/algorithm/string/predicate.hpp>
 
 #include "include/types.h"
 #include "common/ceph_time.h"
@@ -33,8 +34,22 @@ int rgw_delete_system_obj(RGWRados *rgwstore, const rgw_pool& pool, const string
 
 const char *rgw_find_mime_by_ext(string& ext);
 
-void rgw_filter_attrset(map<string, bufferlist>& unfiltered_attrset, const string& check_prefix,
-                        map<string, bufferlist> *attrset);
+template<typename Source, typename Dest>
+void rgw_filter_attrset(Source& unfiltered_attrset, const std::string& check_prefix,
+                        Dest* attrset)
+{
+  attrset->clear();
+  for (auto iter = unfiltered_attrset.lower_bound(check_prefix);
+       iter != unfiltered_attrset.end(); ++iter) {
+    if (!boost::algorithm::starts_with(iter->first, check_prefix))
+      break;
+    attrset->emplace_hint(attrset->cend(),
+                          std::piecewise_construct,
+                          std::forward_as_tuple(iter->first),
+                          std::forward_as_tuple(iter->second));
+  }
+}
+
 
 /// indicates whether the current thread is in boost::asio::io_context::run(),
 /// used to log warnings if synchronous librados calls are made

@@ -638,7 +638,8 @@ int rgw_build_bucket_policies(RGWRados* store, struct req_state* s)
     s->bucket_owner = s->bucket_acl->get_owner();
 
     RGWZoneGroup zonegroup;
-    int r = store->svc.zone->get_zonegroup(s->bucket_info.zonegroup, zonegroup);
+    int r = ceph::from_error_code(
+      store->svc.zone->get_zonegroup(s->bucket_info.zonegroup, zonegroup));
     if (!r) {
       if (!zonegroup.endpoints.empty()) {
 	s->zonegroup_endpoint = zonegroup.endpoints.front();
@@ -3041,9 +3042,10 @@ void RGWCreateBucket::execute()
     rgw_bucket bucket;
     bucket.tenant = s->bucket_tenant;
     bucket.name = s->bucket_name;
-    op_ret = store->svc.zone->select_bucket_placement(*(s->user), zonegroup_id,
-					    placement_rule,
-					    &selected_placement_rule, nullptr);
+    op_ret = ceph::from_error_code(
+      store->svc.zone->select_bucket_placement(*(s->user), zonegroup_id,
+					       placement_rule,
+					       &selected_placement_rule, nullptr));
     if (selected_placement_rule != s->bucket_info.placement_rule) {
       op_ret = -EEXIST;
       return;
@@ -3689,7 +3691,7 @@ void RGWPutObj::execute()
         s->req_id, this, s->yield);
   }
 
-  op_ret = processor->prepare();
+  op_ret = ceph::from_error_code(processor->prepare());
   if (op_ret < 0) {
     ldpp_dout(this, 20) << "processor->prepare() returned ret=" << op_ret
 		      << dendl;
@@ -3773,7 +3775,7 @@ void RGWPutObj::execute()
     /* update torrrent */
     torrent.update(data);
 
-    op_ret = filter->process(std::move(data), ofs);
+    op_ret = ceph::from_error_code(filter->process(std::move(data), ofs));
     if (op_ret < 0) {
       ldpp_dout(this, 20) << "processor->process() returned ret="
           << op_ret << dendl;
@@ -3785,7 +3787,7 @@ void RGWPutObj::execute()
   tracepoint(rgw_op, after_data_transfer, s->req_id.c_str(), ofs);
 
   // flush any data in filters
-  op_ret = filter->process({}, ofs);
+  op_ret = ceph::from_error_code(filter->process({}, ofs));
   if (op_ret < 0) {
     return;
   }
@@ -4009,7 +4011,7 @@ void RGWPostObj::execute()
                                     s->bucket_owner.get_id(),
                                     *static_cast<RGWObjectCtx*>(s->obj_ctx),
                                     obj, 0, s->req_id, this, s->yield);
-    op_ret = processor.prepare();
+    op_ret = ceph::from_error_code(processor.prepare());
     if (op_ret < 0) {
       return;
     }
@@ -4054,7 +4056,7 @@ void RGWPostObj::execute()
       }
 
       hash.Update((const unsigned char *)data.c_str(), data.length());
-      op_ret = filter->process(std::move(data), ofs);
+      op_ret = ceph::from_error_code(filter->process(std::move(data), ofs));
 
       ofs += len;
 
@@ -4065,7 +4067,7 @@ void RGWPostObj::execute()
     } while (again);
 
     // flush
-    op_ret = filter->process({}, ofs);
+    op_ret = ceph::from_error_code(filter->process({}, ofs));
     if (op_ret < 0) {
       return;
     }
@@ -6576,11 +6578,12 @@ int RGWBulkUploadOp::handle_dir(const boost::string_ref path)
     rgw_bucket bucket;
     bucket.tenant = s->bucket_tenant;
     bucket.name = s->bucket_name;
-    op_ret = store->svc.zone->select_bucket_placement(*(s->user),
-                                            store->svc.zone->get_zonegroup().get_id(),
-                                            placement_rule,
-                                            &selected_placement_rule,
-                                            nullptr);
+    op_ret = ceph::from_error_code(
+      store->svc.zone->select_bucket_placement(*(s->user),
+					       store->svc.zone->get_zonegroup().get_id(),
+					       placement_rule,
+					       &selected_placement_rule,
+					       nullptr));
     if (selected_placement_rule != binfo.placement_rule) {
       op_ret = -EEXIST;
       ldpp_dout(this, 20) << "non-coherent placement rule" << dendl;
@@ -6754,7 +6757,7 @@ int RGWBulkUploadOp::handle_file(const boost::string_ref path,
   AtomicObjectProcessor processor(&*aio, store, binfo, &s->dest_placement, bowner.get_id(),
                                   obj_ctx, obj, 0, s->req_id, this, s->yield);
 
-  op_ret = processor.prepare();
+  op_ret = ceph::from_error_code(processor.prepare());
   if (op_ret < 0) {
     ldpp_dout(this, 20) << "cannot prepare processor due to ret=" << op_ret << dendl;
     return op_ret;
@@ -6792,7 +6795,7 @@ int RGWBulkUploadOp::handle_file(const boost::string_ref path,
       return op_ret;
     } else if (len > 0) {
       hash.Update((const unsigned char *)data.c_str(), data.length());
-      op_ret = filter->process(std::move(data), ofs);
+      op_ret = ceph::from_error_code(filter->process(std::move(data), ofs));
       if (op_ret < 0) {
         ldpp_dout(this, 20) << "filter->process() returned ret=" << op_ret << dendl;
         return op_ret;
@@ -6804,7 +6807,7 @@ int RGWBulkUploadOp::handle_file(const boost::string_ref path,
   } while (len > 0);
 
   // flush
-  op_ret = filter->process({}, ofs);
+  op_ret = ceph::from_error_code(filter->process({}, ofs));
   if (op_ret < 0) {
     return op_ret;
   }

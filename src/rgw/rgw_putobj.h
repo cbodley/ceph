@@ -27,7 +27,7 @@ class DataProcessor {
   // consume a bufferlist in its entirety at the given object offset. an
   // empty bufferlist is given to request that any buffered data be flushed,
   // though this doesn't wait for completions
-  virtual int process(bufferlist&& data, uint64_t offset) = 0;
+  virtual boost::system::error_code process(bufferlist&& data, uint64_t offset) = 0;
 };
 
 // for composing data processors into a pipeline
@@ -37,7 +37,7 @@ class Pipe : public DataProcessor {
   explicit Pipe(DataProcessor *next) : next(next) {}
 
   // passes the data on to the next processor
-  int process(bufferlist&& data, uint64_t offset) override {
+  boost::system::error_code process(bufferlist&& data, uint64_t offset) override {
     return next->process(std::move(data), offset);
   }
 };
@@ -51,7 +51,7 @@ class ChunkProcessor : public Pipe {
     : Pipe(next), chunk_size(chunk_size)
   {}
 
-  int process(bufferlist&& data, uint64_t offset) override;
+  boost::system::error_code process(bufferlist&& data, uint64_t offset) override;
 };
 
 
@@ -60,7 +60,7 @@ class StripeGenerator {
  public:
   virtual ~StripeGenerator() {}
 
-  virtual int next(uint64_t offset, uint64_t *stripe_size) = 0;
+  virtual boost::system::error_code next(uint64_t offset, uint64_t *stripe_size) = 0;
 };
 
 // pipe that respects stripe boundaries and restarts each stripe at offset 0
@@ -73,7 +73,7 @@ class StripeProcessor : public Pipe {
     : Pipe(next), gen(gen), bounds(0, first_stripe_size)
   {}
 
-  int process(bufferlist&& data, uint64_t data_offset) override;
+  boost::system::error_code process(bufferlist&& data, uint64_t data_offset) override;
 };
 
 } // namespace rgw::putobj

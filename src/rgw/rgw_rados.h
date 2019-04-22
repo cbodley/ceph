@@ -1265,6 +1265,7 @@ class RGWRados : public AdminSocketHook
   int append_atomic_test(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj,
                          librados::ObjectOperation& op, RGWObjState **state);
   int append_atomic_test(const RGWObjState* astate, librados::ObjectOperation& op);
+  void append_atomic_test(const RGWObjState* state, RADOS::Op& op);
 
   int update_placement_map();
   int store_bucket_info(RGWBucketInfo& info, map<string, bufferlist> *pattrs, RGWObjVersionTracker *objv_tracker, bool exclusive);
@@ -1882,24 +1883,25 @@ public:
 
   int rewrite_obj(RGWBucketInfo& dest_bucket_info, const rgw_obj& obj, const DoutPrefixProvider *dpp);
 
+  template<typename Attr>
   int stat_remote_obj(RGWObjectCtx& obj_ctx,
-               const rgw_user& user_id,
-               req_info *info,
-               const string& source_zone,
-               rgw_obj& src_obj,
-               RGWBucketInfo& src_bucket_info,
-               real_time *src_mtime,
-               uint64_t *psize,
-               const real_time *mod_ptr,
-               const real_time *unmod_ptr,
-               bool high_precision_time,
-               const char *if_match,
-               const char *if_nomatch,
-               map<string, bufferlist> *pattrs,
-               map<string, string> *pheaders,
-               string *version_id,
-               string *ptag,
-               string *petag);
+		      const rgw_user& user_id,
+		      req_info *info,
+		      const string& source_zone,
+		      rgw_obj& src_obj,
+		      RGWBucketInfo& src_bucket_info,
+		      real_time *src_mtime,
+		      uint64_t *psize,
+		      const real_time *mod_ptr,
+		      const real_time *unmod_ptr,
+		      bool high_precision_time,
+		      const char *if_match,
+		      const char *if_nomatch,
+		      Attr* pattrs,
+		      map<string, string> *pheaders,
+		      string *version_id,
+		      string *ptag,
+		      string *petag);
 
   int fetch_remote_obj(RGWObjectCtx& obj_ctx,
                        const rgw_user& user_id,

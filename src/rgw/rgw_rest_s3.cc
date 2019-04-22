@@ -898,7 +898,7 @@ void RGWGetBucketLocation_ObjStore_S3::send_response()
   RGWZoneGroup zonegroup;
   string api_name;
 
-  int ret = store->svc.zone->get_zonegroup(s->bucket_info.zonegroup, zonegroup);
+  int ret = ceph::from_error_code(store->svc.zone->get_zonegroup(s->bucket_info.zonegroup, zonegroup));
   if (ret >= 0) {
     api_name = zonegroup.api_name;
   } else  {

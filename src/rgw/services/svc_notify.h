@@ -31,7 +31,7 @@ private:
   int num_watchers{0};
   RGWWatcher **watchers{nullptr};
   std::set<int> watchers_set;
-  vector<RGWSI_RADOS::Obj> notify_objs;
+  std::vector<RGWSI_RADOS::Obj> notify_objs;
 
   bool enabled{false};
 
@@ -47,7 +47,7 @@ private:
 
   bool finalized{false};
 
-  int init_watch();
+  boost::system::error_code init_watch();
   void finalize_watch();
 
   void init(RGWSI_Zone *_zone_svc,
@@ -60,7 +60,8 @@ private:
   boost::system::error_code do_start() override;
   void shutdown() override;
 
-  int unwatch(RGWSI_RADOS::Obj& obj, uint64_t watch_handle);
+  boost::system::error_code unwatch(RGWSI_RADOS::Obj& obj,
+                                    uint64_t watch_handle);
   void add_watcher(int i);
   void remove_watcher(int i);
 
@@ -71,8 +72,9 @@ private:
   void _set_enabled(bool status);
   void set_enabled(bool status);
 
-  int robust_notify(RGWSI_RADOS::Obj& notify_obj, bufferlist& bl,
-                    optional_yield y);
+  boost::system::error_code robust_notify(RGWSI_RADOS::Obj& notify_obj,
+                                          bufferlist& bl,
+                                          optional_yield y);
 
 public:
   RGWSI_Notify(CephContext *cct, boost::asio::io_context& ioc)
@@ -89,7 +91,8 @@ public:
       virtual void set_enabled(bool status) = 0;
   };
 
-  int distribute(const string& key, bufferlist& bl, optional_yield y);
+  boost::system::error_code distribute(const string& key, bufferlist& bl,
+                                       optional_yield y);
 
   void register_watch_cb(CB *cb);
 };

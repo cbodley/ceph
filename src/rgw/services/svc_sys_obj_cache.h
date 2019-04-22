@@ -15,7 +15,7 @@ class RGWSI_SysObj_Cache_CB;
 class RGWSI_SysObj_Cache : public RGWSI_SysObj_Core
 {
   friend class RGWSI_SysObj_Cache_CB;
-  friend class RGWServices_Def;
+  friend struct RGWServices_Def;
 
   RGWSI_Notify *notify_svc{nullptr};
   ObjectCache cache;
@@ -33,54 +33,56 @@ protected:
 
   boost::system::error_code do_start() override;
 
-  int raw_stat(const rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime, uint64_t *epoch,
-               map<string, bufferlist> *attrs, bufferlist *first_chunk,
-               RGWObjVersionTracker *objv_tracker,
-               optional_yield y) override;
+  boost::system::error_code raw_stat(const rgw_raw_obj& obj, uint64_t *psize,
+                                     real_time *pmtime, uint64_t *epoch,
+                                     boost::container::flat_map<std::string, ceph::buffer::list> *attrs,
+                                     bufferlist *first_chunk,
+                                     RGWObjVersionTracker *objv_tracker,
+                                     optional_yield y) override;
 
-  int read(RGWSysObjectCtxBase& obj_ctx,
-           GetObjState& read_state,
-           RGWObjVersionTracker *objv_tracker,
-           const rgw_raw_obj& obj,
-           bufferlist *bl, off_t ofs, off_t end,
-           map<string, bufferlist> *attrs,
-	   bool raw_attrs,
-           rgw_cache_entry_info *cache_info,
-           boost::optional<obj_version>,
-           optional_yield y) override;
+  boost::system::error_code read(RGWSysObjectCtxBase& obj_ctx,
+                                 GetObjState& read_state,
+                                 RGWObjVersionTracker *objv_tracker,
+                                 const rgw_raw_obj& obj,
+                                 bufferlist *bl, off_t ofs, off_t end,
+                                 boost::container::flat_map<std::string, ceph::buffer::list> *attrs,
+                                 bool raw_attrs,
+                                 rgw_cache_entry_info *cache_info,
+                                 boost::optional<obj_version>,
+                                 optional_yield y) override;
 
-  int get_attr(const rgw_raw_obj& obj, const char *name, bufferlist *dest,
-               optional_yield y) override;
+  boost::system::error_code get_attr(const rgw_raw_obj& obj, const char *name, bufferlist *dest,
+                                     optional_yield y) override;
 
-  int set_attrs(const rgw_raw_obj& obj, 
-                map<string, bufferlist>& attrs,
-                map<string, bufferlist> *rmattrs,
-                RGWObjVersionTracker *objv_tracker,
-                optional_yield y);
+  boost::system::error_code set_attrs(const rgw_raw_obj& obj,
+                                      boost::container::flat_map<std::string, ceph::buffer::list>& attrs,
+                                      boost::container::flat_map<std::string, ceph::buffer::list> *rmattrs,
+                                      RGWObjVersionTracker *objv_tracker,
+                                      optional_yield y) override;
 
-  int remove(RGWSysObjectCtxBase& obj_ctx,
-             RGWObjVersionTracker *objv_tracker,
-             const rgw_raw_obj& obj,
-             optional_yield y) override;
+  boost::system::error_code remove(RGWSysObjectCtxBase& obj_ctx,
+                                   RGWObjVersionTracker *objv_tracker,
+                                   const rgw_raw_obj& obj,
+                                   optional_yield y) override;
 
-  int write(const rgw_raw_obj& obj,
-            real_time *pmtime,
-            map<std::string, bufferlist>& attrs,
-            bool exclusive,
-            const bufferlist& data,
-            RGWObjVersionTracker *objv_tracker,
-            real_time set_mtime,
-            optional_yield y) override;
+  boost::system::error_code write(const rgw_raw_obj& obj,
+                                  real_time *pmtime,
+                                  boost::container::flat_map<std::string, ceph::buffer::list>& attrs,
+                                  bool exclusive,
+                                  const bufferlist& data,
+                                  RGWObjVersionTracker *objv_tracker,
+                                  real_time set_mtime,
+                                  optional_yield y) override;
 
-  int write_data(const rgw_raw_obj& obj,
-                 const bufferlist& bl,
-                 bool exclusive,
-                 RGWObjVersionTracker *objv_tracker,
-                 optional_yield y);
+  boost::system::error_code write_data(const rgw_raw_obj& obj,
+                                       const bufferlist& bl,
+                                       bool exclusive,
+                                       RGWObjVersionTracker *objv_tracker,
+                                       optional_yield y) override;
 
-  int distribute_cache(const string& normal_name, const rgw_raw_obj& obj,
-                       ObjectCacheInfo& obj_info, int op,
-                       optional_yield y);
+  boost::system::error_code distribute_cache(const string& normal_name, const rgw_raw_obj& obj,
+                                             ObjectCacheInfo& obj_info, int op,
+                                             optional_yield y);
 
   int watch_cb(uint64_t notify_id,
                uint64_t cookie,

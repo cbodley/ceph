@@ -156,9 +156,10 @@ int RGWBucketCreateLocalCR::Request::_send_request()
     rgw_bucket bucket;
     bucket.tenant = user.tenant;
     bucket.name = bucket_name;
-    ret = zone_svc->select_bucket_placement(*user_info, zonegroup_id,
-                                         placement_rule,
-                                         &selected_placement_rule, nullptr);
+    ret = ceph::from_error_code(
+      zone_svc->select_bucket_placement(*user_info, zonegroup_id,
+                                        placement_rule,
+                                        &selected_placement_rule, nullptr));
     if (selected_placement_rule != bucket_info.placement_rule) {
       ldout(cct, 0) << "bucket already exists on a different placement rule: "
         << " selected_rule= " << selected_placement_rule

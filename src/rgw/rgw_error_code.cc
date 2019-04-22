@@ -510,7 +510,7 @@ int rgw_error_category::from_code(int ev) const noexcept {
   return -EDOM;
 }
 
-const boost::system::error_category& monc_category() noexcept {
+const boost::system::error_category& rgw_category() noexcept {
   static const rgw_error_category c;
   return c;
 }

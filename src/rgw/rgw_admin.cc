@@ -3506,11 +3506,11 @@ int main(int argc, const char **argv)
       break;
     case OPT_PERIOD_LIST:
       {
-	list<string> periods;
-	int ret = store->svc.zone->list_periods(periods);
-	if (ret < 0) {
-	  cerr << "failed to list periods: " << cpp_strerror(-ret) << std::endl;
-	  return -ret;
+	std::vector<string> periods;
+	auto ret = store->svc.zone->list_periods(periods);
+	if (ret) {
+	  cerr << "failed to list periods: " << ret << std::endl;
+	  return -ceph::from_error_code(ret);
 	}
 	formatter->open_object_section("periods_list");
 	encode_json("periods", periods, formatter);
@@ -3733,8 +3733,8 @@ int main(int argc, const char **argv)
 	if (ret < 0 && ret != -ENOENT) {
 	  cerr << "could not determine default realm: " << cpp_strerror(-ret) << std::endl;
 	}
-	list<string> realms;
-	ret = store->svc.zone->list_realms(realms);
+	std::vector<string> realms;
+        ret = ceph::from_error_code(store->svc.zone->list_realms(realms));
 	if (ret < 0) {
 	  cerr << "failed to list realms: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -3752,8 +3752,8 @@ int main(int argc, const char **argv)
 	if (ret < 0) {
 	  return -ret;
 	}
-	list<string> periods;
-	ret = store->svc.zone->list_periods(period_id, periods);
+	std::list<string> periods;
+	ret = ceph::from_error_code(store->svc.zone->list_periods(period_id, periods));
 	if (ret < 0) {
 	  cerr << "list periods failed: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -4086,8 +4086,8 @@ int main(int argc, const char **argv)
 	  return -ret;
 	}
 
-	list<string> zonegroups;
-	ret = store->svc.zone->list_zonegroups(zonegroups);
+	std::vector<string> zonegroups;
+	ret = ceph::from_error_code(store->svc.zone->list_zonegroups(zonegroups));
 	if (ret < 0) {
 	  cerr << "failed to list zonegroups: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -4475,14 +4475,14 @@ int main(int argc, const char **argv)
 	  return -ret;
 	}
 
-        list<string> zonegroups;
-	ret = store->svc.zone->list_zonegroups(zonegroups);
+	std::vector<string> zonegroups;
+	ret = ceph::from_error_code(store->svc.zone->list_zonegroups(zonegroups));
 	if (ret < 0) {
 	  cerr << "failed to list zonegroups: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
 	}
 
-        for (list<string>::iterator iter = zonegroups.begin(); iter != zonegroups.end(); ++iter) {
+        for (auto iter = zonegroups.begin(); iter != zonegroups.end(); ++iter) {
           RGWZoneGroup zonegroup(string(), *iter);
           int ret = zonegroup.init(g_ceph_context, store->svc.sysobj);
           if (ret < 0) {
@@ -4600,8 +4600,8 @@ int main(int argc, const char **argv)
       break;
     case OPT_ZONE_LIST:
       {
-	list<string> zones;
-	int ret = store->svc.zone->list_zones(zones);
+	std::vector<string> zones;
+	int ret = ceph::from_error_code(store->svc.zone->list_zones(zones));
 	if (ret < 0) {
 	  cerr << "failed to list zones: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -5647,7 +5647,7 @@ next:
       exit(1);
     }
 
-    int ret = store->svc.zone->add_bucket_placement(pool);
+    int ret = ceph::from_error_code(store->svc.zone->add_bucket_placement(pool));
     if (ret < 0)
       cerr << "failed to add bucket placement: " << cpp_strerror(-ret) << std::endl;
   }
@@ -5658,17 +5658,17 @@ next:
       exit(1);
     }
 
-    int ret = store->svc.zone->remove_bucket_placement(pool);
+    int ret = ceph::from_error_code(store->svc.zone->remove_bucket_placement(pool));
     if (ret < 0)
       cerr << "failed to remove bucket placement: " << cpp_strerror(-ret) << std::endl;
   }
 
   if (opt_cmd == OPT_POOLS_LIST) {
-    set<rgw_pool> pools;
-    int ret = store->svc.zone->list_placement_set(pools);
-    if (ret < 0) {
-      cerr << "could not list placement set: " << cpp_strerror(-ret) << std::endl;
-      return -ret;
+    boost::container::flat_set<rgw_pool> pools;
+    auto ret = store->svc.zone->list_placement_set(pools);
+    if (ret) {
+      cerr << "could not list placement set: " << ret << std::endl;
+      return ceph::from_error_code(ret);
     }
     formatter->reset();
     formatter->open_array_section("pools");

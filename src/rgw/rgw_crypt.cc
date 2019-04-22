@@ -16,6 +16,9 @@
 #include "include/str_map.h"
 #include "crypto/crypto_accel.h"
 #include "crypto/crypto_plugin.h"
+
+#include "rgw/rgw_error_code.h"
+
 #ifdef USE_NSS
 # include <nspr.h>
 # include <nss.h>
@@ -688,7 +691,7 @@ RGWPutObj_BlockEncrypt::RGWPutObj_BlockEncrypt(CephContext* cct,
 {
 }
 
-int RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset)
+boost::system::error_code RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset)
 {
   ldout(cct, 25) << "Encrypt " << data.length() << " bytes" << dendl;
 
@@ -707,19 +710,19 @@ int RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset)
     bufferlist in, out;
     cache.splice(0, proc_size, &in);
     if (!crypt->encrypt(in, 0, proc_size, out, logical_offset)) {
-      return -ERR_INTERNAL_ERROR;
+      return rgw_errc::internal_error;
     }
-    int r = Pipe::process(std::move(out), logical_offset);
+    auto ec = Pipe::process(std::move(out), logical_offset);
     logical_offset += proc_size;
-    if (r < 0)
-      return r;
+    if (ec)
+      return ec;
   }
 
   if (flush) {
     /*replicate 0-sized handle_data*/
     return Pipe::process({}, logical_offset);
   }
-  return 0;
+  return {};
 }
 
 

@@ -97,14 +97,14 @@ void RGWAsyncRadosProcessor::queue(RGWAsyncRadosRequest *req) {
 
 int RGWAsyncGetSystemObj::_send_request()
 {
-  map<string, bufferlist> *pattrs = want_attrs ? &attrs : nullptr;
+  boost::container::flat_map<string, bufferlist> *pattrs = want_attrs ? &attrs : nullptr;
 
   auto sysobj = obj_ctx.get_obj(obj);
-  return sysobj.rop()
-               .set_objv_tracker(&objv_tracker)
-               .set_attrs(pattrs)
-	       .set_raw_attrs(raw_attrs)
-               .read(&bl, null_yield);
+  return ceph::from_error_code(sysobj.rop()
+			       .set_objv_tracker(&objv_tracker)
+			       .set_attrs(pattrs)
+			       .set_raw_attrs(raw_attrs)
+			       .read(&bl, null_yield));
 }
 
 RGWAsyncGetSystemObj::RGWAsyncGetSystemObj(RGWCoroutine *caller, RGWAioCompletionNotifier *cn, RGWSI_SysObj *_svc,
@@ -138,10 +138,10 @@ int RGWAsyncPutSystemObj::_send_request()
 {
   auto obj_ctx = svc->init_obj_ctx();
   auto sysobj = obj_ctx.get_obj(obj);
-  return sysobj.wop()
-               .set_objv_tracker(&objv_tracker)
-               .set_exclusive(exclusive)
-               .write_data(bl, null_yield);
+  return ceph::from_error_code(sysobj.wop()
+			       .set_objv_tracker(&objv_tracker)
+			       .set_exclusive(exclusive)
+			       .write_data(bl, null_yield));
 }
 
 RGWAsyncPutSystemObj::RGWAsyncPutSystemObj(RGWCoroutine *caller, RGWAioCompletionNotifier *cn,
@@ -160,17 +160,17 @@ int RGWAsyncPutSystemObjAttrs::_send_request()
 {
   auto obj_ctx = svc->init_obj_ctx();
   auto sysobj = obj_ctx.get_obj(obj);
-  return sysobj.wop()
-               .set_objv_tracker(&objv_tracker)
-               .set_exclusive(false)
-               .set_attrs(attrs)
-               .write_attrs(null_yield);
+  return ceph::from_error_code(sysobj.wop()
+			       .set_objv_tracker(&objv_tracker)
+			       .set_exclusive(false)
+			       .set_attrs(attrs)
+			       .write_attrs(null_yield));
 }
 
 RGWAsyncPutSystemObjAttrs::RGWAsyncPutSystemObjAttrs(RGWCoroutine *caller, RGWAioCompletionNotifier *cn,
                      RGWSI_SysObj *_svc,
                      RGWObjVersionTracker *_objv_tracker, const rgw_raw_obj& _obj,
-                     map<string, bufferlist> _attrs)
+                     boost::container::flat_map<string, bufferlist> _attrs)
   : RGWAsyncRadosRequest(caller, cn), svc(_svc),
     obj(_obj), attrs(std::move(_attrs))
 {
@@ -239,12 +239,14 @@ RGWAsyncUnlockSystemObj::RGWAsyncUnlockSystemObj(RGWCoroutine *caller, RGWAioCom
 {
 }
 
-RGWRadosSetOmapKeysCR::RGWRadosSetOmapKeysCR(RGWRados *_store,
-                      const rgw_raw_obj& _obj,
-                      map<string, bufferlist>& _entries) : RGWSimpleCoroutine(_store->ctx()),
-                                                store(_store),
-                                                entries(_entries),
-                                                obj(_obj), cn(NULL)
+RGWRadosSetOmapKeysCR::RGWRadosSetOmapKeysCR(
+  RGWRados *_store,
+  const rgw_raw_obj& _obj,
+  map<string, bufferlist>& _entries)
+  : RGWSimpleCoroutine(_store->ctx()),
+    store(_store),
+    entries(_entries),
+    obj(_obj), cn(NULL)
 {
   stringstream& s = set_description();
   s << "set omap keys dest=" << obj << " keys=[" << s.str() << "]";
@@ -697,7 +699,7 @@ int RGWAsyncRemoveObj::_send_request()
   RGWAccessControlPolicy policy;
 
   /* decode policy */
-  map<string, bufferlist>::iterator iter = state->attrset.find(RGW_ATTR_ACL);
+  auto iter = state->attrset.find(RGW_ATTR_ACL);
   if (iter != state->attrset.end()) {
     auto bliter = iter->second.cbegin();
     try {

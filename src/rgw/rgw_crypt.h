@@ -130,7 +130,7 @@ public:
                          rgw::putobj::DataProcessor *next,
                          std::unique_ptr<BlockCrypt> crypt);
 
-  int process(bufferlist&& data, uint64_t logical_offset) override;
+  boost::system::error_code process(bufferlist&& data, uint64_t logical_offset) override;
 }; /* RGWPutObj_BlockEncrypt */
 
 

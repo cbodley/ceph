@@ -43,7 +43,7 @@ public:
                      rgw::putobj::DataProcessor *next)
     : Pipe(next), cct(cct_), compressor(compressor) {}
 
-  int process(bufferlist&& data, uint64_t logical_offset) override;
+  boost::system::error_code process(bufferlist&& data, uint64_t logical_offset) override;
 
   bool is_compressed() { return compressed; }
   vector<compression_block>& get_compression_blocks() { return blocks; }

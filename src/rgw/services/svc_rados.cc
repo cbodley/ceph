@@ -1,300 +1,410 @@
 #include "svc_rados.h"
 
-#include "include/rados/librados.hpp"
 #include "common/errno.h"
+#include "common/waiter.h"
 #include "osd/osd_types.h"
 #include "rgw/rgw_tools.h"
 
 #define dout_subsys ceph_subsys_rgw
 
-boost::system::error_code RGWSI_RADOS::do_start()
-{
-  int ret = rados.init_with_context(cct);
-  if (ret < 0) {
-    return ceph::to_error_code(ret);
+tl::expected<std::int64_t, boost::system::error_code>
+RGWSI_RADOS::open_pool(std::string_view pool, bool create, optional_yield y) {
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& yield = y.get_yield_context();
+    boost::system::error_code ec;
+    int64_t id = rados.lookup_pool(std::string(pool), yield[ec]);
+    if (ec == boost::system::errc::no_such_file_or_directory && create) {
+      rados.create_pool(pool, nullopt, yield[ec]);
+      if (ec && ec != boost::system::errc::file_exists) {
+        if (ec == boost::system::errc::result_out_of_range) {
+          ldout(cct, 0)
+            << __func__
+            << " ERROR: RADOS::RADOS::create_pool returned " << ec
+            << " (this can be due to a pool or placement group misconfiguration, e.g."
+            << " pg_num < pgp_num or mon_max_pg_per_osd exceeded)"
+            << dendl;
+        }
+        return tl::unexpected(ec);
+      }
+      id = rados.lookup_pool(std::string(pool), yield[ec]);
+      if (ec)
+        return tl::unexpected(ec);
+      rados.enable_application(pool, pg_pool_t::APPLICATION_NAME_RGW, false,
+                               yield[ec]);
+      if (ec && ec != boost::system::errc::operation_not_supported) {
+        return tl::unexpected(ec);
+      }
+    }
+    if (ec)
+      return tl::unexpected(ec);
+    return id;
   }
-  ret = rados.connect();
-  if (ret < 0) {
-    return ceph::to_error_code(ret);
+  // work on asio threads should be asynchronous, so warn when they block
+  if (is_asio_thread) {
+    ldout(cct, 20) << "WARNING: blocking librados call" << dendl;
   }
-  return {};
+#endif
+  boost::system::error_code ec;
+  int64_t id;
+  {
+    ceph::waiter<boost::system::error_code, int64_t> w;
+    rados.lookup_pool(std::string(pool), w.ref());
+    std::tie(ec, id) = w.wait();
+  }
+  if (ec == boost::system::errc::no_such_file_or_directory && create) {
+    {
+      ceph::waiter<boost::system::error_code> w;
+      rados.create_pool(pool, nullopt, w.ref());
+      ec = w.wait();
+    }
+    if (ec && ec != boost::system::errc::file_exists) {
+      if (ec == boost::system::errc::result_out_of_range) {
+        ldout(cct, 0)
+          << __func__
+          << " ERROR: RADOS::RADOS::create_pool returned " << ec
+          << " (this can be due to a pool or placement group misconfiguration, e.g."
+          << " pg_num < pgp_num or mon_max_pg_per_osd exceeded)"
+          << dendl;
+      }
+      return tl::unexpected(ec);
+    }
+    {
+      ceph::waiter<boost::system::error_code, int64_t> w;
+      rados.lookup_pool(std::string(pool), w.ref());
+      std::tie(ec, id) = w.wait();
+    }
+    if (ec)
+      return tl::unexpected(ec);
+    {
+      ceph::waiter<boost::system::error_code> w;
+      rados.enable_application(pool, pg_pool_t::APPLICATION_NAME_RGW, false,
+                               w.ref());
+      ec = w.wait();
+    }
+    if (ec && ec != boost::system::errc::operation_not_supported) {
+      return tl::unexpected(ec);
+    }
+  }
+  if (ec)
+    return tl::unexpected(ec);
+  return id;
 }
 
 uint64_t RGWSI_RADOS::instance_id()
 {
-  return rados.get_instance_id();
+  return rados.instance_id();
 }
 
-int RGWSI_RADOS::open_pool_ctx(const rgw_pool& pool, librados::IoCtx& io_ctx)
+boost::system::error_code RGWSI_RADOS::Obj::operate(RADOS::WriteOp&& op,
+                                                    optional_yield y,
+                                                    version_t* objver)
 {
-  constexpr bool create = true; // create the pool if it doesn't exist
-  return rgw_init_ioctx(&rados, pool, io_ctx, create);
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& yield = y.get_yield_context();
+    boost::system::error_code ec;
+    rados.execute(obj, ioc, std::move(op), yield[ec], objver);
+    return ec;
+  }
+  // work on asio threads should be asynchronous, so warn when they block
+  if (is_asio_thread) {
+    ldout(cct, 20) << "WARNING: blocking librados call" << dendl;
+  }
+#endif
+  ceph::waiter<boost::system::error_code> w;
+  rados.execute(obj, ioc, std::move(op), w.ref(), objver);
+  return w.wait();
 }
 
-int RGWSI_RADOS::pool_iterate(librados::IoCtx& io_ctx,
-                              librados::NObjectIterator& iter,
-                              uint32_t num, vector<rgw_bucket_dir_entry>& objs,
-                              const RGWAccessListFilter& filter,
-                              bool *is_truncated)
+boost::system::error_code RGWSI_RADOS::Obj::operate(RADOS::ReadOp&& op,
+                                                    ceph::buffer::list* bl,
+                                                    optional_yield y,
+                                                    version_t* objver)
 {
-  if (iter == io_ctx.nobjects_end())
-    return -ENOENT;
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& yield = y.get_yield_context();
+    boost::system::error_code ec;
+    rados.execute(obj, ioc, std::move(op), bl, yield[ec], objver);
+    return ec;
+  }
+  // work on asio threads should be asynchronous, so warn when they block
+  if (is_asio_thread) {
+    ldout(cct, 20) << "WARNING: blocking librados call" << dendl;
+  }
+#endif
+  ceph::waiter<boost::system::error_code> w;
+  rados.execute(obj, ioc, std::move(op), bl, w.ref(), objver);
+  return w.wait();
+}
 
-  uint32_t i;
+tl::expected<uint64_t, boost::system::error_code>
+RGWSI_RADOS::Obj::watch(RADOS::RADOS::WatchCB&& f, optional_yield y) {
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& yield = y.get_yield_context();
+    boost::system::error_code ec;
+    auto handle = rados.watch(obj, ioc, nullopt, std::move(f),
+                              yield[ec]);
+    if (ec)
+      return tl::unexpected(ec);
+    else
+      return handle;
+  }
+  // work on asio threads should be asynchronous, so warn when they block
+  if (is_asio_thread) {
+    ldout(cct, 20) << "WARNING: blocking librados call" << dendl;
+  }
+#endif
+  ceph::waiter<boost::system::error_code, uint64_t> w;
+  rados.watch(obj, ioc, nullopt, std::move(f), w.ref());
+  auto [ec, handle] = w.wait();
+  if (ec)
+    return tl::unexpected(ec);
+  else
+    return handle;
+}
 
-  for (i = 0; i < num && iter != io_ctx.nobjects_end(); ++i, ++iter) {
-    rgw_bucket_dir_entry e;
+boost::system::error_code RGWSI_RADOS::Obj::unwatch(uint64_t handle,
+                                                    optional_yield y)
+{
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& yield = y.get_yield_context();
+    boost::system::error_code ec;
+    rados.unwatch(handle, ioc, yield[ec]);
+    return ec;
+  }
+  // work on asio threads should be asynchronous, so warn when they block
+  if (is_asio_thread) {
+    ldout(cct, 20) << "WARNING: blocking librados call" << dendl;
+  }
+#endif
+  ceph::waiter<boost::system::error_code> w;
+  // rados.unwatch(handle, ioc, w.ref());
+  return w.wait();
+}
 
-    string oid = iter->get_oid();
-    ldout(cct, 20) << "RGWRados::pool_iterate: got " << oid << dendl;
+boost::system::error_code
+RGWSI_RADOS::Obj::notify(bufferlist&& bl,
+                         std::optional<std::chrono::milliseconds> timeout,
+                         bufferlist* pbl, optional_yield y) {
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& yield = y.get_yield_context();
+    boost::system::error_code ec;
+    auto rbl = rados.notify(obj, ioc, std::move(bl), timeout, yield[ec]);
+    if (pbl)
+      *pbl = std::move(rbl);
+    return ec;
+  }
+  // work on asio threads should be asynchronous, so warn when they block
+  if (is_asio_thread) {
+    ldout(cct, 20) << "WARNING: blocking librados call" << dendl;
+  }
+#endif
+  ceph::waiter<boost::system::error_code, bufferlist> w;
+  rados.notify(obj, ioc, std::move(bl), timeout, w.ref());
+  auto [ec, rbl] = w.wait();
+  if (pbl)
+    *pbl = std::move(rbl);
+  return ec;
+}
 
-    // fill it in with initial values; we may correct later
+boost::system::error_code
+RGWSI_RADOS::Obj::notify_ack(uint64_t notify_id, uint64_t cookie,
+                             bufferlist&& bl,
+                             optional_yield y) {
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& yield = y.get_yield_context();
+    boost::system::error_code ec;
+    rados.notify_ack(obj, ioc, notify_id, cookie, std::move(bl), yield[ec]);
+    return ec;
+  }
+  // work on asio threads should be asynchronous, so warn when they block
+  if (is_asio_thread) {
+    ldout(cct, 20) << "WARNING: blocking librados call" << dendl;
+  }
+#endif
+  ceph::waiter<boost::system::error_code> w;
+  rados.notify_ack(obj, ioc, notify_id, cookie, std::move(bl), w.ref());
+  return w.wait();
+}
+
+boost::system::error_code RGWSI_RADOS::create_pool(const rgw_pool& p,
+                                                   optional_yield y)
+{
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& yield = y.get_yield_context();
+    boost::system::error_code ec;
+    rados.create_pool(p.name, nullopt, yield[ec]);
+    if (ec) {
+      if (ec == boost::system::errc::result_out_of_range) {
+        ldout(cct, 0)
+          << __func__
+          << " ERROR: RADOS::RADOS::create_pool returned " << ec
+          << " (this can be due to a pool or placement group misconfiguration, e.g."
+          << " pg_num < pgp_num or mon_max_pg_per_osd exceeded)"
+          << dendl;
+      }
+      return ec;
+    }
+    rados.enable_application(p.name, pg_pool_t::APPLICATION_NAME_RGW, false,
+                             yield[ec]);
+    if (ec && ec != boost::system::errc::operation_not_supported) {
+      return ec;
+    }
+    return {};
+  }
+  // work on asio threads should be asynchronous, so warn when they block
+  if (is_asio_thread) {
+    ldout(cct, 20) << "WARNING: blocking librados call" << dendl;
+  }
+#endif
+  boost::system::error_code ec;
+  {
+    ceph::waiter<boost::system::error_code> w;
+    rados.create_pool(p.name, nullopt, w.ref());
+    ec = w.wait();
+  }
+  if (ec) {
+    if (ec == boost::system::errc::result_out_of_range) {
+      ldout(cct, 0)
+        << __func__
+        << " ERROR: RADOS::RADOS::create_pool returned " << ec
+        << " (this can be due to a pool or placement group misconfiguration, e.g."
+        << " pg_num < pgp_num or mon_max_pg_per_osd exceeded)"
+        << dendl;
+    }
+    return ec;
+  }
+  {
+    ceph::waiter<boost::system::error_code> w;
+    rados.enable_application(p.name, pg_pool_t::APPLICATION_NAME_RGW, false,
+                             w.ref());
+    ec = w.wait();
+  }
+  if (ec && ec != boost::system::errc::operation_not_supported) {
+    return ec;
+  }
+
+  return {};
+}
+
+boost::system::error_code
+RGWSI_RADOS::create_pools(const std::vector<rgw_pool>& pools,
+                          std::vector<boost::system::error_code>* e,
+                          optional_yield y) {
+  // TODO: Figure out how to queue up a whole bunch of operations on a
+  // single coroutine rather than serializing them.
+  boost::system::error_code tec;
+
+  if (e)
+    e->clear();
+  for (const auto& p : pools) {
+    auto ec = create_pool(p, y);
+    if (ec)
+      tec = ec;
+    if (e)
+      e->push_back(ec);
+  }
+  return tec;
+}
+
+RGWSI_RADOS::Pool::List RGWSI_RADOS::Pool::list(RGWAccessListFilter filter) {
+  return List(*this, std::move(filter));
+}
+
+boost::system::error_code
+RGWSI_RADOS::Pool::List::get_next(int max,
+                                  std::vector<std::string>* oids,
+                                  bool* is_truncated,
+                                  optional_yield y)
+{
+  if (iter == RADOS::EnumerationCursor::begin())
+    return ceph::to_error_code(ENOENT);
+
+  std::vector<RADOS::EnumeratedObject> ls;
+  boost::system::error_code ec;
+
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& yield = y.get_yield_context();
+    pool.rados.enumerate_objects(pool.ioc, iter,
+                                 RADOS::EnumerationCursor::end(),
+                                 max, {}, &ls, &iter,
+                                 yield[ec]);
+    }
+  // work on asio threads should be asynchronous, so warn when they block
+  if (is_asio_thread) {
+    ldout(pool.cct, 20) << "WARNING: blocking librados call" << dendl;
+  }
+#endif
+  if (!y) {
+    ceph::waiter<boost::system::error_code> w;
+    pool.rados.enumerate_objects(pool.ioc, iter,
+                                 RADOS::EnumerationCursor::end(),
+                                 max, {}, &ls, &iter,
+                                 w.ref());
+    ec = w.wait();
+  }
+
+  if (ec)
+    return ec;
+
+  for (auto& e : ls) {
+    auto& oid = e.oid;
+    ldout(pool.cct, 20) << "Pool::get_ext: got " << oid << dendl;
     if (filter && filter(oid, oid))
       continue;
 
-    e.key = oid;
-    objs.push_back(e);
+    oids->push_back(std::move(oid));
   }
 
   if (is_truncated)
-    *is_truncated = (iter != io_ctx.nobjects_end());
-
-  return objs.size();
+    *is_truncated = (iter != RADOS::EnumerationCursor::end());
+  return {};
 }
 
-void RGWSI_RADOS::Obj::init(const rgw_raw_obj& obj)
-{
-  ref.obj = obj;
+tl::expected<RGWSI_RADOS::Obj, boost::system::error_code>
+RGWSI_RADOS::obj(const rgw_raw_obj& o, optional_yield y) {
+  auto r = open_pool(o.pool.name, true, y);
+  if (r)
+    return Obj(cct, rados, *r, o.pool.ns, o.oid, o.loc, o.pool.name);
+  else
+    return tl::unexpected(r.error());
+}
+tl::expected<RGWSI_RADOS::Obj, boost::system::error_code>
+RGWSI_RADOS::obj(const RGWSI_RADOS::Pool& p, std::string_view oid,
+                 std::string_view loc) {
+  return Obj(cct, rados, p.ioc.pool(), p.ioc.ns(), oid, loc, p.name);
 }
 
-int RGWSI_RADOS::Obj::open()
-{
-  int r = rados_svc->open_pool_ctx(ref.obj.pool, ref.ioctx);
-  if (r < 0) {
-    return r;
-  }
-
-  ref.ioctx.locator_set_key(ref.obj.loc);
-
-  return 0;
+tl::expected<RGWSI_RADOS::Pool, boost::system::error_code>
+RGWSI_RADOS::pool(const rgw_pool& p, optional_yield y) {
+  auto r = open_pool(p.name, true, y);
+  if (r)
+    return Pool(cct, rados, *r, p.ns, p.name);
+  else
+    return tl::unexpected(r.error());
 }
 
-int RGWSI_RADOS::Obj::operate(librados::ObjectWriteOperation *op,
-                              optional_yield y)
-{
-  return rgw_rados_operate(ref.ioctx, ref.obj.oid, op, y);
-}
-
-int RGWSI_RADOS::Obj::operate(librados::ObjectReadOperation *op, bufferlist *pbl,
-                              optional_yield y)
-{
-  return rgw_rados_operate(ref.ioctx, ref.obj.oid, op, pbl, y);
-}
-
-int RGWSI_RADOS::Obj::aio_operate(librados::AioCompletion *c, librados::ObjectWriteOperation *op)
-{
-  return ref.ioctx.aio_operate(ref.obj.oid, c, op);
-}
-
-int RGWSI_RADOS::Obj::aio_operate(librados::AioCompletion *c, librados::ObjectReadOperation *op,
-                                  bufferlist *pbl)
-{
-  return ref.ioctx.aio_operate(ref.obj.oid, c, op, pbl);
-}
-
-int RGWSI_RADOS::Obj::watch(uint64_t *handle, librados::WatchCtx2 *ctx)
-{
-  return ref.ioctx.watch2(ref.obj.oid, handle, ctx);
-}
-
-int RGWSI_RADOS::Obj::aio_watch(librados::AioCompletion *c, uint64_t *handle, librados::WatchCtx2 *ctx)
-{
-  return ref.ioctx.aio_watch(ref.obj.oid, c, handle, ctx);
-}
-
-int RGWSI_RADOS::Obj::unwatch(uint64_t handle)
-{
-  return ref.ioctx.unwatch2(handle);
-}
-
-int RGWSI_RADOS::Obj::notify(bufferlist& bl, uint64_t timeout_ms,
-                             bufferlist *pbl, optional_yield y)
-{
-  return rgw_rados_notify(ref.ioctx, ref.obj.oid, bl, timeout_ms, pbl, y);
-}
-
-void RGWSI_RADOS::Obj::notify_ack(uint64_t notify_id,
-                                 uint64_t cookie,
-                                 bufferlist& bl)
-{
-  ref.ioctx.notify_ack(ref.obj.oid, notify_id, cookie, bl);
-}
-
-uint64_t RGWSI_RADOS::Obj::get_last_version()
-{
-  return ref.ioctx.get_last_version();
-}
-
-int RGWSI_RADOS::Pool::create()
-{
-  librados::Rados *rad = &rados_svc->rados;
-  int r = rad->pool_create(pool.name.c_str());
-  if (r < 0) {
-    ldout(rados_svc->cct, 0) << "WARNING: pool_create returned " << r << dendl;
-    return r;
+void RGWSI_RADOS::watch_flush(optional_yield y) {
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    auto& yield = y.get_yield_context();
+    rados.flush_watch(yield);
   }
-  librados::IoCtx io_ctx;
-  r = rad->ioctx_create(pool.name.c_str(), io_ctx);
-  if (r < 0) {
-    ldout(rados_svc->cct, 0) << "WARNING: ioctx_create returned " << r << dendl;
-    return r;
+  // work on asio threads should be asynchronous, so warn when they block
+  if (is_asio_thread) {
+    ldout(cct, 20) << "WARNING: blocking librados call" << dendl;
   }
-  r = io_ctx.application_enable(pg_pool_t::APPLICATION_NAME_RGW, false);
-  if (r < 0) {
-    ldout(rados_svc->cct, 0) << "WARNING: application_enable returned " << r << dendl;
-    return r;
-  }
-  return 0;
-}
-
-int RGWSI_RADOS::Pool::create(const vector<rgw_pool>& pools, vector<int> *retcodes)
-{
-  vector<librados::PoolAsyncCompletion *> completions;
-  vector<int> rets;
-
-  librados::Rados *rad = &rados_svc->rados;
-  for (auto iter = pools.begin(); iter != pools.end(); ++iter) {
-    librados::PoolAsyncCompletion *c = librados::Rados::pool_async_create_completion();
-    completions.push_back(c);
-    auto& pool = *iter;
-    int ret = rad->pool_create_async(pool.name.c_str(), c);
-    rets.push_back(ret);
-  }
-
-  vector<int>::iterator riter;
-  vector<librados::PoolAsyncCompletion *>::iterator citer;
-
-  bool error = false;
-  ceph_assert(rets.size() == completions.size());
-  for (riter = rets.begin(), citer = completions.begin(); riter != rets.end(); ++riter, ++citer) {
-    int r = *riter;
-    librados::PoolAsyncCompletion *c = *citer;
-    if (r == 0) {
-      c->wait();
-      r = c->get_return_value();
-      if (r < 0) {
-        ldout(rados_svc->cct, 0) << "WARNING: async pool_create returned " << r << dendl;
-        error = true;
-      }
-    }
-    c->release();
-    retcodes->push_back(r);
-  }
-  if (error) {
-    return 0;
-  }
-
-  std::vector<librados::IoCtx> io_ctxs;
-  retcodes->clear();
-  for (auto pool : pools) {
-    io_ctxs.emplace_back();
-    int ret = rad->ioctx_create(pool.name.c_str(), io_ctxs.back());
-    if (ret < 0) {
-      ldout(rados_svc->cct, 0) << "WARNING: ioctx_create returned " << ret << dendl;
-      error = true;
-    }
-    retcodes->push_back(ret);
-  }
-  if (error) {
-    return 0;
-  }
-
-  completions.clear();
-  for (auto &io_ctx : io_ctxs) {
-    librados::PoolAsyncCompletion *c =
-      librados::Rados::pool_async_create_completion();
-    completions.push_back(c);
-    int ret = io_ctx.application_enable_async(pg_pool_t::APPLICATION_NAME_RGW,
-                                              false, c);
-    ceph_assert(ret == 0);
-  }
-
-  retcodes->clear();
-  for (auto c : completions) {
-    c->wait();
-    int ret = c->get_return_value();
-    if (ret == -EOPNOTSUPP) {
-      ret = 0;
-    } else if (ret < 0) {
-      ldout(rados_svc->cct, 0) << "WARNING: async application_enable returned " << ret
-                    << dendl;
-      error = true;
-    }
-    c->release();
-    retcodes->push_back(ret);
-  }
-  return 0;
-}
-
-int RGWSI_RADOS::Pool::lookup()
-{
-  librados::Rados *rad = &rados_svc->rados;
-  int ret = rad->pool_lookup(pool.name.c_str());
-  if (ret < 0) {
-    return ret;
-  }
-
-  return 0;
-}
-
-int RGWSI_RADOS::Pool::List::init(const string& marker,
-                                  RGWAccessListFilter&& filter)
-{
-  if (ctx.initialized) {
-    return -EINVAL;
-  }
-
-  int r = pool.rados_svc->open_pool_ctx(pool.pool, ctx.ioctx);
-  if (r < 0) {
-    return r;
-  }
-
-  librados::ObjectCursor oc;
-  if (!oc.from_str(marker)) {
-    ldout(pool.rados_svc->cct, 10) << "failed to parse cursor: " << marker << dendl;
-    return -EINVAL;
-  }
-
-  ctx.iter = ctx.ioctx.nobjects_begin(oc);
-  ctx.filter = std::move(filter);
-  ctx.initialized = true;
-
-  return 0;
-}
-
-int RGWSI_RADOS::Pool::List::get_next(int max,
-                                      std::list<string> *oids,
-                                      bool *is_truncated)
-{
-  if (!ctx.initialized) {
-    return -EINVAL;
-  }
-  vector<rgw_bucket_dir_entry> objs;
-  int r = pool.rados_svc->pool_iterate(ctx.ioctx, ctx.iter, max, objs, ctx.filter, is_truncated);
-  if (r < 0) {
-    if(r != -ENOENT) {
-      ldout(pool.rados_svc->cct, 10) << "failed to list objects pool_iterate returned r=" << r << dendl;
-    }
-    return r;
-  }
-
-  for (auto& o : objs) {
-    oids->push_back(o.key.name);
-  }
-
-  return oids->size();
-}
-
-int RGWSI_RADOS::watch_flush() {
-  return rados.watch_flush();
+  return;
+#endif
+  ceph::waiter<void> w;
+  rados.flush_watch(w.ref());
+  w.wait();
 }

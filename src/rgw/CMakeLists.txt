@@ -188,7 +188,7 @@ endif()
 
 target_link_libraries(rgw_a
   PRIVATE
-  librados cls_otp_client cls_lock_client cls_rgw_client cls_refcount_client
+  librados libRADOS cls_otp_client cls_lock_client cls_rgw_client cls_refcount_client
   cls_log_client cls_timeindex_client cls_version_client
   cls_user_client ceph-common common_utf8 global
   ${CURL_LIBRARIES}
@@ -239,7 +239,7 @@ if(WITH_RADOSGW_BEAST_FRONTEND AND WITH_RADOSGW_BEAST_OPENSSL)
 endif()
 
 add_executable(radosgw rgw_main.cc)
-target_link_libraries(radosgw radosgw_a librados
+target_link_libraries(radosgw radosgw_a librados libRADOS
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
   cls_log_client cls_timeindex_client
   cls_version_client cls_user_client
@@ -253,7 +253,7 @@ set(radosgw_admin_srcs
   rgw_admin.cc
   rgw_orphan.cc)
 add_executable(radosgw-admin ${radosgw_admin_srcs})
-target_link_libraries(radosgw-admin ${rgw_libs} librados
+target_link_libraries(radosgw-admin ${rgw_libs} librados libRADOS
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
   cls_log_client cls_timeindex_client
   cls_version_client cls_user_client
@@ -264,7 +264,7 @@ install(TARGETS radosgw-admin DESTINATION bin)
 set(radosgw_es_srcs
   rgw_es_main.cc)
 add_executable(radosgw-es ${radosgw_es_srcs})
-target_link_libraries(radosgw-es ${rgw_libs} librados
+target_link_libraries(radosgw-es ${rgw_libs} librados libRADOS
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
   cls_log_client cls_timeindex_client
   cls_version_client cls_user_client
@@ -275,14 +275,14 @@ install(TARGETS radosgw-es DESTINATION bin)
 set(radosgw_token_srcs
   rgw_token.cc)
 add_executable(radosgw-token ${radosgw_token_srcs})
-target_link_libraries(radosgw-token librados
+target_link_libraries(radosgw-token librados libRADOS
   global ${ALLOC_LIBS})
 install(TARGETS radosgw-token DESTINATION bin)
 
 set(radosgw_object_expirer_srcs
   rgw_object_expirer.cc)
 add_executable(radosgw-object-expirer ${radosgw_object_expirer_srcs})
-target_link_libraries(radosgw-object-expirer ${rgw_libs} librados
+target_link_libraries(radosgw-object-expirer ${rgw_libs} librados libRADOS
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
   cls_log_client cls_timeindex_client
   cls_version_client cls_user_client
@@ -298,6 +298,7 @@ target_link_libraries(rgw
   PRIVATE
   ${rgw_libs}
   librados
+  libRADOS
   cls_rgw_client
   cls_otp_client
   cls_lock_client
@@ -311,6 +312,7 @@ target_link_libraries(rgw
   ${CURL_LIBRARIES}
   ${EXPAT_LIBRARIES}
   PUBLIC
+  fmt::fmt
   dmclock::dmclock)
 
 if(WITH_RADOSGW_AMQP_ENDPOINT)
@@ -333,6 +335,7 @@ add_dependencies(rgw_admin_user civetweb_h)
 
 target_link_libraries(rgw_admin_user PRIVATE
   librados
+  libRADOS
   cls_rgw_client
   cls_otp_client
   cls_lock_client

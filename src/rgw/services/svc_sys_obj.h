@@ -47,9 +47,9 @@ public:
       Obj& source;
 
       RGWSI_SysObj_Core::GetObjState state;
-      
+
       RGWObjVersionTracker *objv_tracker{nullptr};
-      map<string, bufferlist> *attrs{nullptr};
+      boost::container::flat_map<std::string, ceph::buffer::list>* attrs{nullptr};
       bool raw_attrs{false};
       boost::optional<obj_version> refresh_version{boost::none};
       ceph::real_time *lastmod{nullptr};
@@ -71,7 +71,8 @@ public:
         return *this;
       }
 
-      ROp& set_attrs(map<string, bufferlist> *_attrs) {
+      ROp& set_attrs(boost::container::flat_map<std::string,
+                                                ceph::buffer::list>* _attrs) {
         attrs = _attrs;
         return *this;
       }
@@ -93,19 +94,19 @@ public:
 
       ROp(Obj& _source) : source(_source) {}
 
-      int stat(optional_yield y);
-      int read(int64_t ofs, int64_t end, bufferlist *pbl, optional_yield y);
-      int read(bufferlist *pbl, optional_yield y) {
+      boost::system::error_code stat(optional_yield y);
+      boost::system::error_code read(int64_t ofs, int64_t end, bufferlist *pbl, optional_yield y);
+      boost::system::error_code read(bufferlist *pbl, optional_yield y) {
         return read(0, -1, pbl, y);
       }
-      int get_attr(const char *name, bufferlist *dest, optional_yield y);
+      boost::system::error_code get_attr(const char *name, bufferlist *dest, optional_yield y);
     };
 
     struct WOp {
       Obj& source;
 
       RGWObjVersionTracker *objv_tracker{nullptr};
-      map<string, bufferlist> attrs;
+      boost::container::flat_map<std::string, ceph::buffer::list> attrs;
       ceph::real_time mtime;
       ceph::real_time *pmtime{nullptr};
       bool exclusive{false};
@@ -115,12 +116,12 @@ public:
         return *this;
       }
 
-      WOp& set_attrs(map<string, bufferlist>& _attrs) {
+      WOp& set_attrs(boost::container::flat_map<std::string, ceph::buffer::list>& _attrs) {
         attrs = _attrs;
         return *this;
       }
 
-      WOp& set_attrs(map<string, bufferlist>&& _attrs) {
+      WOp& set_attrs(boost::container::flat_map<std::string, ceph::buffer::list>&& _attrs) {
         attrs = _attrs;
         return *this;
       }
@@ -142,13 +143,13 @@ public:
 
       WOp(Obj& _source) : source(_source) {}
 
-      int remove(optional_yield y);
-      int write(bufferlist& bl, optional_yield y);
+      boost::system::error_code remove(optional_yield y);
+      boost::system::error_code write(bufferlist& bl, optional_yield y);
 
-      int write_data(bufferlist& bl, optional_yield y); /* write data only */
-      int write_attrs(optional_yield y); /* write attrs only */
-      int write_attr(const char *name, bufferlist& bl,
-                     optional_yield y); /* write attrs only */
+      boost::system::error_code write_data(bufferlist& bl, optional_yield y); /* write data only */
+      boost::system::error_code write_attrs(optional_yield y); /* write attrs only */
+      boost::system::error_code write_attr(const char *name, bufferlist& bl,
+                                           optional_yield y); /* write attrs only */
     };
 
     struct OmapOp {
@@ -163,13 +164,19 @@ public:
 
       OmapOp(Obj& _source) : source(_source) {}
 
-      int get_all(std::map<string, bufferlist> *m, optional_yield y);
-      int get_vals(const string& marker, uint64_t count,
-                   std::map<string, bufferlist> *m,
-                   bool *pmore, optional_yield y);
-      int set(const std::string& key, bufferlist& bl, optional_yield y);
-      int set(const map<std::string, bufferlist>& m, optional_yield y);
-      int del(const std::string& key, optional_yield y);
+      boost::system::error_code
+      get_all(boost::container::flat_map<std::string, ceph::buffer::list> *m,
+              optional_yield y);
+      boost::system::error_code
+      get_vals(const std::string& marker, uint64_t count,
+               boost::container::flat_map<std::string, ceph::buffer::list> *m,
+               bool *pmore, optional_yield y);
+      boost::system::error_code set(const std::string& key, bufferlist& bl,
+                                    optional_yield y);
+      boost::system::error_code
+      set(const boost::container::flat_map<std::string, ceph::buffer::list>& m,
+          optional_yield y);
+      boost::system::error_code del(const std::string& key, optional_yield y);
     };
 
     struct WNOp {
@@ -177,8 +184,9 @@ public:
 
       WNOp(Obj& _source) : source(_source) {}
 
-      int notify(bufferlist& bl, uint64_t timeout_ms, bufferlist *pbl,
-                 optional_yield y);
+      boost::system::error_code notify(bufferlist& bl,
+                                       std::optional<std::chrono::milliseconds> timeout,
+                                       bufferlist *pbl, optional_yield y);
     };
     ROp rop() {
       return ROp(*this);
@@ -220,7 +228,11 @@ public:
 
       Op(Pool& _source) : source(_source) {}
 
-      int list_prefixed_objs(const std::string& prefix, std::list<std::string> *result);
+      boost::system::error_code
+      list_prefixed_objs(
+        const string& prefix,
+        std::vector<std::string> *result,
+        optional_yield y);
     };
 
     Op op() {

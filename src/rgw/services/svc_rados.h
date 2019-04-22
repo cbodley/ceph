@@ -6,8 +6,14 @@
 #include <string>
 #include <string_view>
 
-#include "rgw/rgw_service.h"
+#include "include/expected.hpp"
+
+#include "include/RADOS/RADOS.hpp"
+
 #include "common/async/yield_context.h"
+
+#include "rgw/rgw_service.h"
+
 
 using RGWAccessListFilter =
   std::function<bool(std::string_view, std::string_view)>;
@@ -21,126 +27,160 @@ inline auto RGWAccessListFilterPrefix(std::string prefix) {
 
 class RGWSI_RADOS : public RGWServiceInstance
 {
-  librados::Rados rados;
+  RADOS::RADOS rados;
 
-  boost::system::error_code do_start() override;
+public:
 
-  int open_pool_ctx(const rgw_pool& pool, librados::IoCtx& io_ctx);
-  int pool_iterate(librados::IoCtx& ioctx,
-                   librados::NObjectIterator& iter,
-                   uint32_t num, vector<rgw_bucket_dir_entry>& objs,
-                   const RGWAccessListFilter& filter,
-                   bool *is_truncated);
+  class Pool {
+    friend class RGWSI_RADOS;
+
+    CephContext* cct;
+    RADOS::RADOS& rados;
+    RADOS::IOContext ioc;
+    std::string name; // Rather annoying.
+
+    Pool(CephContext* cct,
+         RADOS::RADOS& rados,
+         int64_t id,
+         std::string ns,
+         std::string(name)) : cct(cct), rados(rados), ioc(id, ns), name(name) {}
+
+  public:
+
+    class List {
+      friend Pool;
+      Pool& pool;
+      RADOS::EnumerationCursor iter = RADOS::EnumerationCursor::begin();
+      RGWAccessListFilter filter;
+
+      List(Pool& pool, RGWAccessListFilter filter) :
+        pool(pool), filter(std::move(filter)) {}
+
+    public:
+      boost::system::error_code get_next(int max,
+                                         std::vector<std::string> *oids,
+                                         bool *is_truncated,
+                                         optional_yield);
+    };
+
+    List list(RGWAccessListFilter filter = nullptr);
+
+  };
+
+
+private:
+
+  tl::expected<std::int64_t, boost::system::error_code>
+  open_pool(std::string_view pool, bool create, optional_yield y);
 
 public:
   RGWSI_RADOS(CephContext *cct, boost::asio::io_context& ioc)
-    : RGWServiceInstance(cct, ioc) {}
+    : RGWServiceInstance(cct, ioc), rados(ioc, cct) {}
 
   void init() {}
 
   uint64_t instance_id();
 
-  struct ObjRef {
-    rgw_raw_obj obj;
-    librados::IoCtx ioctx;
-  };
-
   class Obj {
     friend class RGWSI_RADOS;
 
-    RGWSI_RADOS *rados_svc{nullptr};
-    ObjRef ref;
+    CephContext* cct;
+    RADOS::RADOS& rados;
+    RADOS::IOContext ioc;
+    RADOS::Object obj;
+    std::string pname; // Fudge. We need this for now to support
+                       // getting an rgw_raw_obj back out.
 
-    void init(const rgw_raw_obj& obj);
-
-    Obj(RGWSI_RADOS *_rados_svc, const rgw_raw_obj& _obj)
-      : rados_svc(_rados_svc) {
-      init(_obj);
+    Obj(CephContext* cct, RADOS::RADOS& rados, int64_t pool, std::string_view ns,
+        std::string_view obj, std::string_view key, std::string_view pname)
+      : rados(rados), ioc(pool, ns), obj(obj), pname(pname) {
+      if (!key.empty())
+        ioc.key(key);
     }
 
   public:
-    Obj() {}
 
-    int open();
+    Obj(const Obj& rhs)
+      : cct(rhs.cct), rados(rhs.rados), ioc(rhs.ioc), obj(rhs.obj),
+        pname(rhs.pname) {}
+    Obj(Obj&& rhs)
+      : cct(rhs.cct), rados(rhs.rados), ioc(std::move(rhs.ioc)),
+        obj(std::move(rhs.obj)), pname(std::move(rhs.pname)) {}
 
-    int operate(librados::ObjectWriteOperation *op, optional_yield y);
-    int operate(librados::ObjectReadOperation *op, bufferlist *pbl,
-                optional_yield y);
-    int aio_operate(librados::AioCompletion *c, librados::ObjectWriteOperation *op);
-    int aio_operate(librados::AioCompletion *c, librados::ObjectReadOperation *op,
-                    bufferlist *pbl);
-
-    int watch(uint64_t *handle, librados::WatchCtx2 *ctx);
-    int aio_watch(librados::AioCompletion *c, uint64_t *handle, librados::WatchCtx2 *ctx);
-    int unwatch(uint64_t handle);
-    int notify(bufferlist& bl, uint64_t timeout_ms,
-               bufferlist *pbl, optional_yield y);
-    void notify_ack(uint64_t notify_id,
-                    uint64_t cookie,
-                    bufferlist& bl);
-
-    uint64_t get_last_version();
-
-    ObjRef& get_ref() { return ref; }
-    const ObjRef& get_ref() const { return ref; }
-  };
-
-  class Pool {
-    friend class RGWSI_RADOS;
-
-    RGWSI_RADOS *rados_svc{nullptr};
-    rgw_pool pool;
-
-    Pool(RGWSI_RADOS *_rados_svc,
-         const rgw_pool& _pool) : rados_svc(_rados_svc),
-                                  pool(_pool) {}
-
-    Pool(RGWSI_RADOS *_rados_svc) : rados_svc(_rados_svc) {}
-  public:
-    Pool() {}
-
-    int create();
-    int create(const std::vector<rgw_pool>& pools, std::vector<int> *retcodes);
-    int lookup();
-
-    struct List {
-      Pool& pool;
-
-      struct Ctx {
-        bool initialized{false};
-        librados::IoCtx ioctx;
-        librados::NObjectIterator iter;
-        RGWAccessListFilter filter;
-      } ctx;
-
-      List(Pool& _pool) : pool(_pool) {}
-
-      int init(const string& marker, RGWAccessListFilter&& filter = nullptr);
-      int get_next(int max,
-                   std::list<string> *oids,
-                   bool *is_truncated);
-    };
-
-    List op() {
-      return List(*this);
+    Obj& operator =(const Obj& rhs) {
+      ioc = rhs.ioc;
+      obj = rhs.obj;
+      pname = rhs.pname;
+      return *this;
+    }
+    Obj& operator =(Obj&& rhs) {
+      ioc = std::move(rhs.ioc);
+      obj = std::move(rhs.obj);
+      pname = std::move(rhs.pname);
+      return *this;
     }
 
-    friend List;
+    rgw_raw_obj get_raw_obj() const {
+      return rgw_raw_obj(rgw_pool(pname, std::string(ioc.ns())),
+                         std::string(obj),
+                         std::string(ioc.key().value_or(std::string_view{})));
+    }
+
+    std::string_view get_oid() const {
+      return std::string_view(obj);
+    }
+
+    boost::system::system_error open(optional_yield y);
+
+    boost::system::error_code operate(RADOS::WriteOp&& op, optional_yield y,
+                                      version_t* objver = nullptr);
+    boost::system::error_code operate(RADOS::ReadOp&& op,
+                                      ceph::buffer::list* bl,
+                                      optional_yield y,
+                                      version_t* objver = nullptr);
+    template<typename CompletionToken>
+    auto aio_operate(RADOS::WriteOp&& op, CompletionToken&& token) {
+      return rados.execute(obj, ioc, std::move(op),
+                           std::forward<CompletionToken>(token));
+    }
+    template<typename CompletionToken>
+    auto aio_operate(RADOS::ReadOp&& op, ceph::buffer::list* bl,
+                     CompletionToken&& token) {
+      return rados.execute(obj, ioc, std::move(op), bl,
+                           std::forward<CompletionToken>(token));
+    }
+
+    tl::expected<uint64_t, boost::system::error_code>
+    watch(RADOS::RADOS::WatchCB&& f, optional_yield y);
+    template<typename CompletionToken>
+    auto aio_watch(RADOS::RADOS::WatchCB&& f, CompletionToken&& token) {
+      return rados.watch(obj, ioc, nullopt, std::move(f),
+                         std::forward<CompletionToken>(token));
+    }
+    boost::system::error_code unwatch(uint64_t handle,
+                                      optional_yield y);
+    boost::system::error_code
+    notify(bufferlist&& bl,
+           std::optional<std::chrono::milliseconds> timeouts,
+           bufferlist* pbl, optional_yield y);
+    boost::system::error_code notify_ack(uint64_t notify_id, uint64_t cookie, bufferlist&& bl,
+                                         optional_yield y);
   };
 
-  int watch_flush();
+  boost::system::error_code create_pool(const rgw_pool& p, optional_yield y);
+  boost::system::error_code create_pools(const std::vector<rgw_pool>& p,
+                                         std::vector<boost::system::error_code>* e,
+                                         optional_yield y);
 
-  Obj obj(const rgw_raw_obj& o) {
-    return Obj(this, o);
-  }
+  void watch_flush(optional_yield y);
 
-  Pool pool() {
-    return Pool(this);
-  }
+  tl::expected<Obj, boost::system::error_code>
+  obj(const rgw_raw_obj& o, optional_yield y);
+  tl::expected<Obj, boost::system::error_code>
+  obj(const Pool& p, std::string_view oid, std::string_view loc);
 
-  Pool pool(const rgw_pool& p) {
-    return Pool(this, p);
-  }
+  tl::expected<Pool, boost::system::error_code>
+  pool(const rgw_pool& p, optional_yield y);
 
   friend Obj;
   friend Pool;

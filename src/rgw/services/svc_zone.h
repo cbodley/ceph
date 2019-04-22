@@ -49,12 +49,12 @@ class RGWSI_Zone : public RGWServiceInstance
   boost::system::error_code do_start() override;
   void shutdown() override;
 
-  int replace_region_with_zonegroup();
-  int init_zg_from_period(bool *initialized);
-  int init_zg_from_local(bool *creating_defaults);
-  int convert_regionmap();
+  boost::system::error_code replace_region_with_zonegroup();
+  boost::system::error_code init_zg_from_period(bool *initialized);
+  boost::system::error_code init_zg_from_local(bool *creating_defaults);
+  boost::system::error_code convert_regionmap();
 
-  int update_placement_map();
+  boost::system::error_code update_placement_map();
 public:
   RGWSI_Zone(CephContext *cct, boost::asio::io_context& ioc);
   ~RGWSI_Zone();
@@ -63,7 +63,7 @@ public:
   const RGWPeriod& get_current_period() const;
   const RGWRealm& get_realm() const;
   const RGWZoneGroup& get_zonegroup() const;
-  int get_zonegroup(const string& id, RGWZoneGroup& zonegroup) const;
+  boost::system::error_code get_zonegroup(const string& id, RGWZoneGroup& zonegroup) const;
   const RGWZone& get_zone() const;
 
   const string& zone_name();
@@ -103,18 +103,20 @@ public:
   RGWRESTConn *get_zone_conn_by_name(const string& name);
   bool find_zone_id_by_name(const string& name, string *id);
 
-  int select_bucket_placement(const RGWUserInfo& user_info, const string& zonegroup_id,
-                              const rgw_placement_rule& rule,
-                              rgw_placement_rule *pselected_rule, RGWZonePlacementInfo *rule_info);
-  int select_legacy_bucket_placement(RGWZonePlacementInfo *rule_info);
-  int select_new_bucket_location(const RGWUserInfo& user_info, const string& zonegroup_id,
-                                 const rgw_placement_rule& rule,
-                                 rgw_placement_rule *pselected_rule_name, RGWZonePlacementInfo *rule_info);
-  int select_bucket_location_by_rule(const rgw_placement_rule& location_rule, RGWZonePlacementInfo *rule_info);
+  boost::system::error_code select_bucket_placement(const RGWUserInfo& user_info, const string& zonegroup_id,
+                                                    const rgw_placement_rule& rule,
+                                                    rgw_placement_rule *pselected_rule,
+                                                    RGWZonePlacementInfo *rule_info);
+  boost::system::error_code select_legacy_bucket_placement(RGWZonePlacementInfo *rule_info);
+  boost::system::error_code select_new_bucket_location(const RGWUserInfo& user_info, const string& zonegroup_id,
+                                                       const rgw_placement_rule& rule,
+                                                       rgw_placement_rule *pselected_rule_name,
+                                                       RGWZonePlacementInfo *rule_info);
+  boost::system::error_code select_bucket_location_by_rule(const rgw_placement_rule& location_rule, RGWZonePlacementInfo *rule_info);
 
-  int add_bucket_placement(const rgw_pool& new_pool);
-  int remove_bucket_placement(const rgw_pool& old_pool);
-  int list_placement_set(set<rgw_pool>& names);
+  boost::system::error_code add_bucket_placement(const rgw_pool& new_pool);
+  boost::system::error_code remove_bucket_placement(const rgw_pool& old_pool);
+  boost::system::error_code list_placement_set(boost::container::flat_set<rgw_pool>& names);
 
   bool is_meta_master() const;
 
@@ -123,12 +125,12 @@ public:
   bool can_reshard() const;
   bool is_syncing_bucket_meta(const rgw_bucket& bucket);
 
-  int list_zonegroups(list<string>& zonegroups);
-  int list_regions(list<string>& regions);
-  int list_zones(list<string>& zones);
-  int list_realms(list<string>& realms);
-  int list_periods(list<string>& periods);
-  int list_periods(const string& current_period, list<string>& periods);
+  boost::system::error_code list_zonegroups(std::vector<string>& zonegroups);
+  boost::system::error_code list_regions(std::vector<std::string>& regions);
+  boost::system::error_code list_zones(std::vector<string>& zones);
+  boost::system::error_code list_realms(std::vector<string>& realms);
+  boost::system::error_code list_periods(std::vector<string>& periods);
+  boost::system::error_code list_periods(const string& current_period, std::list<string>& periods);
 };
 
 #endif

@@ -886,11 +886,11 @@ int RGWBucket::link(RGWBucketAdminOpState& op_state, std::string *err_msg)
     policy.encode(aclbl);
 
     auto sysobj = obj_ctx.get_obj(obj);
-    r = sysobj.wop()
-              .set_objv_tracker(&objv_tracker)
-              .write_attr(RGW_ATTR_ACL, aclbl, null_yield);
-    if (r < 0) {
-      return r;
+    auto ec = sysobj.wop()
+      .set_objv_tracker(&objv_tracker)
+      .write_attr(RGW_ATTR_ACL, aclbl, null_yield);
+    if (ec) {
+      return ceph::from_error_code(ec);
     }
 
     RGWAccessControlPolicy policy_instance;
@@ -901,11 +901,11 @@ int RGWBucket::link(RGWBucketAdminOpState& op_state, std::string *err_msg)
     rgw_raw_obj obj_bucket_instance;
     store->get_bucket_instance_obj(bucket, obj_bucket_instance);
     auto inst_sysobj = obj_ctx.get_obj(obj_bucket_instance);
-    r = inst_sysobj.wop()
-                   .set_objv_tracker(&objv_tracker)
-                   .write_attr(RGW_ATTR_ACL, aclbl, null_yield);
-    if (r < 0) {
-      return r;
+    ec = inst_sysobj.wop()
+      .set_objv_tracker(&objv_tracker)
+      .write_attr(RGW_ATTR_ACL, aclbl, null_yield);
+    if (ec) {
+      return ceph::from_error_code(ec);
     }
 
     r = rgw_link_bucket(store, user_info.user_id, bucket_info.bucket,
@@ -2828,10 +2828,10 @@ public:
       bci.info.bucket.name = bucket_name;
       bci.info.bucket.bucket_id = bucket_instance;
       bci.info.bucket.tenant = tenant_name;
-      ret = store->svc.zone->select_bucket_location_by_rule(bci.info.placement_rule, &rule_info);
-      if (ret < 0) {
-        ldout(store->ctx(), 0) << "ERROR: select_bucket_placement() returned " << ret << dendl;
-        return ret;
+      auto ec = store->svc.zone->select_bucket_location_by_rule(bci.info.placement_rule, &rule_info);
+      if (ec) {
+        ldout(store->ctx(), 0) << "ERROR: select_bucket_placement() returned " << ec << dendl;
+        return ceph::from_error_code(ec);
       }
       bci.info.index_type = rule_info.index_type;
     } else {

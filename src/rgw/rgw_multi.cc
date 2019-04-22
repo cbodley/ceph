@@ -100,8 +100,8 @@ int list_multipart_parts(RGWRados *store, RGWBucketInfo& bucket_info,
 			 int *next_marker, bool *truncated,
 			 bool assume_unsorted)
 {
-  map<string, bufferlist> parts_map;
-  map<string, bufferlist>::iterator iter;
+  boost::container::flat_map<string, bufferlist> parts_map;
+  boost::container::flat_map<string, bufferlist>::iterator iter;
 
   rgw_obj obj;
   obj.init_ns(bucket_info.bucket, meta_oid, RGW_OBJ_NS_MULTIPART);
@@ -128,10 +128,12 @@ int list_multipart_parts(RGWRados *store, RGWBucketInfo& bucket_info,
     snprintf(buf, sizeof(buf), "%08d", marker);
     p.append(buf);
 
-    ret = sysobj.omap().get_vals(p, num_parts + 1, &parts_map,
-                                 nullptr, null_yield);
+    ret = ceph::from_error_code(
+      sysobj.omap().get_vals(p, num_parts + 1, &parts_map,
+			     nullptr, null_yield));
   } else {
-    ret = sysobj.omap().get_all(&parts_map, null_yield);
+    ret = ceph::from_error_code(
+      sysobj.omap().get_all(&parts_map, null_yield));
   }
   if (ret < 0)
     return ret;

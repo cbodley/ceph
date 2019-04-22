@@ -107,22 +107,25 @@ int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool, const string& o
 
   auto obj_ctx = rgwstore->svc.sysobj->init_obj_ctx();
   auto sysobj = obj_ctx.get_obj(obj);
-  int ret = sysobj.wop()
-                  .set_objv_tracker(objv_tracker)
-                  .set_exclusive(exclusive)
-                  .set_mtime(set_mtime)
-                  .set_attrs(*pattrs)
-                  .write(data, null_yield);
+  // TODO
+  boost::container::flat_map<string, bufferlist> tm(std::move_iterator(pattrs->begin()),
+						    std::move_iterator(pattrs->end()));
+  int ret = ceph::from_error_code(sysobj.wop()
+				  .set_objv_tracker(objv_tracker)
+				  .set_exclusive(exclusive)
+				  .set_mtime(set_mtime)
+				  .set_attrs(tm)
+				  .write(data, null_yield));
 
   if (ret == -ENOENT) {
     ret = rgwstore->create_pool(pool);
     if (ret >= 0) {
-      ret = sysobj.wop()
-                  .set_objv_tracker(objv_tracker)
-                  .set_exclusive(exclusive)
-                  .set_mtime(set_mtime)
-                  .set_attrs(*pattrs)
-                  .write(data, null_yield);
+      ret = ceph::from_error_code(sysobj.wop()
+				  .set_objv_tracker(objv_tracker)
+				  .set_exclusive(exclusive)
+				  .set_mtime(set_mtime)
+				  .set_attrs(tm)
+				  .write(data, null_yield));
     }
   }
 
@@ -142,20 +145,25 @@ int rgw_get_system_obj(RGWRados *rgwstore, RGWSysObjectCtx& obj_ctx, const rgw_p
     original_readv = objv_tracker->read_version;
   }
 
+  boost::container::flat_map<string, bufferlist> tm;
   do {
     auto sysobj = obj_ctx.get_obj(obj);
     auto rop = sysobj.rop();
 
-    int ret = rop.set_attrs(pattrs)
-                 .set_last_mod(pmtime)
-                 .set_objv_tracker(objv_tracker)
-                 .stat(null_yield);
+    int ret = ceph::from_error_code(rop.set_attrs(&tm)
+				    .set_last_mod(pmtime)
+				    .set_objv_tracker(objv_tracker)
+				    .stat(null_yield));
+    if (pattrs)
+      std::move(tm.begin(), tm.end(),
+		std::inserter(*pattrs, pattrs->end()));
+
     if (ret < 0)
       return ret;
 
-    ret = rop.set_cache_info(cache_info)
-             .set_refresh_version(refresh_version)
-             .read(&bl, null_yield);
+    ret = ceph::from_error_code(rop.set_cache_info(cache_info)
+				.set_refresh_version(refresh_version)
+				.read(&bl, null_yield));
     if (ret == -ECANCELED) {
       /* raced, restart */
       if (!original_readv.empty()) {
@@ -186,9 +194,9 @@ int rgw_delete_system_obj(RGWRados *rgwstore, const rgw_pool& pool, const string
   auto obj_ctx = rgwstore->svc.sysobj->init_obj_ctx();
   auto sysobj = obj_ctx.get_obj(rgw_raw_obj{pool, oid});
   rgw_raw_obj obj(pool, oid);
-  return sysobj.wop()
-               .set_objv_tracker(objv_tracker)
-               .remove(null_yield);
+  return ceph::from_error_code(sysobj.wop()
+			       .set_objv_tracker(objv_tracker)
+			       .remove(null_yield));
 }
 
 thread_local bool is_asio_thread = false;
@@ -352,19 +360,6 @@ const char *rgw_find_mime_by_ext(string& ext)
   return iter->second.c_str();
 }
 
-void rgw_filter_attrset(map<string, bufferlist>& unfiltered_attrset, const string& check_prefix,
-                        map<string, bufferlist> *attrset)
-{
-  attrset->clear();
-  map<string, bufferlist>::iterator iter;
-  for (iter = unfiltered_attrset.lower_bound(check_prefix);
-       iter != unfiltered_attrset.end(); ++iter) {
-    if (!boost::algorithm::starts_with(iter->first, check_prefix))
-      break;
-    (*attrset)[iter->first] = iter->second;
-  }
-}
-
 RGWDataAccess::RGWDataAccess(RGWRados *_store) : store(_store)
 {
   sysobj_ctx = std::make_unique<RGWSysObjectCtx>(store->svc.sysobj->init_obj_ctx());
@@ -443,7 +438,7 @@ int RGWDataAccess::Object::put(bufferlist& data,
                                   owner.get_id(), obj_ctx, obj, olh_epoch,
                                   req_id, dpp, null_yield);
 
-  int ret = processor.prepare();
+  int ret = ceph::from_error_code(processor.prepare());
   if (ret < 0)
     return ret;
 
@@ -477,14 +472,14 @@ int RGWDataAccess::Object::put(bufferlist& data,
     data.splice(0, read_len, &bl);
     etag_calc.update(bl);
 
-    ret = filter->process(std::move(bl), ofs);
+    ret = ceph::from_error_code(filter->process(std::move(bl), ofs));
     if (ret < 0)
       return ret;
 
     ofs += read_len;
   } while (data.length() > 0);
 
-  ret = filter->process({}, ofs);
+  ret = ceph::from_error_code(filter->process({}, ofs));
   if (ret < 0) {
     return ret;
   }

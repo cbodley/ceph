@@ -4,8 +4,8 @@ add_executable(ceph_test_cls_version
   )
 target_link_libraries(ceph_test_cls_version
   librados
-  libRADOS
   cls_version_client
+  libRADOS
   global
   ${UNITTEST_LIBS}
   ${BLKID_LIBRARIES}
@@ -15,3 +15,7 @@ target_link_libraries(ceph_test_cls_version
   radostest-cxx
   )
 
+
+if(WITH_BOOST_CONTEXT)
+  target_link_libraries(ceph_test_cls_version Boost::coroutine Boost::context)
+endif()

@@ -16,13 +16,15 @@
 #include "rgw_aio.h"
 #include "rgw_putobj_processor.h"
 #include "rgw_multi.h"
+#include "rgw_error_code.h"
 #include "services/svc_sys_obj.h"
 
 #define dout_subsys ceph_subsys_rgw
 
 namespace rgw::putobj {
 
-int HeadObjectProcessor::process(bufferlist&& data, uint64_t logical_offset)
+boost::system::error_code HeadObjectProcessor::process(bufferlist&& data,
+						       uint64_t logical_offset)
 {
   const bool flush = (data.length() == 0);
 
@@ -41,13 +43,13 @@ int HeadObjectProcessor::process(bufferlist&& data, uint64_t logical_offset)
     if (data_offset == head_chunk_size) {
       // process the first complete chunk
       ceph_assert(head_data.length() == head_chunk_size);
-      int r = process_first_chunk(std::move(head_data), &processor);
-      if (r < 0) {
+      auto r = process_first_chunk(std::move(head_data), &processor);
+      if (r) {
         return r;
       }
     }
     if (data.length() == 0) { // avoid flushing stripe processor
-      return 0;
+      return {};
     }
   }
   ceph_assert(processor); // process_first_chunk() must initialize
@@ -59,59 +61,65 @@ int HeadObjectProcessor::process(bufferlist&& data, uint64_t logical_offset)
 }
 
 
-static int process_completed(const AioResultList& completed, RawObjSet *written)
+static boost::system::error_code
+process_completed(const AioResultList& completed, RawObjSet *written)
 {
-  std::optional<int> error;
+  boost::system::error_code error;
   for (auto& r : completed) {
-    if (r.result >= 0) {
-      written->insert(r.obj.get_ref().obj);
+    if (!r.result) {
+      written->insert(r.obj.get_raw_obj());
     } else if (!error) { // record first error code
       error = r.result;
     }
   }
-  return error.value_or(0);
+  return error;
 }
 
-int RadosWriter::set_stripe_obj(const rgw_raw_obj& raw_obj)
+boost::system::error_code
+RadosWriter::set_stripe_obj(const rgw_raw_obj& raw_obj)
 {
-  stripe_obj = store->svc.rados->obj(raw_obj);
-  return stripe_obj.open();
+  auto r = store->svc.rados->obj(raw_obj, null_yield);
+  if (!r)
+    return r.error();
+  stripe_obj.emplace(std::move(*r));
+  return {};
 }
 
-int RadosWriter::process(bufferlist&& bl, uint64_t offset)
+boost::system::error_code
+RadosWriter::process(bufferlist&& bl, uint64_t offset)
 {
   bufferlist data = std::move(bl);
   const uint64_t cost = data.length();
   if (cost == 0) { // no empty writes, use aio directly for creates
-    return 0;
+    return {};
   }
-  librados::ObjectWriteOperation op;
+  RADOS::WriteOp op;
   if (offset == 0) {
-    op.write_full(data);
+    op.write_full(std::move(data));
   } else {
-    op.write(offset, data);
+    op.write(offset, std::move(data));
   }
   constexpr uint64_t id = 0; // unused
-  auto c = aio->get(stripe_obj, Aio::librados_op(std::move(op), y), cost, id);
+  auto c = aio->get(*stripe_obj, Aio::rados_op(std::move(op), y), cost, id);
   return process_completed(c, &written);
 }
 
-int RadosWriter::write_exclusive(const bufferlist& data)
+boost::system::error_code RadosWriter::write_exclusive(const bufferlist& data)
 {
   const uint64_t cost = data.length();
 
-  librados::ObjectWriteOperation op;
+  RADOS::WriteOp op;
   op.create(true); // exclusive create
-  op.write_full(data);
+  op.write_full(bufferlist(data));
 
   constexpr uint64_t id = 0; // unused
-  auto c = aio->get(stripe_obj, Aio::librados_op(std::move(op), y), cost, id);
+  auto c = aio->get(*stripe_obj, Aio::rados_op(std::move(op), y), cost, id);
   auto d = aio->drain();
   c.splice(c.end(), d);
   return process_completed(c, &written);
 }
 
-int RadosWriter::drain()
+boost::system::error_code RadosWriter::drain()
 {
   return process_completed(aio->drain(), &written);
 }
@@ -164,12 +172,13 @@ RadosWriter::~RadosWriter()
 
 
 // advance to the next stripe
-int ManifestObjectProcessor::next(uint64_t offset, uint64_t *pstripe_size)
+boost::system::error_code
+ManifestObjectProcessor::next(uint64_t offset, uint64_t *pstripe_size)
 {
   // advance the manifest
   int r = manifest_gen.create_next(offset);
   if (r < 0) {
-    return r;
+    return ceph::to_error_code(r);
   }
 
   rgw_raw_obj stripe_obj = manifest_gen.get_cur_obj(store);
@@ -177,29 +186,30 @@ int ManifestObjectProcessor::next(uint64_t offset, uint64_t *pstripe_size)
   uint64_t chunk_size = 0;
   r = store->get_max_chunk_size(stripe_obj.pool, &chunk_size);
   if (r < 0) {
-    return r;
+    return ceph::to_error_code(r);
   }
-  r = writer.set_stripe_obj(stripe_obj);
-  if (r < 0) {
-    return r;
+  auto ec = writer.set_stripe_obj(stripe_obj);
+  if (ec) {
+    return ec;
   }
 
   chunk = ChunkProcessor(&writer, chunk_size);
   *pstripe_size = manifest_gen.cur_stripe_max_size();
-  return 0;
+  return {};
 }
 
 
 
-int AtomicObjectProcessor::process_first_chunk(bufferlist&& data,
-                                               DataProcessor **processor)
+boost::system::error_code
+AtomicObjectProcessor::process_first_chunk(bufferlist&& data,
+					   DataProcessor **processor)
 {
   first_chunk = std::move(data);
   *processor = &stripe;
-  return 0;
+  return {};
 }
 
-int AtomicObjectProcessor::prepare()
+boost::system::error_code AtomicObjectProcessor::prepare()
 {
   uint64_t max_head_chunk_size;
   uint64_t head_max_size;
@@ -208,12 +218,12 @@ int AtomicObjectProcessor::prepare()
   rgw_pool head_pool;
 
   if (!store->get_obj_data_pool(bucket_info.placement_rule, head_obj, &head_pool)) {
-    return -EIO;
+    return rgw_errc::placement_pool_missing;
   }
 
   int r = store->get_max_chunk_size(head_pool, &max_head_chunk_size, &alignment);
   if (r < 0) {
-    return r;
+    return ceph::to_error_code(r);
   }
 
   bool same_pool = true;
@@ -221,7 +231,7 @@ int AtomicObjectProcessor::prepare()
   if (bucket_info.placement_rule != tail_placement_rule) {
     rgw_pool tail_pool;
     if (!store->get_obj_data_pool(tail_placement_rule, head_obj, &tail_pool)) {
-      return -EIO;
+      return rgw_errc::placement_pool_missing;
     }
 
     if (tail_pool != head_pool) {
@@ -229,7 +239,7 @@ int AtomicObjectProcessor::prepare()
 
       r = store->get_max_chunk_size(tail_pool, &chunk_size);
       if (r < 0) {
-        return r;
+        return ceph::to_error_code(r);
       }
 
       head_max_size = 0;
@@ -253,42 +263,43 @@ int AtomicObjectProcessor::prepare()
                                 &tail_placement_rule,
                                 head_obj.bucket, head_obj);
   if (r < 0) {
-    return r;
+    return ceph::to_error_code(r);
   }
 
   rgw_raw_obj stripe_obj = manifest_gen.get_cur_obj(store);
 
-  r = writer.set_stripe_obj(stripe_obj);
-  if (r < 0) {
-    return r;
+  auto ec = writer.set_stripe_obj(stripe_obj);
+  if (ec) {
+    return ec;
   }
 
   set_head_chunk_size(head_max_size);
   // initialize the processors
   chunk = ChunkProcessor(&writer, chunk_size);
   stripe = StripeProcessor(&chunk, this, head_max_size);
-  return 0;
+  return ec;
 }
 
-int AtomicObjectProcessor::complete(size_t accounted_size,
-                                    const std::string& etag,
-                                    ceph::real_time *mtime,
-                                    ceph::real_time set_mtime,
-                                    std::map<std::string, bufferlist>& attrs,
-                                    ceph::real_time delete_at,
-                                    const char *if_match,
-                                    const char *if_nomatch,
-                                    const std::string *user_data,
-                                    rgw_zone_set *zones_trace,
-                                    bool *pcanceled)
+boost::system::error_code
+AtomicObjectProcessor::complete(size_t accounted_size,
+				const std::string& etag,
+				ceph::real_time *mtime,
+				ceph::real_time set_mtime,
+				boost::container::flat_map<std::string, bufferlist>& attrs,
+				ceph::real_time delete_at,
+				const char *if_match,
+				const char *if_nomatch,
+				const std::string *user_data,
+				rgw_zone_set *zones_trace,
+				bool *pcanceled)
 {
-  int r = writer.drain();
-  if (r < 0) {
+  auto r = writer.drain();
+  if (r) {
     return r;
   }
   const uint64_t actual_size = get_actual_size();
-  r = manifest_gen.create_next(actual_size);
-  if (r < 0) {
+  r = ceph::to_error_code(manifest_gen.create_next(actual_size));
+  if (r) {
     return r;
   }
 
@@ -316,8 +327,13 @@ int AtomicObjectProcessor::complete(size_t accounted_size,
   obj_op.meta.zones_trace = zones_trace;
   obj_op.meta.modify_tail = true;
 
-  r = obj_op.write_meta(actual_size, accounted_size, attrs);
-  if (r < 0) {
+  // TODO: Fix.
+  std::map<std::string, bufferlist> tm;
+  std::move(attrs.begin(), attrs.end(),
+	    std::inserter(tm, tm.end()));
+  r = ceph::to_error_code(obj_op.write_meta(actual_size, accounted_size,
+					    tm));
+  if (r) {
     return r;
   }
   if (!obj_op.meta.canceled) {
@@ -327,17 +343,18 @@ int AtomicObjectProcessor::complete(size_t accounted_size,
   if (pcanceled) {
     *pcanceled = obj_op.meta.canceled;
   }
-  return 0;
+  return {};
 }
 
 
-int MultipartObjectProcessor::process_first_chunk(bufferlist&& data,
-                                                  DataProcessor **processor)
+boost::system::error_code
+MultipartObjectProcessor::process_first_chunk(bufferlist&& data,
+					      DataProcessor **processor)
 {
   // write the first chunk of the head object as part of an exclusive create,
   // then drain to wait for the result in case of EEXIST
-  int r = writer.write_exclusive(data);
-  if (r == -EEXIST) {
+  auto r = writer.write_exclusive(data);
+  if (r == boost::system::errc::file_exists) {
     // randomize the oid prefix and reprepare the head/manifest
     std::string oid_rand(32, 0);
     gen_rand_alphanumeric(store->ctx(), oid_rand.data(), oid_rand.size());
@@ -346,20 +363,21 @@ int MultipartObjectProcessor::process_first_chunk(bufferlist&& data,
     manifest.set_prefix(target_obj.key.name + "." + oid_rand);
 
     r = prepare_head();
-    if (r < 0) {
+    if (r) {
       return r;
     }
     // resubmit the write op on the new head object
     r = writer.write_exclusive(data);
   }
-  if (r < 0) {
+  if (r) {
     return r;
   }
   *processor = &stripe;
-  return 0;
+  return {};
 }
 
-int MultipartObjectProcessor::prepare_head()
+boost::system::error_code
+MultipartObjectProcessor::prepare_head()
 {
   const uint64_t default_stripe_size = store->ctx()->_conf->rgw_obj_stripe_size;
   uint64_t chunk_size;
@@ -368,8 +386,11 @@ int MultipartObjectProcessor::prepare_head()
 
   int r = store->get_max_chunk_size(tail_placement_rule, target_obj, &chunk_size, &alignment);
   if (r < 0) {
-    ldpp_dout(dpp, 0) << "ERROR: unexpected: get_max_chunk_size(): placement_rule=" << tail_placement_rule.to_str() << " obj=" << target_obj << " returned r=" << r << dendl;
-    return r;
+    ldpp_dout(dpp, 0)
+      << "ERROR: unexpected: get_max_chunk_size(): placement_rule="
+      << tail_placement_rule.to_str() << " obj=" << target_obj << " returned r="
+      << r << dendl;
+    return ceph::to_error_code(r);
   }
   store->get_max_aligned_size(default_stripe_size, alignment, &stripe_size);
 
@@ -380,16 +401,16 @@ int MultipartObjectProcessor::prepare_head()
                                 &tail_placement_rule,
                                 target_obj.bucket, target_obj);
   if (r < 0) {
-    return r;
+    return ceph::to_error_code(r);
   }
 
   rgw_raw_obj stripe_obj = manifest_gen.get_cur_obj(store);
   rgw_raw_obj_to_obj(head_obj.bucket, stripe_obj, &head_obj);
   head_obj.index_hash_source = target_obj.key.name;
 
-  r = writer.set_stripe_obj(stripe_obj);
-  if (r < 0) {
-    return r;
+  auto ec = writer.set_stripe_obj(stripe_obj);
+  if (r) {
+    return ec;
   }
   stripe_size = manifest_gen.cur_stripe_max_size();
 
@@ -398,35 +419,37 @@ int MultipartObjectProcessor::prepare_head()
 
   chunk = ChunkProcessor(&writer, chunk_size);
   stripe = StripeProcessor(&chunk, this, max_head_size);
-  return 0;
+  return {};
 }
 
-int MultipartObjectProcessor::prepare()
+boost::system::error_code
+MultipartObjectProcessor::prepare()
 {
   manifest.set_prefix(target_obj.key.name + "." + upload_id);
 
   return prepare_head();
 }
 
-int MultipartObjectProcessor::complete(size_t accounted_size,
-                                       const std::string& etag,
-                                       ceph::real_time *mtime,
-                                       ceph::real_time set_mtime,
-                                       std::map<std::string, bufferlist>& attrs,
-                                       ceph::real_time delete_at,
-                                       const char *if_match,
-                                       const char *if_nomatch,
-                                       const std::string *user_data,
-                                       rgw_zone_set *zones_trace,
-                                       bool *pcanceled)
+boost::system::error_code
+MultipartObjectProcessor::complete(size_t accounted_size,
+				   const std::string& etag,
+				   ceph::real_time *mtime,
+				   ceph::real_time set_mtime,
+				   boost::container::flat_map<std::string, bufferlist>& attrs,
+				   ceph::real_time delete_at,
+				   const char *if_match,
+				   const char *if_nomatch,
+				   const std::string *user_data,
+				   rgw_zone_set *zones_trace,
+				   bool *pcanceled)
 {
-  int r = writer.drain();
-  if (r < 0) {
+  auto r = writer.drain();
+  if (r) {
     return r;
   }
   const uint64_t actual_size = get_actual_size();
-  r = manifest_gen.create_next(actual_size);
-  if (r < 0) {
+  r = ceph::to_error_code(manifest_gen.create_next(actual_size));
+  if (r) {
     return r;
   }
 
@@ -441,8 +464,13 @@ int MultipartObjectProcessor::complete(size_t accounted_size,
   obj_op.meta.zones_trace = zones_trace;
   obj_op.meta.modify_tail = true;
 
-  r = obj_op.write_meta(actual_size, accounted_size, attrs);
-  if (r < 0)
+  std::map<std::string, bufferlist> tm;
+  std::move(attrs.begin(), attrs.end(),
+	    std::inserter(tm, tm.end()));
+  r = ceph::to_error_code(obj_op.write_meta(actual_size, accounted_size,
+					    tm));
+
+  if (r)
     return r;
 
   bufferlist bl;
@@ -465,8 +493,8 @@ int MultipartObjectProcessor::complete(size_t accounted_size,
   info.manifest = manifest;
 
   bool compressed;
-  r = rgw_compression_info_from_attrset(attrs, compressed, info.cs_info);
-  if (r < 0) {
+  r = ceph::to_error_code(rgw_compression_info_from_attrset(tm, compressed, info.cs_info));
+  if (r) {
     ldpp_dout(dpp, 1) << "cannot get compression info" << dendl;
     return r;
   }
@@ -487,7 +515,7 @@ int MultipartObjectProcessor::complete(size_t accounted_size,
   r = sysobj.omap()
       .set_must_exist(true)
       .set(p, bl, null_yield);
-  if (r < 0) {
+  if (r) {
     return r;
   }
 
@@ -498,32 +526,34 @@ int MultipartObjectProcessor::complete(size_t accounted_size,
   if (pcanceled) {
     *pcanceled = obj_op.meta.canceled;
   }
-  return 0;
+  return {};
 }
 
-int AppendObjectProcessor::process_first_chunk(bufferlist &&data, rgw::putobj::DataProcessor **processor)
+boost::system::error_code
+AppendObjectProcessor::process_first_chunk(bufferlist &&data,
+					   rgw::putobj::DataProcessor **processor)
 {
-  int r = writer.write_exclusive(data);
-  if (r < 0) {
+  auto r = writer.write_exclusive(data);
+  if (r) {
     return r;
   }
   *processor = &stripe;
-  return 0;
+  return {};
 }
 
-int AppendObjectProcessor::prepare()
+boost::system::error_code AppendObjectProcessor::prepare()
 {
   RGWObjState *astate;
   int r = store->get_obj_state(&obj_ctx, bucket_info, head_obj, &astate);
   if (r < 0) {
-    return r;
+    return ceph::to_error_code(r);
   }
   cur_size = astate->size;
   *cur_accounted_size = astate->accounted_size;
   if (!astate->exists) {
     if (position != 0) {
       ldpp_dout(dpp, 5) << "ERROR: Append position should be zero" << dendl;
-      return -ERR_POSITION_NOT_EQUAL_TO_LENGTH;
+      return rgw_errc::position_not_equal_to_length;
     } else {
       cur_part_num = 1;
       //set the prefix
@@ -537,20 +567,20 @@ int AppendObjectProcessor::prepare()
     }
   } else {
     // check whether the object appendable
-    map<string, bufferlist>::iterator iter = astate->attrset.find(RGW_ATTR_APPEND_PART_NUM);
+    auto iter = astate->attrset.find(RGW_ATTR_APPEND_PART_NUM);
     if (iter == astate->attrset.end()) {
       ldpp_dout(dpp, 5) << "ERROR: The object is not appendable" << dendl;
-      return -ERR_OBJECT_NOT_APPENDABLE;
+      return rgw_errc::object_not_appendable;
     }
     if (position != *cur_accounted_size) {
       ldpp_dout(dpp, 5) << "ERROR: Append position should be equal to the obj size" << dendl;
-      return -ERR_POSITION_NOT_EQUAL_TO_LENGTH;
+      return rgw_errc::position_not_equal_to_length;
     }
     try {
       decode(cur_part_num, iter->second);
-    } catch (buffer::error& err) {
+    } catch (ceph::buffer::error& err) {
       ldpp_dout(dpp, 5) << "ERROR: failed to decode part num" << dendl;
-      return -EIO;
+      return err.code();
     }
     cur_part_num++;
     //get the current obj etag
@@ -567,18 +597,18 @@ int AppendObjectProcessor::prepare()
 
   r = manifest_gen.create_begin(store->ctx(), &manifest, bucket_info.placement_rule, &tail_placement_rule, head_obj.bucket, head_obj);
   if (r < 0) {
-    return r;
+    return ceph::to_error_code(r);
   }
   rgw_raw_obj stripe_obj = manifest_gen.get_cur_obj(store);
 
   uint64_t chunk_size = 0;
   r = store->get_max_chunk_size(stripe_obj.pool, &chunk_size);
   if (r < 0) {
-    return r;
+    return ceph::to_error_code(r);
   }
-  r = writer.set_stripe_obj(std::move(stripe_obj));
-  if (r < 0) {
-    return r;
+  auto ec = writer.set_stripe_obj(std::move(stripe_obj));
+  if (ec) {
+    return ec;
   }
 
   uint64_t stripe_size = manifest_gen.cur_stripe_max_size();
@@ -590,20 +620,23 @@ int AppendObjectProcessor::prepare()
   chunk = ChunkProcessor(&writer, chunk_size);
   stripe = StripeProcessor(&chunk, this, stripe_size);
 
-  return 0;
+  return {};
 }
 
-int AppendObjectProcessor::complete(size_t accounted_size, const string &etag, ceph::real_time *mtime,
-                                    ceph::real_time set_mtime, map <string, bufferlist> &attrs,
-                                    ceph::real_time delete_at, const char *if_match, const char *if_nomatch,
-                                    const string *user_data, rgw_zone_set *zones_trace, bool *pcanceled)
+boost::system::error_code
+AppendObjectProcessor::complete(size_t accounted_size, const string &etag,
+				ceph::real_time *mtime,
+				ceph::real_time set_mtime,
+				boost::container::flat_map<string, bufferlist> &attrs,
+				ceph::real_time delete_at, const char *if_match, const char *if_nomatch,
+				const string *user_data, rgw_zone_set *zones_trace, bool *pcanceled)
 {
-  int r = writer.drain();
-  if (r < 0)
+  auto r = writer.drain();
+  if (r)
     return r;
   const uint64_t actual_size = get_actual_size();
-  r = manifest_gen.create_next(actual_size);
-  if (r < 0) {
+  r = ceph::to_error_code(manifest_gen.create_next(actual_size));
+  if (r) {
     return r;
   }
   obj_ctx.set_atomic(head_obj);
@@ -649,8 +682,13 @@ int AppendObjectProcessor::complete(size_t accounted_size, const string &etag, c
     etag_bl.append(final_etag_str, strlen(final_etag_str) + 1);
     attrs[RGW_ATTR_ETAG] = etag_bl;
   }
-  r = obj_op.write_meta(actual_size + cur_size, accounted_size + *cur_accounted_size, attrs);
-  if (r < 0) {
+  std::map<std::string, bufferlist> tm;
+  std::move(attrs.begin(), attrs.end(),
+	    std::inserter(tm, tm.end()));
+  r = ceph::to_error_code(obj_op.write_meta(actual_size + cur_size,
+					    accounted_size + *cur_accounted_size,
+					    tm));
+  if (r) {
     return r;
   }
   if (!obj_op.meta.canceled) {
@@ -662,7 +700,7 @@ int AppendObjectProcessor::complete(size_t accounted_size, const string &etag, c
   }
   *cur_accounted_size += accounted_size;
 
-  return 0;
+  return {};
 }
 
 } // namespace rgw::putobj
