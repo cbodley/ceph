@@ -24,28 +24,28 @@ public:
   }
 };
 
-int RGWSI_SysObj_Cache::do_start()
+boost::system::error_code RGWSI_SysObj_Cache::do_start()
 {
-  int r = RGWSI_SysObj_Core::do_start();
-  if (r < 0) {
+  auto r = RGWSI_SysObj_Core::do_start();
+  if (r) {
     return r;
   }
 
   r = notify_svc->start();
-  if (r < 0) {
+  if (r) {
     return r;
   }
 
   assert(notify_svc->is_started());
 
-  cb.reset(new RGWSI_SysObj_Cache_CB(this));
+  cb = std::make_shared<RGWSI_SysObj_Cache_CB>(this);
 
   notify_svc->register_watch_cb(cb.get());
 
-  return 0;
+  return {};
 }
 
-static string normal_name(rgw_pool& pool, const std::string& oid) {
+static std::string normal_name(rgw_pool& pool, const std::string& oid) {
   std::string buf;
   buf.reserve(pool.name.size() + pool.ns.size() + oid.size() + 2);
   buf.append(pool.name).append("+").append(pool.ns).append("+").append(oid);

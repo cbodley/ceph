@@ -12,6 +12,9 @@
  *
  */
 
+#include <optional>
+#include "common/asio_misc.h"
+
 #include "rgw/rgw_aio_throttle.h"
 
 #include <optional>
@@ -23,15 +26,18 @@
 #endif
 #include <gtest/gtest.h>
 
+
 struct RadosEnv : public ::testing::Environment {
  public:
   static constexpr auto poolname = "ceph_test_rgw_throttle";
 
+  static std::optional<ceph::io_context_pool> poolctx;
   static std::optional<RGWSI_RADOS> rados;
 
   void SetUp() override {
-    rados.emplace(g_ceph_context);
-    ASSERT_EQ(0, rados->start());
+    poolctx.emplace(g_ceph_context);
+    rados.emplace(g_ceph_context, poolctx->get_io_context());
+    ASSERT_FALSE(rados->start());
     int r = rados->pool({poolname}).create();
     if (r == -EEXIST)
       r = 0;
@@ -41,6 +47,7 @@ struct RadosEnv : public ::testing::Environment {
     rados.reset();
   }
 };
+std::optional<ceph::io_context_pool> RadosEnv::poolctx;
 std::optional<RGWSI_RADOS> RadosEnv::rados;
 
 auto *const rados_env = ::testing::AddGlobalTestEnvironment(new RadosEnv);

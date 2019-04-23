@@ -23,7 +23,7 @@ class RGWSI_RADOS : public RGWServiceInstance
 {
   librados::Rados rados;
 
-  int do_start() override;
+  boost::system::error_code do_start() override;
 
   int open_pool_ctx(const rgw_pool& pool, librados::IoCtx& io_ctx);
   int pool_iterate(librados::IoCtx& ioctx,
@@ -33,7 +33,8 @@ class RGWSI_RADOS : public RGWServiceInstance
                    bool *is_truncated);
 
 public:
-  RGWSI_RADOS(CephContext *cct) : RGWServiceInstance(cct) {}
+  RGWSI_RADOS(CephContext *cct, boost::asio::io_context& ioc)
+    : RGWServiceInstance(cct, ioc) {}
 
   void init() {}
 

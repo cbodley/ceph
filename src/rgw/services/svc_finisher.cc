@@ -2,12 +2,12 @@
 
 #include "svc_finisher.h"
 
-int RGWSI_Finisher::do_start()
+boost::system::error_code RGWSI_Finisher::do_start()
 {
-  finisher = new Finisher(cct);
+  finisher = std::make_unique<Finisher>(cct);
   finisher->start();
 
-  return 0;
+  return {};
 }
 
 void RGWSI_Finisher::shutdown()
@@ -24,7 +24,7 @@ void RGWSI_Finisher::shutdown()
     for (auto& iter : cbs) {
       iter.second->call();
     }
-    delete finisher;
+    finisher.reset();
   }
 
   finalized = true;
@@ -50,4 +50,3 @@ void RGWSI_Finisher::schedule_context(Context *c)
 {
   finisher->queue(c);
 }
-

@@ -13,9 +13,8 @@
 
 using namespace rgw_zone_defaults;
 
-RGWSI_Zone::RGWSI_Zone(CephContext *cct) : RGWServiceInstance(cct)
-{
-}
+RGWSI_Zone::RGWSI_Zone(CephContext *cct, boost::asio::io_context& ioc)
+  : RGWServiceInstance(cct, ioc) {}
 
 void RGWSI_Zone::init(RGWSI_SysObj *_sysobj_svc,
                       RGWSI_RADOS * _rados_svc,
@@ -47,157 +46,162 @@ bool RGWSI_Zone::zone_syncs_from(const RGWZone& target_zone, const RGWZone& sour
          sync_modules_svc->get_manager()->supports_data_export(source_zone.tier_type);
 }
 
-int RGWSI_Zone::do_start()
+boost::system::error_code RGWSI_Zone::do_start()
 {
-  int ret = sysobj_svc->start();
-  if (ret < 0) {
+  auto ret = sysobj_svc->start();
+  if (ret) {
     return ret;
   }
 
   assert(sysobj_svc->is_started()); /* if not then there's ordering issue */
 
   ret = rados_svc->start();
-  if (ret < 0) {
+  if (ret) {
     return ret;
   }
   ret = sync_modules_svc->start();
-  if (ret < 0) {
-    return ret;
-  }
-  ret = realm->init(cct, sysobj_svc);
-  if (ret < 0 && ret != -ENOENT) {
-    ldout(cct, 0) << "failed reading realm info: ret "<< ret << " " << cpp_strerror(-ret) << dendl;
-    return ret;
-  } else if (ret != -ENOENT) {
-    ldout(cct, 20) << "realm  " << realm->get_name() << " " << realm->get_id() << dendl;
-    ret = current_period->init(cct, sysobj_svc, realm->get_id(), realm->get_name());
-    if (ret < 0 && ret != -ENOENT) {
-      ldout(cct, 0) << "failed reading current period info: " << " " << cpp_strerror(-ret) << dendl;
-      return ret;
-    }
-    ldout(cct, 20) << "current period " << current_period->get_id() << dendl;  
-  }
-
-  ret = replace_region_with_zonegroup();
-  if (ret < 0) {
-    lderr(cct) << "failed converting region to zonegroup : ret "<< ret << " " << cpp_strerror(-ret) << dendl;
+  if (ret) {
     return ret;
   }
 
-  ret = convert_regionmap();
-  if (ret < 0) {
-    lderr(cct) << "failed converting regionmap: " << cpp_strerror(-ret) << dendl;
-    return ret;
-  }
-
-  bool zg_initialized = false;
-
-  if (!current_period->get_id().empty()) {
-    ret = init_zg_from_period(&zg_initialized);
-    if (ret < 0) {
-      return ret;
-    }
-  }
-
-  bool creating_defaults = false;
-  bool using_local = (!zg_initialized);
-  if (using_local) {
-    ldout(cct, 10) << " cannot find current period zonegroup using local zonegroup" << dendl;
-    ret = init_zg_from_local(&creating_defaults);
-    if (ret < 0) {
-      return ret;
-    }
-    // read period_config into current_period
-    auto& period_config = current_period->get_config();
-    ret = period_config.read(sysobj_svc, zonegroup->realm_id);
-    if (ret < 0 && ret != -ENOENT) {
-      ldout(cct, 0) << "ERROR: failed to read period config: "
-          << cpp_strerror(ret) << dendl;
-      return ret;
-    }
-  }
-
-  ldout(cct, 10) << "Cannot find current period zone using local zone" << dendl;
-  if (creating_defaults && cct->_conf->rgw_zone.empty()) {
-    ldout(cct, 10) << " Using default name "<< default_zone_name << dendl;
-    zone_params->set_name(default_zone_name);
-  }
-
-  ret = zone_params->init(cct, sysobj_svc);
-  if (ret < 0 && ret != -ENOENT) {
-    lderr(cct) << "failed reading zone info: ret "<< ret << " " << cpp_strerror(-ret) << dendl;
-    return ret;
-  }
-  auto zone_iter = zonegroup->zones.find(zone_params->get_id());
-  if (zone_iter == zonegroup->zones.end()) {
-    if (using_local) {
-      lderr(cct) << "Cannot find zone id=" << zone_params->get_id() << " (name=" << zone_params->get_name() << ")" << dendl;
-      return -EINVAL;
-    }
-    ldout(cct, 1) << "Cannot find zone id=" << zone_params->get_id() << " (name=" << zone_params->get_name() << "), switching to local zonegroup configuration" << dendl;
-    ret = init_zg_from_local(&creating_defaults);
-    if (ret < 0) {
-      return ret;
-    }
-    zone_iter = zonegroup->zones.find(zone_params->get_id());
-  }
-  if (zone_iter != zonegroup->zones.end()) {
-    *zone_public_config = zone_iter->second;
-    ldout(cct, 20) << "zone " << zone_params->get_name() << dendl;
-  } else {
-    lderr(cct) << "Cannot find zone id=" << zone_params->get_id() << " (name=" << zone_params->get_name() << ")" << dendl;
-    return -EINVAL;
-  }
-
-  zone_short_id = current_period->get_map().get_zone_short_id(zone_params->get_id());
-
-  RGWSyncModuleRef sm;
-  if (!sync_modules_svc->get_manager()->get_module(zone_public_config->tier_type, &sm)) {
-    lderr(cct) << "ERROR: tier type not found: " << zone_public_config->tier_type << dendl;
-    return -EINVAL;
-  }
-
-  writeable_zone = sm->supports_writes();
-
-  /* first build all zones index */
-  for (auto ziter : zonegroup->zones) {
-    const string& id = ziter.first;
-    RGWZone& z = ziter.second;
-    zone_id_by_name[z.name] = id;
-    zone_by_id[id] = z;
-  }
-
-  if (zone_by_id.find(zone_id()) == zone_by_id.end()) {
-    ldout(cct, 0) << "WARNING: could not find zone config in zonegroup for local zone (" << zone_id() << "), will use defaults" << dendl;
-  }
-  *zone_public_config = zone_by_id[zone_id()];
-  for (const auto& ziter : zonegroup->zones) {
-    const string& id = ziter.first;
-    const RGWZone& z = ziter.second;
-    if (id == zone_id()) {
-      continue;
-    }
-    if (z.endpoints.empty()) {
-      ldout(cct, 0) << "WARNING: can't generate connection for zone " << z.id << " id " << z.name << ": no endpoints defined" << dendl;
-      continue;
-    }
-    ldout(cct, 20) << "generating connection object for zone " << z.name << " id " << z.id << dendl;
-    RGWRESTConn *conn = new RGWRESTConn(cct, this, z.id, z.endpoints);
-    zone_conn_map[id] = conn;
-    if (zone_syncs_from(*zone_public_config, z) ||
-        zone_syncs_from(z, *zone_public_config)) {
-      if (zone_syncs_from(*zone_public_config, z)) {
-        data_sync_source_zones.push_back(&z);
+  auto more_init =
+    [this]() {
+      auto ret = realm->init(cct, sysobj_svc);
+      if (ret < 0 && ret != -ENOENT) {
+        ldout(cct, 0) << "failed reading realm info: ret "<< ret << " " << cpp_strerror(-ret) << dendl;
+        return ret;
+      } else if (ret != -ENOENT) {
+        ldout(cct, 20) << "realm  " << realm->get_name() << " " << realm->get_id() << dendl;
+        ret = current_period->init(cct, sysobj_svc, realm->get_id(), realm->get_name());
+        if (ret < 0 && ret != -ENOENT) {
+          ldout(cct, 0) << "failed reading current period info: " << " " << cpp_strerror(-ret) << dendl;
+          return ret;
+        }
+        ldout(cct, 20) << "current period " << current_period->get_id() << dendl;  
       }
-      if (zone_syncs_from(z, *zone_public_config)) {
-        zone_data_notify_to_map[id] = conn;
-      }
-    } else {
-      ldout(cct, 20) << "NOTICE: not syncing to/from zone " << z.name << " id " << z.id << dendl;
-    }
-  }
 
-  return 0;
+      ret = replace_region_with_zonegroup();
+      if (ret < 0) {
+        lderr(cct) << "failed converting region to zonegroup : ret "<< ret << " " << cpp_strerror(-ret) << dendl;
+        return ret;
+      }
+
+      ret = convert_regionmap();
+      if (ret < 0) {
+        lderr(cct) << "failed converting regionmap: " << cpp_strerror(-ret) << dendl;
+        return ret;
+      }
+
+      bool zg_initialized = false;
+
+      if (!current_period->get_id().empty()) {
+        ret = init_zg_from_period(&zg_initialized);
+        if (ret < 0) {
+          return ret;
+        }
+      }
+
+      bool creating_defaults = false;
+      bool using_local = (!zg_initialized);
+      if (using_local) {
+        ldout(cct, 10) << " cannot find current period zonegroup using local zonegroup" << dendl;
+        ret = init_zg_from_local(&creating_defaults);
+        if (ret < 0) {
+          return ret;
+        }
+        // read period_config into current_period
+        auto& period_config = current_period->get_config();
+        ret = period_config.read(sysobj_svc, zonegroup->realm_id);
+        if (ret < 0 && ret != -ENOENT) {
+          ldout(cct, 0) << "ERROR: failed to read period config: "
+                        << cpp_strerror(ret) << dendl;
+          return ret;
+        }
+      }
+
+      ldout(cct, 10) << "Cannot find current period zone using local zone" << dendl;
+      if (creating_defaults && cct->_conf->rgw_zone.empty()) {
+        ldout(cct, 10) << " Using default name "<< default_zone_name << dendl;
+        zone_params->set_name(default_zone_name);
+      }
+
+      ret = zone_params->init(cct, sysobj_svc);
+      if (ret < 0 && ret != -ENOENT) {
+        lderr(cct) << "failed reading zone info: ret "<< ret << " " << cpp_strerror(-ret) << dendl;
+        return ret;
+      }
+      auto zone_iter = zonegroup->zones.find(zone_params->get_id());
+      if (zone_iter == zonegroup->zones.end()) {
+        if (using_local) {
+          lderr(cct) << "Cannot find zone id=" << zone_params->get_id() << " (name=" << zone_params->get_name() << ")" << dendl;
+          return -EINVAL;
+        }
+        ldout(cct, 1) << "Cannot find zone id=" << zone_params->get_id() << " (name=" << zone_params->get_name() << "), switching to local zonegroup configuration" << dendl;
+        ret = init_zg_from_local(&creating_defaults);
+        if (ret < 0) {
+          return ret;
+        }
+        zone_iter = zonegroup->zones.find(zone_params->get_id());
+      }
+      if (zone_iter != zonegroup->zones.end()) {
+        *zone_public_config = zone_iter->second;
+        ldout(cct, 20) << "zone " << zone_params->get_name() << dendl;
+      } else {
+        lderr(cct) << "Cannot find zone id=" << zone_params->get_id() << " (name=" << zone_params->get_name() << ")" << dendl;
+        return -EINVAL;
+      }
+
+      zone_short_id = current_period->get_map().get_zone_short_id(zone_params->get_id());
+
+      RGWSyncModuleRef sm;
+      if (!sync_modules_svc->get_manager()->get_module(zone_public_config->tier_type, &sm)) {
+        lderr(cct) << "ERROR: tier type not found: " << zone_public_config->tier_type << dendl;
+        return -EINVAL;
+      }
+
+      writeable_zone = sm->supports_writes();
+
+      /* first build all zones index */
+      for (auto ziter : zonegroup->zones) {
+        const string& id = ziter.first;
+        RGWZone& z = ziter.second;
+        zone_id_by_name[z.name] = id;
+        zone_by_id[id] = z;
+      }
+
+      if (zone_by_id.find(zone_id()) == zone_by_id.end()) {
+        ldout(cct, 0) << "WARNING: could not find zone config in zonegroup for local zone (" << zone_id() << "), will use defaults" << dendl;
+      }
+      *zone_public_config = zone_by_id[zone_id()];
+      for (const auto& ziter : zonegroup->zones) {
+        const string& id = ziter.first;
+        const RGWZone& z = ziter.second;
+        if (id == zone_id()) {
+          continue;
+        }
+        if (z.endpoints.empty()) {
+          ldout(cct, 0) << "WARNING: can't generate connection for zone " << z.id << " id " << z.name << ": no endpoints defined" << dendl;
+          continue;
+        }
+        ldout(cct, 20) << "generating connection object for zone " << z.name << " id " << z.id << dendl;
+        RGWRESTConn *conn = new RGWRESTConn(cct, this, z.id, z.endpoints);
+        zone_conn_map[id] = conn;
+        if (zone_syncs_from(*zone_public_config, z) ||
+            zone_syncs_from(z, *zone_public_config)) {
+          if (zone_syncs_from(*zone_public_config, z)) {
+            data_sync_source_zones.push_back(&z);
+          }
+          if (zone_syncs_from(z, *zone_public_config)) {
+            zone_data_notify_to_map[id] = conn;
+          }
+        } else {
+          ldout(cct, 20) << "NOTICE: not syncing to/from zone " << z.name << " id " << z.id << dendl;
+        }
+      }
+
+      return 0;
+    };
+    return ceph::to_error_code(more_init());
 }
 
 void RGWSI_Zone::shutdown()

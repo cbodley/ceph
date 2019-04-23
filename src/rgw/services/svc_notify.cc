@@ -1,5 +1,6 @@
 #include "include/random.h"
 #include "common/errno.h"
+#include "common/Finisher.h"
 
 #include "svc_notify.h"
 #include "svc_finisher.h"
@@ -233,21 +234,21 @@ void RGWSI_Notify::finalize_watch()
   delete[] watchers;
 }
 
-int RGWSI_Notify::do_start()
+boost::system::error_code RGWSI_Notify::do_start()
 {
-  int r = zone_svc->start();
-  if (r < 0) {
+  auto r = zone_svc->start();
+  if (r) {
     return r;
   }
 
   assert(zone_svc->is_started()); /* otherwise there's an ordering problem */
 
   r = rados_svc->start();
-  if (r < 0) {
+  if (r) {
     return r;
   }
   r = finisher_svc->start();
-  if (r < 0) {
+  if (r) {
     return r;
   }
 
@@ -255,8 +256,9 @@ int RGWSI_Notify::do_start()
 
   int ret = init_watch();
   if (ret < 0) {
-    lderr(cct) << "ERROR: failed to initialize watch: " << cpp_strerror(-ret) << dendl;
-    return ret;
+    lderr(cct) << "ERROR: failed to initialize watch: " << cpp_strerror(-ret)
+               << dendl;
+    return ceph::to_error_code(ret);
   }
 
   shutdown_cb = new RGWSI_Notify_ShutdownCB(this);
@@ -264,7 +266,7 @@ int RGWSI_Notify::do_start()
   finisher_svc->register_caller(shutdown_cb, &handle);
   finisher_handle = handle;
 
-  return 0;
+  return {};
 }
 
 void RGWSI_Notify::shutdown()

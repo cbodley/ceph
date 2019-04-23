@@ -31,7 +31,7 @@ protected:
     notify_svc = _notify_svc;
   }
 
-  int do_start() override;
+  boost::system::error_code do_start() override;
 
   int raw_stat(const rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime, uint64_t *epoch,
                map<string, bufferlist> *attrs, bufferlist *first_chunk,
@@ -90,7 +90,8 @@ protected:
   void set_enabled(bool status);
 
 public:
-  RGWSI_SysObj_Cache(CephContext *cct) : RGWSI_SysObj_Core(cct) {
+  RGWSI_SysObj_Cache(CephContext *cct, boost::asio::io_context& ioc)
+    : RGWSI_SysObj_Core(cct, ioc) {
     cache.set_ctx(cct);
   }
 

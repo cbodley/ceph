@@ -60,7 +60,7 @@ private:
     rados_svc = _rados_svc;
     finisher_svc = _finisher_svc;
   }
-  int do_start() override;
+  boost::system::error_code do_start() override;
   void shutdown() override;
 
   int unwatch(RGWSI_RADOS::Obj& obj, uint64_t watch_handle);
@@ -79,7 +79,8 @@ private:
 
   void schedule_context(Context *c);
 public:
-  RGWSI_Notify(CephContext *cct): RGWServiceInstance(cct) {}
+  RGWSI_Notify(CephContext *cct, boost::asio::io_context& ioc)
+    : RGWServiceInstance(cct, ioc) {}
   ~RGWSI_Notify();
 
   class CB {

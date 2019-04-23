@@ -9,6 +9,7 @@
 #include "include/rados/librados.hpp"
 #include "include/Context.h"
 #include "common/admin_socket.h"
+#include "common/asio_misc.h"
 #include "common/RefCountedObj.h"
 #include "common/RWLock.h"
 #include "common/ceph_time.h"
@@ -1273,6 +1274,7 @@ class RGWRados : public AdminSocketHook
   void cls_obj_check_mtime(librados::ObjectOperation& op, const real_time& mtime, bool high_precision_time, RGWCheckMTimeType type);
 protected:
   CephContext *cct;
+  std::optional<ceph::io_context_pool> ctxpool;
 
   librados::Rados rados;
 
@@ -1358,6 +1360,9 @@ public:
   void set_context(CephContext *_cct) {
     cct = _cct;
   }
+  void init_ctxpool() {
+    ctxpool.emplace(cct);
+  }
 
   RGWServices svc;
 
@@ -1421,7 +1426,7 @@ public:
     return initialize();
   }
   /** Initialize the RADOS instance and prepare to do other ops */
-  int init_svc(bool raw);
+  boost::system::error_code init_svc(bool raw);
   int init_rados();
   int init_complete();
   int initialize();

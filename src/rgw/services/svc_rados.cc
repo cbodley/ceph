@@ -7,17 +7,17 @@
 
 #define dout_subsys ceph_subsys_rgw
 
-int RGWSI_RADOS::do_start()
+boost::system::error_code RGWSI_RADOS::do_start()
 {
   int ret = rados.init_with_context(cct);
   if (ret < 0) {
-    return ret;
+    return ceph::to_error_code(ret);
   }
   ret = rados.connect();
   if (ret < 0) {
-    return ret;
+    return ceph::to_error_code(ret);
   }
-  return 0;
+  return {};
 }
 
 uint64_t RGWSI_RADOS::instance_id()
@@ -28,7 +28,7 @@ uint64_t RGWSI_RADOS::instance_id()
 int RGWSI_RADOS::open_pool_ctx(const rgw_pool& pool, librados::IoCtx& io_ctx)
 {
   constexpr bool create = true; // create the pool if it doesn't exist
-  return rgw_init_ioctx(get_rados_handle(), pool, io_ctx, create);
+  return rgw_init_ioctx(&rados, pool, io_ctx, create);
 }
 
 int RGWSI_RADOS::pool_iterate(librados::IoCtx& io_ctx,

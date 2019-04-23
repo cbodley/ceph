@@ -18,7 +18,8 @@ class RGWServiceInstance
   friend struct RGWServices_Def;
 
 protected:
-  CephContext *cct;
+  CephContext* cct;
+  boost::asio::io_context& ioc;
 
   enum StartState {
     StateInit = 0,
@@ -27,20 +28,25 @@ protected:
   } start_state{StateInit};
 
   virtual void shutdown() {}
-  virtual int do_start() {
-    return 0;
+  virtual boost::system::error_code do_start() {
+    return {};
   }
 public:
-  RGWServiceInstance(CephContext *_cct) : cct(_cct) {}
+  RGWServiceInstance(CephContext* cct, boost::asio::io_context& ioc)
+    : cct(cct), ioc(ioc) {}
   virtual ~RGWServiceInstance() {}
 
-  int start();
+  boost::system::error_code start();
   bool is_started() {
     return (start_state == StateStarted);
   }
 
-  CephContext *ctx() {
+  CephContext* ctx() {
     return cct;
+  }
+
+  boost::asio::io_context& ioctx() {
+    return ioc;
   }
 };
 
@@ -74,14 +80,15 @@ struct RGWServices_Def
   RGWServices_Def();
   ~RGWServices_Def();
 
-  int init(CephContext *cct, bool have_cache, bool raw_storage);
+  boost::system::error_code init(CephContext *cct, boost::asio::io_context& ioc,
+				 bool have_cache, bool raw_storage);
   void shutdown();
 };
 
 
 struct RGWServices
 {
-  RGWServices_Def _svc;
+  RGWServices_Def svc;
 
   RGWSI_Finisher *finisher{nullptr};
   RGWSI_Notify *notify{nullptr};
@@ -94,17 +101,21 @@ struct RGWServices
   RGWSI_SysObj_Cache *cache{nullptr};
   RGWSI_SysObj_Core *core{nullptr};
 
-  int do_init(CephContext *cct, bool have_cache, bool raw_storage);
+  boost::system::error_code do_init(CephContext* cct,
+				    boost::asio::io_context& ioc,
+				    bool have_cache, bool raw_storage);
 
-  int init(CephContext *cct, bool have_cache) {
-    return do_init(cct, have_cache, false);
+  boost::system::error_code init(CephContext *cct,
+				 boost::asio::io_context& ioc, bool have_cache) {
+    return do_init(cct, ioc, have_cache, false);
   }
 
-  int init_raw(CephContext *cct, bool have_cache) {
-    return do_init(cct, have_cache, true);
+  boost::system::error_code init_raw(CephContext *cct, boost::asio::io_context& ioc,
+				     bool have_cache) {
+    return do_init(cct, ioc, have_cache, true);
   }
   void shutdown() {
-    _svc.shutdown();
+    svc.shutdown();
   }
 };
 

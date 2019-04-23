@@ -211,7 +211,8 @@ protected:
            optional_yield y);
 
 public:
-  RGWSI_SysObj_Core(CephContext *cct): RGWServiceInstance(cct) {}
+  RGWSI_SysObj_Core(CephContext *cct, boost::asio::io_context& ioc)
+    : RGWServiceInstance(cct, ioc) {}
 
   RGWSI_Zone *get_zone_svc() {
     return zone_svc;

@@ -35,10 +35,10 @@ class RGWSI_Zone : public RGWServiceInstance
   bool writeable_zone{false};
 
   RGWRESTConn *rest_master_conn{nullptr};
-  map<string, RGWRESTConn *> zone_conn_map;
+  std::map<std::string, RGWRESTConn *> zone_conn_map;
   std::vector<const RGWZone*> data_sync_source_zones;
-  map<string, RGWRESTConn *> zone_data_notify_to_map;
-  map<string, RGWRESTConn *> zonegroup_conn_map;
+  std::map<std::string, RGWRESTConn *> zone_data_notify_to_map;
+  std::map<std::string, RGWRESTConn *> zonegroup_conn_map;
 
   map<string, string> zone_id_by_name;
   map<string, RGWZone> zone_by_id;
@@ -46,7 +46,7 @@ class RGWSI_Zone : public RGWServiceInstance
   void init(RGWSI_SysObj *_sysobj_svc,
            RGWSI_RADOS *_rados_svc,
            RGWSI_SyncModules *_sync_modules_svc);
-  int do_start() override;
+  boost::system::error_code do_start() override;
   void shutdown() override;
 
   int replace_region_with_zonegroup();
@@ -56,7 +56,7 @@ class RGWSI_Zone : public RGWServiceInstance
 
   int update_placement_map();
 public:
-  RGWSI_Zone(CephContext *cct);
+  RGWSI_Zone(CephContext *cct, boost::asio::io_context& ioc);
   ~RGWSI_Zone();
 
   const RGWZoneParams& get_zone_params() const;

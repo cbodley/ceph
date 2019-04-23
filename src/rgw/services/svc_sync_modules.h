@@ -12,7 +12,8 @@ class RGWSI_SyncModules : public RGWServiceInstance
   RGWSyncModulesManager *sync_modules_manager{nullptr};
 
 public:
-  RGWSI_SyncModules(CephContext *cct): RGWServiceInstance(cct) {}
+  RGWSI_SyncModules(CephContext *cct, boost::asio::io_context& ioc)
+    : RGWServiceInstance(cct, ioc) {}
   ~RGWSI_SyncModules();
 
   RGWSyncModulesManager *get_manager() {
