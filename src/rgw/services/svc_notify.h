@@ -11,12 +11,10 @@ class RGWSI_Zone;
 class RGWSI_Finisher;
 
 class RGWWatcher;
-class RGWSI_Notify_ShutdownCB;
 
 class RGWSI_Notify : public RGWServiceInstance
 {
   friend class RGWWatcher;
-  friend class RGWSI_Notify_ShutdownCB;
   friend class RGWServices_Def;
 
 public:
@@ -46,7 +44,6 @@ private:
   CB *cb{nullptr};
 
   std::optional<int> finisher_handle;
-  RGWSI_Notify_ShutdownCB *shutdown_cb{nullptr};
 
   bool finalized{false};
 
@@ -77,7 +74,6 @@ private:
   int robust_notify(RGWSI_RADOS::Obj& notify_obj, bufferlist& bl,
                     optional_yield y);
 
-  void schedule_context(Context *c);
 public:
   RGWSI_Notify(CephContext *cct, boost::asio::io_context& ioc)
     : RGWServiceInstance(cct, ioc) {}
@@ -99,4 +95,3 @@ public:
 };
 
 #endif
-

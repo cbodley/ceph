@@ -22,16 +22,9 @@ class RGWWatcher : public librados::WatchCtx2 {
   int register_ret{0};
   librados::AioCompletion *register_completion{nullptr};
 
-  class C_ReinitWatch : public Context {
-    RGWWatcher *watcher;
-    public:
-      explicit C_ReinitWatch(RGWWatcher *_watcher) : watcher(_watcher) {}
-      void finish(int r) override {
-        watcher->reinit();
-      }
-  };
 public:
-  RGWWatcher(CephContext *_cct, RGWSI_Notify *s, int i, RGWSI_RADOS::Obj& o) : cct(_cct), svc(s), index(i), obj(o), watch_handle(0) {}
+  RGWWatcher(CephContext *_cct, RGWSI_Notify *s, int i, RGWSI_RADOS::Obj& o)
+    : cct(_cct), svc(s), index(i), obj(o), watch_handle(0) {}
   void handle_notify(uint64_t notify_id,
 		     uint64_t cookie,
 		     uint64_t notifier_id,
@@ -62,7 +55,7 @@ public:
     lderr(cct) << "RGWWatcher::handle_error cookie " << cookie
 			<< " err " << cpp_strerror(err) << dendl;
     svc->remove_watcher(index);
-    svc->schedule_context(new C_ReinitWatch(this));
+    svc->finisher_svc->schedule(std::bind(&RGWWatcher::reinit, this));
   }
 
   void reinit() {
@@ -129,16 +122,6 @@ public:
   }
 };
 
-
-class RGWSI_Notify_ShutdownCB : public RGWSI_Finisher::ShutdownCB
-{
-  RGWSI_Notify *svc;
-public:
-  RGWSI_Notify_ShutdownCB(RGWSI_Notify *_svc) : svc(_svc) {}
-  void call() override {
-    svc->shutdown();
-  }
-};
 
 string RGWSI_Notify::get_control_oid(int i)
 {
@@ -261,10 +244,7 @@ boost::system::error_code RGWSI_Notify::do_start()
     return ceph::to_error_code(ret);
   }
 
-  shutdown_cb = new RGWSI_Notify_ShutdownCB(this);
-  int handle;
-  finisher_svc->register_caller(shutdown_cb, &handle);
-  finisher_handle = handle;
+  finisher_handle = finisher_svc->register_caller([this] { shutdown(); });
 
   return {};
 }
@@ -279,8 +259,6 @@ void RGWSI_Notify::shutdown()
     finisher_svc->unregister_caller(*finisher_handle);
   }
   finalize_watch();
-
-  delete shutdown_cb;
 
   finalized = true;
 }
@@ -470,9 +448,4 @@ void RGWSI_Notify::register_watch_cb(CB *_cb)
   RWLock::WLocker l(watchers_lock);
   cb = _cb;
   _set_enabled(enabled);
-}
-
-void RGWSI_Notify::schedule_context(Context *c)
-{
-  finisher_svc->schedule_context(c);
 }
