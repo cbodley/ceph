@@ -602,7 +602,7 @@ RADOS::executor_type RADOS::get_executor() {
 }
 
 void RADOS::execute(const Object& o, const IOContext& _ioc, ReadOp&& _op,
-		    std::unique_ptr<ReadOp::Completion> c) {
+		    std::unique_ptr<ReadOp::Completion> c, version_t* objver) {
   auto rados = reinterpret_cast<_::RADOS*>(&impl);
   auto oid = reinterpret_cast<const object_t*>(&o.impl);
   auto ioc = reinterpret_cast<const IOContextImpl*>(&_ioc.impl);
@@ -611,11 +611,11 @@ void RADOS::execute(const Object& o, const IOContext& _ioc, ReadOp&& _op,
 
   rados->objecter->read(
     *oid, ioc->oloc, std::move(op->op), ioc->snap_seq, nullptr, flags,
-    resulter(std::move(c)));
+    resulter(std::move(c)), objver);
 }
 
 void RADOS::execute(const Object& o, const IOContext& _ioc, WriteOp&& _op,
-		    std::unique_ptr<WriteOp::Completion> c) {
+		    std::unique_ptr<WriteOp::Completion> c, version_t* objver) {
   auto rados = reinterpret_cast<_::RADOS*>(&impl);
   auto oid = reinterpret_cast<const object_t*>(&o.impl);
   auto ioc = reinterpret_cast<const IOContextImpl*>(&_ioc.impl);
@@ -630,13 +630,14 @@ void RADOS::execute(const Object& o, const IOContext& _ioc, WriteOp&& _op,
   rados->objecter->mutate(
     *oid, ioc->oloc, std::move(op->op), ioc->snapc,
     mtime, flags,
-    resulter(std::move(c)));
+    resulter(std::move(c)), objver);
 }
 
 void RADOS::execute(const Object& o, std::int64_t pool, ReadOp&& _op,
 		    std::unique_ptr<ReadOp::Completion> c,
 		    std::optional<std::string_view> ns,
-		    std::optional<std::string_view> key) {
+		    std::optional<std::string_view> key,
+		    version_t* objver) {
   auto rados = reinterpret_cast<_::RADOS*>(&impl);
   auto oid = reinterpret_cast<const object_t*>(&o.impl);
   auto op = reinterpret_cast<OpImpl*>(&_op.impl);
@@ -650,13 +651,14 @@ void RADOS::execute(const Object& o, std::int64_t pool, ReadOp&& _op,
 
   rados->objecter->read(
     *oid, oloc, std::move(op->op), CEPH_NOSNAP, nullptr, flags,
-    resulter(std::move(c)));
+    resulter(std::move(c)), objver);
 }
 
 void RADOS::execute(const Object& o, std::int64_t pool, WriteOp&& _op,
 		    std::unique_ptr<WriteOp::Completion> c,
 		    std::optional<std::string_view> ns,
-		    std::optional<std::string_view> key) {
+		    std::optional<std::string_view> key,
+		    version_t* objver) {
   auto rados = reinterpret_cast<_::RADOS*>(&impl);
   auto oid = reinterpret_cast<const object_t*>(&o.impl);
   auto op = reinterpret_cast<OpImpl*>(&_op.impl);
@@ -677,7 +679,7 @@ void RADOS::execute(const Object& o, std::int64_t pool, WriteOp&& _op,
   rados->objecter->mutate(
     *oid, oloc, std::move(op->op), {},
     mtime, flags,
-    resulter(std::move(c)));
+    resulter(std::move(c)), objver);
 }
 
 boost::uuids::uuid RADOS::get_fsid() const noexcept {

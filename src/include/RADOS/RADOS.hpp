@@ -353,21 +353,23 @@ public:
 
   template<typename CompletionToken>
   auto execute(const Object& o, const IOContext& ioc, ReadOp&& op,
-	       CompletionToken&& token) {
+	       CompletionToken&& token, version_t* objver = nullptr) {
     boost::asio::async_completion<CompletionToken, Op::Signature> init(token);
     execute(o, ioc, std::move(op),
 	    ReadOp::Completion::create(get_executor(),
-				       std::move(init.completion_handler)));
+				       std::move(init.completion_handler)),
+	    objver);
     return init.result.get();
   }
 
   template<typename CompletionToken>
   auto execute(const Object& o, const IOContext& ioc, WriteOp&& op,
-	       CompletionToken&& token) {
+	       CompletionToken&& token, version_t* objver = nullptr) {
     boost::asio::async_completion<CompletionToken, Op::Signature> init(token);
     execute(o, ioc, std::move(op),
 	    Op::Completion::create(get_executor(),
-				   std::move(init.completion_handler)));
+				   std::move(init.completion_handler)),
+	    objver);
     return init.result.get();
   }
 
@@ -376,12 +378,13 @@ public:
 	       ReadOp&& op,
 	       CompletionToken&& token,
 	       std::optional<std::string_view> ns = {},
-	       std::optional<std::string_view> key = {}) {
+	       std::optional<std::string_view> key = {},
+	       version_t* objver = nullptr) {
     boost::asio::async_completion<CompletionToken, Op::Signature> init(token);
     execute(o, pool, std::move(op),
 	    ReadOp::Completion::create(get_executor(),
 				       std::move(init.completion_handler)),
-	    ns, key);
+	    ns, key, objver);
     return init.result.get();
   }
 
@@ -389,12 +392,13 @@ public:
   auto execute(const Object& o, std::int64_t pool, WriteOp&& op,
 	       CompletionToken&& token,
 	       std::optional<std::string_view> ns = {},
-	       std::optional<std::string_view> key = {}) {
+	       std::optional<std::string_view> key = {},
+	       version_t* objver = nullptr) {
     boost::asio::async_completion<CompletionToken, Op::Signature> init(token);
     execute(o, pool, std::move(op),
 	    Op::Completion::create(get_executor(),
 				   std::move(init.completion_handler)),
-	    ns, key);
+	    ns, key, objver);
     return init.result.get();
   }
 
@@ -716,20 +720,22 @@ public:
 private:
 
   void execute(const Object& o, const IOContext& ioc, ReadOp&& op,
-	       std::unique_ptr<Op::Completion> c);
+	       std::unique_ptr<Op::Completion> c, version_t* objver);
 
   void execute(const Object& o, const IOContext& ioc, WriteOp&& op,
-	       std::unique_ptr<Op::Completion> c);
+	       std::unique_ptr<Op::Completion> c, version_t* objver);
 
   void execute(const Object& o, std::int64_t pool, ReadOp&& op,
 	       std::unique_ptr<Op::Completion> c,
 	       std::optional<std::string_view> ns,
-	       std::optional<std::string_view> key);
+	       std::optional<std::string_view> key,
+	       version_t* objver);
 
   void execute(const Object& o, std::int64_t pool, WriteOp&& op,
 	       std::unique_ptr<Op::Completion> c,
 	       std::optional<std::string_view> ns,
-	       std::optional<std::string_view> key);
+	       std::optional<std::string_view> key,
+	       version_t* objver);
 
   void lookup_pool(std::string name, std::unique_ptr<LookupPoolComp> c);
   void create_pool_snap(int64_t pool, std::string_view snapName,
