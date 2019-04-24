@@ -65,6 +65,15 @@ Object& Object::operator =(const Object& o) {
     *reinterpret_cast<const object_t*>(&o.impl);
   return *this;
 }
+Object::Object(Object&& o) {
+  static_assert(impl_size >= sizeof(object_t));
+  new (&impl) object_t(std::move(*reinterpret_cast<object_t*>(&o.impl)));
+}
+Object& Object::operator =(Object&& o) {
+  *reinterpret_cast<object_t*>(&impl) =
+    std::move(*reinterpret_cast<object_t*>(&o.impl));
+  return *this;
+}
 
 Object::operator std::string_view() const {
   return std::string_view(reinterpret_cast<const object_t*>(&impl)->name);

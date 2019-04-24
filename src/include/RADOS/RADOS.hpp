@@ -90,8 +90,8 @@ public:
   Object(const Object& o);
   Object& operator =(const Object& o);
 
-  Object(Object&& o) = delete;
-  Object& operator =(Object&& o) = delete;
+  Object(Object&& o);
+  Object& operator =(Object&& o);
 
   operator std::string_view() const;
 
