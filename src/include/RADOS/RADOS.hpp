@@ -716,6 +716,7 @@ public:
 					    std::move(init.completion_handler)));
     return init.result.get();
   }
+  uint64_t instance_id() const;
 
 private:
 

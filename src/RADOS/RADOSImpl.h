@@ -92,6 +92,9 @@ public:
   mon_feature_t get_required_monitor_features() const {
     return monclient.with_monmap(std::mem_fn(&MonMap::get_required_features));
   }
+  int get_instance_id() const {
+    return instance_id;
+  }
 };
 }
 }

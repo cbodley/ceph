@@ -1333,6 +1333,11 @@ void RADOS::enable_application(std::string_view pool, std::string_view app_name,
 	  });
   }
 }
+
+uint64_t RADOS::instance_id() const {
+  auto rados = reinterpret_cast<const _::RADOS*>(&impl);
+  return rados->get_instance_id();
+}
 }
 
 namespace std {
