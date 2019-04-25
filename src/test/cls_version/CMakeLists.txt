@@ -4,6 +4,7 @@ add_executable(ceph_test_cls_version
   )
 target_link_libraries(ceph_test_cls_version
   librados
+  libRADOS
   cls_version_client
   global
   ${UNITTEST_LIBS}
