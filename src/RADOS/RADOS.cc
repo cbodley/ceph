@@ -399,14 +399,6 @@ void Op::cmp_omap(const boost::container::flat_map<
 
 // ---
 
-ReadOp RADOS::make_ReadOp() {
-  return ReadOp{};
-}
-
-WriteOp RADOS::make_WriteOp() {
-  return WriteOp{};
-}
-
 // ReadOp / WriteOp
 
 ReadOp::ReadOp() = default;

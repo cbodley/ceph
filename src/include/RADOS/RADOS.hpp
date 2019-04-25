@@ -13,6 +13,9 @@
  *
  */
 
+#ifndef RADOS_UNLEASHED_HPP
+#define RADOS_UNLEASHED_HPP
+
 #include <cstddef>
 #include <memory>
 #include <tuple>
@@ -56,9 +59,6 @@
 #include "osd/osd_types.h"
 
 #include "librados/ListObjectImpl.h"
-
-#ifndef RADOS_UNLEASHED_HPP
-#define RADOS_UNLEASHED_HPP
 
 class CephContext;
 
@@ -249,7 +249,6 @@ public:
 	    const bufferlist& inbl,
 	    ceph::buffer::list* out);
 
-private:
   ReadOp();
 };
 
@@ -288,7 +287,6 @@ public:
 		      uint64_t expected_write_size,
 		      uint32_t flags);
   void exec(std::string_view cls, std::string_view method, const bufferlist& inbl);
-private:
   WriteOp();
 };
 
@@ -344,9 +342,6 @@ public:
   RADOS& operator =(RADOS&&) = delete;
 
   CephContext* cct();
-
-  ReadOp make_ReadOp();
-  WriteOp make_WriteOp();
 
   using executor_type = boost::asio::io_context::executor_type;
   executor_type get_executor();
