@@ -403,42 +403,46 @@ void Op::cmp_omap(const boost::container::flat_map<
 
 ReadOp::ReadOp() = default;
 
-void ReadOp::read(size_t off, uint64_t len, ceph::buffer::list* out) {
-  reinterpret_cast<OpImpl*>(&impl)->op.read(off, len, nullptr, out);
+void ReadOp::read(size_t off, uint64_t len, ceph::buffer::list* out,
+		  boost::system::error_code* ec) {
+  reinterpret_cast<OpImpl*>(&impl)->op.read(off, len, ec, out);
 }
 
-void ReadOp::getxattr(std::string_view name, ceph::buffer::list* out) {
-  reinterpret_cast<OpImpl*>(&impl)->op.getxattr(name, nullptr, out);
+void ReadOp::get_xattr(std::string_view name, ceph::buffer::list* out,
+		       boost::system::error_code* ec) {
+  reinterpret_cast<OpImpl*>(&impl)->op.getxattr(name, ec, out);
 }
 
-void ReadOp::get_omap_header(ceph::buffer::list* out) {
-  reinterpret_cast<OpImpl*>(&impl)->op.omap_get_header(nullptr, out);
+void ReadOp::get_omap_header(ceph::buffer::list* out,
+			     boost::system::error_code* ec) {
+  reinterpret_cast<OpImpl*>(&impl)->op.omap_get_header(ec, out);
 }
 
 void ReadOp::sparse_read(uint64_t off, uint64_t len, ceph::buffer::list* out,
 			 std::vector<std::pair<std::uint64_t,
-			                       std::uint64_t>>* extents) {
-  reinterpret_cast<OpImpl*>(&impl)->op.sparse_read(off, len, nullptr, extents,
-						   out);
+			             std::uint64_t>>* extents,
+			 boost::system::error_code* ec) {
+  reinterpret_cast<OpImpl*>(&impl)->op.sparse_read(off, len, ec, extents, out);
 }
 
-void ReadOp::stat(std::uint64_t* size, ceph::real_time* mtime) {
-  reinterpret_cast<OpImpl*>(&impl)->op.stat(
-    size, mtime,
-    static_cast<boost::system::error_code*>(nullptr));
+void ReadOp::stat(std::uint64_t* size, ceph::real_time* mtime,
+		  boost::system::error_code* ec) {
+  reinterpret_cast<OpImpl*>(&impl)->op.stat(size, mtime, ec);
 }
 
 void ReadOp::get_omap_keys(std::optional<std::string_view> start_after,
 			   std::uint64_t max_return,
 			   boost::container::flat_set<std::string>* keys,
-			   bool* done) {
+			   bool* done,
+			   boost::system::error_code* ec) {
   reinterpret_cast<OpImpl*>(&impl)->op.omap_get_keys(start_after, max_return,
-						     nullptr, keys, done);
+						     ec, keys, done);
 }
 
 void ReadOp::get_xattrs(boost::container::flat_map<std::string,
-			                           ceph::buffer::list>* kv) {
-  reinterpret_cast<OpImpl*>(&impl)->op.getxattrs(nullptr, kv);
+			                           ceph::buffer::list>* kv,
+			boost::system::error_code* ec) {
+  reinterpret_cast<OpImpl*>(&impl)->op.getxattrs(ec, kv);
 }
 
 void ReadOp::get_omap_vals(std::optional<std::string_view> start_after,
@@ -446,32 +450,34 @@ void ReadOp::get_omap_vals(std::optional<std::string_view> start_after,
 			   uint64_t max_return,
 			   boost::container::flat_map<std::string,
 						      ceph::buffer::list>* kv,
-			   bool* done) {
+			   bool* done,
+			   boost::system::error_code* ec) {
   reinterpret_cast<OpImpl*>(&impl)->op.omap_get_vals(start_after, filter_prefix,
-						     max_return,
-						     nullptr, kv, done);
+						     max_return, ec, kv, done);
 }
 
 void ReadOp::get_omap_vals_by_keys(
   const boost::container::flat_set<std::string>& keys,
-  boost::container::flat_map<std::string, ceph::buffer::list>* kv) {
-  reinterpret_cast<OpImpl*>(&impl)->op.omap_get_vals_by_keys(keys, nullptr, kv);
+  boost::container::flat_map<std::string, ceph::buffer::list>* kv,
+  boost::system::error_code* ec) {
+  reinterpret_cast<OpImpl*>(&impl)->op.omap_get_vals_by_keys(keys, ec, kv);
 }
 
-void ReadOp::list_watchers(std::vector<obj_watch_t>* watchers) {
-  reinterpret_cast<OpImpl*>(&impl)->
-    op.list_watchers(watchers,
-		     static_cast<boost::system::error_code*>(nullptr));
+void ReadOp::list_watchers(std::vector<obj_watch_t>* watchers,
+			   boost::system::error_code* ec) {
+  reinterpret_cast<OpImpl*>(&impl)-> op.list_watchers(watchers, ec);
 }
 
-void ReadOp::list_snaps(librados::snap_set_t* snaps) {
-  reinterpret_cast<OpImpl*>(&impl)->op.list_snaps(snaps, nullptr, nullptr);
+void ReadOp::list_snaps(librados::snap_set_t* snaps,
+			boost::system::error_code* ec) {
+  reinterpret_cast<OpImpl*>(&impl)->op.list_snaps(snaps, nullptr, ec);
 }
 
 void ReadOp::exec(std::string_view cls, std::string_view method,
 		  const bufferlist& inbl,
-		  ceph::buffer::list* out) {
-  reinterpret_cast<OpImpl*>(&impl)->op.call(cls, method, inbl, nullptr, out);
+		  ceph::buffer::list* out,
+		  boost::system::error_code* ec) {
+  reinterpret_cast<OpImpl*>(&impl)->op.call(cls, method, inbl, ec, out);
 }
 
 // WriteOp
@@ -555,8 +561,8 @@ void WriteOp::set_alloc_hint(uint64_t expected_object_size,
 }
 
 void WriteOp::exec(std::string_view cls, std::string_view method,
-		   const bufferlist& inbl) {
-  reinterpret_cast<OpImpl*>(&impl)->op.call(cls, method, inbl, nullptr);
+		   const bufferlist& inbl, boost::system::error_code* ec) {
+  reinterpret_cast<OpImpl*>(&impl)->op.call(cls, method, inbl, ec);
 }
 
 

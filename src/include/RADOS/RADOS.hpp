@@ -212,42 +212,56 @@ public:
   using Op::Op;
   using Op::operator =;
 
-  void read(size_t off, uint64_t len, ceph::buffer::list* out);
-  void getxattr(std::string_view name, ceph::buffer::list* out);
-  void get_omap_header(ceph::buffer::list*);
+  void read(size_t off, uint64_t len, ceph::buffer::list* out,
+	    boost::system::error_code* ec = nullptr);
+  void get_xattr(std::string_view name, ceph::buffer::list* out,
+		 boost::system::error_code* ec = nullptr);
+  void get_omap_header(ceph::buffer::list*,
+		       boost::system::error_code* ec = nullptr);
 
   void sparse_read(uint64_t off, uint64_t len,
 		   ceph::buffer::list* out,
-		   std::vector<std::pair<std::uint64_t, std::uint64_t>>* extents);
+		   std::vector<std::pair<std::uint64_t, std::uint64_t>>* extents,
+		   boost::system::error_code* ec = nullptr);
 
-  void stat(std::uint64_t* size, ceph::real_time* mtime);
+  void stat(std::uint64_t* size, ceph::real_time* mtime,
+	    boost::system::error_code* ec = nullptr);
 
   void get_omap_keys(std::optional<std::string_view> start_after,
 		     std::uint64_t max_return,
 		     boost::container::flat_set<std::string>* keys,
-		     bool* truncated);
+		     bool* truncated,
+		     boost::system::error_code* ec = nullptr);
 
 
   void get_xattrs(boost::container::flat_map<std::string,
-					     ceph::buffer::list>* kv);
+		                             ceph::buffer::list>* kv,
+		     boost::system::error_code* ec = nullptr);
 
   void get_omap_vals(std::optional<std::string_view> start_after,
 		     std::optional<std::string_view> filter_prefix,
 		     uint64_t max_return,
 		     boost::container::flat_map<std::string,
 		                                ceph::buffer::list>* kv,
-		     bool* truncated);
+		     bool* truncated,
+		     boost::system::error_code* ec = nullptr);
+
 
   void get_omap_vals_by_keys(const boost::container::flat_set<std::string>& keys,
 			     boost::container::flat_map<std::string,
-			                                ceph::buffer::list>* kv);
+			                                ceph::buffer::list>* kv,
+			     boost::system::error_code* ec = nullptr);
 
-  void list_watchers(std::vector<obj_watch_t>* watchers);
-  void list_snaps(librados::snap_set_t* snaps);
+  void list_watchers(std::vector<obj_watch_t>* watchers,
+		     boost::system::error_code* ec = nullptr);
+
+  void list_snaps(librados::snap_set_t* snaps,
+		  boost::system::error_code* ec = nullptr);
 
   void exec(std::string_view cls, std::string_view method,
 	    const bufferlist& inbl,
-	    ceph::buffer::list* out);
+	    ceph::buffer::list* out,
+	    boost::system::error_code* ec = nullptr);
 
   ReadOp();
 };
@@ -286,7 +300,8 @@ public:
   void set_alloc_hint(uint64_t expected_object_size,
 		      uint64_t expected_write_size,
 		      uint32_t flags);
-  void exec(std::string_view cls, std::string_view method, const bufferlist& inbl);
+  void exec(std::string_view cls, std::string_view method,
+	    const bufferlist& inbl, boost::system::error_code* ec = nullptr);
   WriteOp();
 };
 
