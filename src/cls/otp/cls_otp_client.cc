@@ -17,7 +17,6 @@
 #include "include/rados/librados.hpp"
 #include "include/utime.h"
  
-using namespace librados;
 
 #include "cls/otp/cls_otp_ops.h"
 #include "cls/otp/cls_otp_client.h"
@@ -27,6 +26,7 @@ using namespace librados;
 namespace rados {
   namespace cls {
     namespace otp {
+using namespace librados;
 
       void OTP::create(librados::ObjectWriteOperation *rados_op,
                        const otp_info_t& config) {
