@@ -84,7 +84,7 @@ struct ObjectOperation {
   ObjectOperation& operator =(ObjectOperation&&) = default;
   ~ObjectOperation() = default;
 
-  size_t size() {
+  size_t size() const {
     return ops.size();
   }
 

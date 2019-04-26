@@ -397,6 +397,10 @@ void Op::cmp_omap(const boost::container::flat_map<
   reinterpret_cast<OpImpl*>(&impl)->op.omap_cmp(assertions, nullptr);
 }
 
+std::size_t Op::size() const {
+  return reinterpret_cast<const OpImpl*>(&impl)->op.size();
+}
+
 // ---
 
 // ReadOp / WriteOp

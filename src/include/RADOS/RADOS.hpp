@@ -193,6 +193,7 @@ public:
 		  std::string,
 		  std::pair<ceph::buffer::list, int>>& assertions);
 
+  std::size_t size() const;
   using Signature = void(boost::system::error_code);
   using Completion = ceph::async::Completion<Signature>;
 protected:
