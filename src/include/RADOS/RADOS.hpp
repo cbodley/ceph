@@ -165,6 +165,15 @@ private:
   std::aligned_storage_t<impl_size> impl;
 };
 
+enum class cmpxattr_op : std::uint8_t {
+  eq  = 1,
+  ne  = 2,
+  gt  = 3,
+  gte = 4,
+  lt  = 5,
+  lte = 6
+};
+
 class Op {
   friend RADOS;
 
@@ -185,8 +194,8 @@ public:
   void set_fadvise_nocache();
 
   void cmpext(uint64_t off, buffer::list&& cmp_bl, std::size_t* s);
-  void cmpxattr(std::string_view name, uint8_t op, const bufferlist& val);
-  void cmpxattr(std::string_view name, uint8_t op, std::uint64_t val);
+  void cmpxattr(std::string_view name, cmpxattr_op op, const bufferlist& val);
+  void cmpxattr(std::string_view name, cmpxattr_op op, std::uint64_t val);
   void assert_version(uint64_t ver);
   void assert_exists();
   void cmp_omap(const boost::container::flat_map<

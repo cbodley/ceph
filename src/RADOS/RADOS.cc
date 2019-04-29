@@ -371,15 +371,15 @@ void Op::cmpext(uint64_t off, bufferlist&& cmp_bl, std::size_t* s) {
   reinterpret_cast<OpImpl*>(&impl)->op.cmpext(off, std::move(cmp_bl), nullptr,
 					      s);
 }
-void Op::cmpxattr(std::string_view name, uint8_t op, const bufferlist& val) {
+void Op::cmpxattr(std::string_view name, cmpxattr_op op, const bufferlist& val) {
   reinterpret_cast<OpImpl*>(&impl)->
-    op.cmpxattr(name, op,CEPH_OSD_CMPXATTR_MODE_STRING, val);
+    op.cmpxattr(name, std::uint8_t(op), CEPH_OSD_CMPXATTR_MODE_STRING, val);
 }
-void Op::cmpxattr(std::string_view name, uint8_t op, std::uint64_t val) {
+void Op::cmpxattr(std::string_view name, cmpxattr_op op, std::uint64_t val) {
   bufferlist bl;
   encode(val, bl);
   reinterpret_cast<OpImpl*>(&impl)->
-    op.cmpxattr(name, op, CEPH_OSD_CMPXATTR_MODE_U64, bl);
+    op.cmpxattr(name, std::uint8_t(op), CEPH_OSD_CMPXATTR_MODE_U64, bl);
 }
 
 void Op::assert_version(uint64_t ver) {
