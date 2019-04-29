@@ -217,6 +217,25 @@ struct ObjectOperation {
     osd_op.indata.append(method.data(), osd_op.op.cls.method_len);
     osd_op.indata.append(indata);
   }
+  void add_call(int op, std::string_view cname, std::string_view method,
+		const ceph::buffer::list &indata,
+		fu2::unique_function<void(boost::system::error_code,
+					  const ceph::buffer::list&) &&> f) {
+    OSDOp& osd_op = add_op(op);
+
+    set_handler([f = std::move(f)](boost::system::error_code ec,
+				   int,
+				   const ceph::buffer::list& bl) mutable {
+		  std::move(f)(ec, bl);
+		});
+
+    osd_op.op.cls.class_len = cname.size();
+    osd_op.op.cls.method_len = method.size();
+    osd_op.op.cls.indata_len = indata.length();
+    osd_op.indata.append(cname.data(), osd_op.op.cls.class_len);
+    osd_op.indata.append(method.data(), osd_op.op.cls.method_len);
+    osd_op.indata.append(indata);
+  }
   void add_pgls(int op, uint64_t count, collection_list_handle_t cookie,
 		epoch_t start_epoch) {
     using ceph::encode;
@@ -1216,6 +1235,12 @@ struct ObjectOperation {
 	    boost::system::error_code* ec, ceph::buffer::list *outdata) {
     add_call(CEPH_OSD_OP_CALL, cname, method, indata, outdata, nullptr, nullptr);
     out_ec.back() = ec;
+  }
+  void call(std::string_view cname, std::string_view method,
+	    const ceph::buffer::list& indata,
+	    fu2::unique_function<void (boost::system::error_code,
+				       const ceph::buffer::list&) &&> f) {
+    add_call(CEPH_OSD_OP_CALL, cname, method, indata, std::move(f));
   }
 
   // watch/notify

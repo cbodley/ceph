@@ -482,6 +482,13 @@ void ReadOp::exec(std::string_view cls, std::string_view method,
   reinterpret_cast<OpImpl*>(&impl)->op.call(cls, method, inbl, ec, out);
 }
 
+void ReadOp::exec(std::string_view cls, std::string_view method,
+		  const bufferlist& inbl,
+		  fu2::unique_function<void (boost::system::error_code,
+					     const ceph::buffer::list&) &&> f) {
+  reinterpret_cast<OpImpl*>(&impl)->op.call(cls, method, inbl, std::move(f));
+}
+
 // WriteOp
 
 void WriteOp::set_mtime(ceph::real_time t) {

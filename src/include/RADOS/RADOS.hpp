@@ -267,6 +267,10 @@ public:
 	    const bufferlist& inbl,
 	    ceph::buffer::list* out,
 	    boost::system::error_code* ec = nullptr);
+  void exec(std::string_view cls, std::string_view method,
+	    const bufferlist& inbl,
+	    fu2::unique_function<void (boost::system::error_code,
+				       const ceph::buffer::list&) &&> f);
 };
 
 class WriteOp : public Op {
