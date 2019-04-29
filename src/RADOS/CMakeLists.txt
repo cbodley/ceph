@@ -7,7 +7,7 @@ add_library(libRADOS STATIC
   $<TARGET_OBJECTS:RADOS_api_obj>
   $<TARGET_OBJECTS:RADOS_objs>)
 target_link_libraries(libRADOS PRIVATE
-  osdc ceph-common cls_lock_client
+  osdc ceph-common cls_lock_client fmt::fmt
   ${BLKID_LIBRARIES} ${CRYPTO_LIBS} ${EXTRALIBS})
 
 # if(ENABLE_SHARED)
