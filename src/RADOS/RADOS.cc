@@ -405,8 +405,6 @@ std::size_t Op::size() const {
 
 // ReadOp / WriteOp
 
-ReadOp::ReadOp() = default;
-
 void ReadOp::read(size_t off, uint64_t len, ceph::buffer::list* out,
 		  boost::system::error_code* ec) {
   reinterpret_cast<OpImpl*>(&impl)->op.read(off, len, ec, out);
@@ -485,8 +483,6 @@ void ReadOp::exec(std::string_view cls, std::string_view method,
 }
 
 // WriteOp
-
-WriteOp::WriteOp() = default;
 
 void WriteOp::set_mtime(ceph::real_time t) {
   auto o = reinterpret_cast<OpImpl*>(&impl);

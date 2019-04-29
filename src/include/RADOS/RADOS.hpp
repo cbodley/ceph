@@ -210,8 +210,12 @@ class ReadOp : public Op {
 
 public:
 
-  using Op::Op;
-  using Op::operator =;
+  ReadOp() = default;
+  ReadOp(const ReadOp&) = delete;
+  ReadOp(ReadOp&&) = default;
+
+  ReadOp& operator =(const ReadOp&) = delete;
+  ReadOp& operator =(ReadOp&&) = default;
 
   void read(size_t off, uint64_t len, ceph::buffer::list* out,
 	    boost::system::error_code* ec = nullptr);
@@ -263,23 +267,18 @@ public:
 	    const bufferlist& inbl,
 	    ceph::buffer::list* out,
 	    boost::system::error_code* ec = nullptr);
-
-  ReadOp();
 };
 
 class WriteOp : public Op {
   friend RADOS;
 public:
 
-  using Op::Op;
-  using Op::operator =;
-
+  WriteOp() = default;
   WriteOp(const WriteOp&) = delete;
-  WriteOp& operator =(const WriteOp&) = delete;
-  WriteOp(WriteOp&&);
-  WriteOp& operator =(WriteOp&&);
+  WriteOp(WriteOp&&) = default;
 
-  ~WriteOp();
+  WriteOp& operator =(const WriteOp&) = delete;
+  WriteOp& operator =(WriteOp&&) = default;
 
   void set_mtime(ceph::real_time t);
   void create(bool exclusive);
@@ -303,7 +302,6 @@ public:
 		      uint32_t flags);
   void exec(std::string_view cls, std::string_view method,
 	    const bufferlist& inbl, boost::system::error_code* ec = nullptr);
-  WriteOp();
 };
 
 // Come back and refactor this layer properly at some point.
