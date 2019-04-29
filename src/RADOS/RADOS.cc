@@ -613,6 +613,7 @@ RADOS::executor_type RADOS::get_executor() {
 }
 
 void RADOS::execute(const Object& o, const IOContext& _ioc, ReadOp&& _op,
+		    ceph::buffer::list* bl,
 		    std::unique_ptr<ReadOp::Completion> c, version_t* objver) {
   auto rados = reinterpret_cast<_::RADOS*>(&impl);
   auto oid = reinterpret_cast<const object_t*>(&o.impl);
@@ -621,7 +622,7 @@ void RADOS::execute(const Object& o, const IOContext& _ioc, ReadOp&& _op,
   auto flags = 0; // Should be in Op.
 
   rados->objecter->read(
-    *oid, ioc->oloc, std::move(op->op), ioc->snap_seq, nullptr, flags,
+    *oid, ioc->oloc, std::move(op->op), ioc->snap_seq, bl, flags,
     resulter(std::move(c)), objver);
 }
 
@@ -645,6 +646,7 @@ void RADOS::execute(const Object& o, const IOContext& _ioc, WriteOp&& _op,
 }
 
 void RADOS::execute(const Object& o, std::int64_t pool, ReadOp&& _op,
+		    ceph::buffer::list* bl,
 		    std::unique_ptr<ReadOp::Completion> c,
 		    std::optional<std::string_view> ns,
 		    std::optional<std::string_view> key,
@@ -661,7 +663,7 @@ void RADOS::execute(const Object& o, std::int64_t pool, ReadOp&& _op,
     oloc.key = *key;
 
   rados->objecter->read(
-    *oid, oloc, std::move(op->op), CEPH_NOSNAP, nullptr, flags,
+    *oid, oloc, std::move(op->op), CEPH_NOSNAP, bl, flags,
     resulter(std::move(c)), objver);
 }
 
