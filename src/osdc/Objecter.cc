@@ -17,6 +17,7 @@
 
 #include "Objecter.h"
 #include "osd/OSDMap.h"
+#include "osd/error_code.h"
 #include "Filer.h"
 
 #include "mon/MonClient.h"
@@ -3458,9 +3459,10 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
     if (*pr)
       **pr = ceph_to_hostos_errno(p->rval);
     if (*pe)
-      **pe = ceph::to_error_code(p->rval);
+      **pe = boost::system::error_code(-p->rval, osd_category());
     if (*ph) {
-      std::move((*ph))(ceph::to_error_code(p->rval), p->rval, p->outdata);
+      std::move((*ph))(boost::system::error_code(-p->rval, osd_category()),
+		       p->rval, p->outdata);
     }
   }
 
