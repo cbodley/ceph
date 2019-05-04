@@ -182,7 +182,7 @@ boost::system::error_code RGWSI_RADOS::Obj::unwatch(uint64_t handle,
   }
 #endif
   ceph::waiter<boost::system::error_code> w;
-  // rados.unwatch(handle, ioc, w.ref());
+  rados.unwatch(handle, ioc, w.ref());
   return w.wait();
 }
 
