@@ -1677,6 +1677,7 @@ int RGWRados::initialize()
     cct->_conf.get_val<double>("rgw_inject_notify_timeout_probability");
   max_notify_retries = cct->_conf.get_val<uint64_t>("rgw_max_notify_retries");
 
+  init_ctxpool();
   auto ec = init_svc(false);
   if (ec) {
     ldout(cct, 0) << "ERROR: failed to init services (ret=" << ec << ")" << dendl;
