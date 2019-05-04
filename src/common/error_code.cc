@@ -139,10 +139,9 @@ const error_category& ceph_category() noexcept {
 // them in an error_code.
 boost::system::error_code to_error_code(int ret) noexcept
 {
-  if (ret < 0)
-    return { -ret, boost::system::system_category() };
-  else
+  if (ret == 0)
     return {};
+  return { std::abs(ret), boost::system::system_category() };
 }
 
 // This is more complicated. For the case of categories defined
