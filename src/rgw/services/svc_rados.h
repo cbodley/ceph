@@ -93,7 +93,7 @@ public:
 
     Obj(CephContext* cct, RADOS::RADOS& rados, int64_t pool, std::string_view ns,
         std::string_view obj, std::string_view key, std::string_view pname)
-      : rados(rados), ioc(pool, ns), obj(obj), pname(pname) {
+      : cct(cct), rados(rados), ioc(pool, ns), obj(obj), pname(pname) {
       if (!key.empty())
         ioc.key(key);
     }
