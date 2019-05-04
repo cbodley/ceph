@@ -1030,7 +1030,7 @@ void RADOS::flush_watch(std::unique_ptr<VoidOpComp> c)
 				  });
 }
 
-struct NotifyHandler {
+struct NotifyHandler : std::enable_shared_from_this<NotifyHandler> {
   boost::asio::io_context& ioc;
   boost::asio::io_context::strand strand;
   Objecter* objecter;
@@ -1053,7 +1053,7 @@ struct NotifyHandler {
 		  bufferlist&&) {
     boost::asio::post(
       strand,
-      [this, ec]() mutable {
+      [this, ec, p = shared_from_this()]() mutable {
 	acked = true;
 	maybe_cleanup(ec);
       });
@@ -1065,7 +1065,7 @@ struct NotifyHandler {
 		  bufferlist&& bl) {
     boost::asio::post(
       strand,
-      [this, ec]() mutable {
+      [this, ec, p = shared_from_this()]() mutable {
 	finished = true;
 	maybe_cleanup(ec);
       });
@@ -1075,14 +1075,11 @@ struct NotifyHandler {
   void maybe_cleanup(boost::system::error_code ec) {
     if (!res && ec)
       res = ec;
-    if ((acked && finished) || res)
-      boost::asio::defer(
-	ioc.get_executor(),
-	[this]() mutable {
-	  auto bl = std::move(rbl);
-	  objecter->linger_cancel(op);
-	  ceph::async::dispatch(std::move(c), res, std::move(bl));
-	});
+    if ((acked && finished) || res) {
+      objecter->linger_cancel(op);
+      ceph_assert(c);
+      ceph::async::dispatch(std::move(c), res, std::move(rbl));
+    }
   }
 };
 
@@ -1095,10 +1092,10 @@ void RADOS::notify(const Object& o, const IOContext& _ioc, bufferlist&& bl,
   auto ioc = reinterpret_cast<const IOContextImpl*>(&_ioc.impl);
   auto linger_op = rados->objecter->linger_register(*oid, ioc->oloc, 0);
 
-  auto x = new NotifyHandler(rados->ioctx, rados->objecter.get(), linger_op, std::move(c));
+  auto cb = std::make_shared<NotifyHandler>(rados->ioctx, rados->objecter.get(),
+                                            linger_op, std::move(c));
   linger_op->on_notify_finish =
-    [cb = std::unique_ptr<NotifyHandler>(x)](boost::system::error_code ec,
-					     ceph::bufferlist&& bl) mutable {
+    [cb](boost::system::error_code ec, ceph::bufferlist&& bl) mutable {
       (*cb)(ec, std::move(bl));
     };
   ObjectOperation rd;
@@ -1110,8 +1107,8 @@ void RADOS::notify(const Object& o, const IOContext& _ioc, bufferlist&& bl,
 
   rados->objecter->linger_notify(
     linger_op, rd, ioc->snap_seq, inbl,
-    [x](boost::system::error_code ec, bufferlist&& bl) mutable {
-      x->handle_ack(ec, std::move(bl));
+    [cb](boost::system::error_code ec, bufferlist&& bl) mutable {
+      cb->handle_ack(ec, std::move(bl));
     }, nullptr);
 }
 
@@ -1131,11 +1128,10 @@ void RADOS::notify(const Object& o, std::int64_t pool, bufferlist&& bl,
     oloc.key = *key;
   auto linger_op = rados->objecter->linger_register(*oid, oloc, 0);
 
-  auto x = new NotifyHandler(rados->ioctx, rados->objecter.get(), linger_op,
-			     std::move(c));
+  auto cb = std::make_shared<NotifyHandler>(rados->ioctx, rados->objecter.get(),
+                                            linger_op, std::move(c));
   linger_op->on_notify_finish =
-    [cb = std::unique_ptr<NotifyHandler>(x)](boost::system::error_code ec,
-					     ceph::bufferlist&& bl) mutable {
+    [cb](boost::system::error_code ec, ceph::bufferlist&& bl) mutable {
       (*cb)(ec, std::move(bl));
     };
   ObjectOperation rd;
@@ -1147,8 +1143,8 @@ void RADOS::notify(const Object& o, std::int64_t pool, bufferlist&& bl,
 
   rados->objecter->linger_notify(
     linger_op, rd, CEPH_NOSNAP, inbl,
-    [x](boost::system::error_code ec, bufferlist&& bl) mutable {
-      x->handle_ack(ec, std::move(bl));
+    [cb](boost::system::error_code ec, bufferlist&& bl) mutable {
+      cb->handle_ack(ec, std::move(bl));
     }, nullptr);
 }
 
