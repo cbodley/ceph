@@ -109,7 +109,7 @@ bool operator !=(const Object& lhs, const Object& rhs) {
 
 struct IOContextImpl {
   object_locator_t oloc;
-  snapid_t snap_seq;
+  snapid_t snap_seq = CEPH_NOSNAP;
   SnapContext snapc;
 };
 
