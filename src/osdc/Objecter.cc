@@ -4049,9 +4049,7 @@ void Objecter::handle_pool_op_reply(MPoolOpReply *m)
 			      std::move(o)(ec, bl);
 			    }),
 			  m->epoch,
-			  boost::system::error_code(
-			    m->replyCode,
-			    boost::system::system_category()));
+			  ceph::to_error_code(m->replyCode));
       } else {
 	// map epoch changed, probably because a MOSDMap message
 	// sneaked in. Do caller-specified callback now or else
