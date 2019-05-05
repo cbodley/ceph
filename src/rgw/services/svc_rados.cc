@@ -324,9 +324,6 @@ RGWSI_RADOS::Pool::List::get_next(int max,
                                   bool* is_truncated,
                                   optional_yield y)
 {
-  if (iter == RADOS::EnumerationCursor::begin())
-    return ceph::to_error_code(ENOENT);
-
   std::vector<RADOS::EnumeratedObject> ls;
   boost::system::error_code ec;
 
