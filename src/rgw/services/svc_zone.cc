@@ -71,7 +71,7 @@ boost::system::error_code RGWSI_Zone::do_start()
       if (ret && ret != boost::system::errc::no_such_file_or_directory) {
         ldout(cct, 0) << "failed reading realm info: ret "<< ret << " " << dendl;
         return ret;
-      } else if (ret == boost::system::errc::no_such_file_or_directory) {
+      } else if (ret != boost::system::errc::no_such_file_or_directory) {
         ldout(cct, 20) << "realm  " << realm->get_name() << " " << realm->get_id() << dendl;
         ret = ceph::to_error_code(current_period->init(cct, sysobj_svc, realm->get_id(), realm->get_name()));
         if (ret && ret != boost::system::errc::no_such_file_or_directory) {
