@@ -5064,7 +5064,9 @@ void Objecter::enumerate_objects(
   // later.
   pg_read(start.get_hash(), oloc, op, &on_ack->bl, 0,
 	  [c = std::move(on_ack)]
-	  (boost::system::error_code ec, int) mutable {
+	  (boost::system::error_code ec, int rc) mutable {
+            if (rc == 1) // returns 1 on eof
+              ec.clear();
 	    (*c)(ec);
 	  }, epoch, budget);
 }
