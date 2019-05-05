@@ -358,7 +358,7 @@ RGWSI_RADOS::Pool::List::get_next(int max,
   for (auto& e : ls) {
     auto& oid = e.oid;
     ldout(pool.cct, 20) << "Pool::get_ext: got " << oid << dendl;
-    if (filter && filter(oid, oid))
+    if (filter && !filter(oid, oid))
       continue;
 
     oids->push_back(std::move(oid));
