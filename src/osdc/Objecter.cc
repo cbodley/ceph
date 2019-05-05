@@ -5062,7 +5062,8 @@ void Objecter::enumerate_objects(
   object_locator_t oloc(pool_id, ns);
   // I hate having to do this. Try to find a cleaner way
   // later.
-  pg_read(start.get_hash(), oloc, op, &on_ack->bl, 0,
+  bufferlist* pbl = &on_ack->bl;
+  pg_read(start.get_hash(), oloc, op, pbl, 0,
 	  [c = std::move(on_ack)]
 	  (boost::system::error_code ec, int rc) mutable {
             if (rc == 1) // returns 1 on eof
