@@ -176,7 +176,7 @@ RGWSI_SysObj_Cache::read(RGWSysObjectCtxBase& obj_ctx,
     info.version = objv_tracker->read_version;
   }
   if (attrs) {
-    unfiltered_attrset.clear();
+    info.xattrs.clear();
     std::move(unfiltered_attrset.begin(), unfiltered_attrset.end(),
               std::inserter(info.xattrs, info.xattrs.end()));
     if (raw_attrs) {
