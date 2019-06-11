@@ -76,6 +76,13 @@ def wait_for_radosgw(url):
     add_daemon() doesn't wait until radosgw finishes startup, so this is used
     to avoid racing with later tasks that expect radosgw to be up and listening
     """
+    # the 'requests' library comes with its own ca bundle to verify ssl
+    # certificates - override that to use the system's ca bundle, which
+    # is where the ssl task installed this certificate
+    if remote.os.package_type == 'deb':
+        ca_cert_dir = '/etc/ssl/certs/ca-certificates.crt'
+    else:
+        ca_cert_dir = '/etc/pki/tls/certs/ca-bundle.crt'
     # use a connection pool with retry/backoff to poll until it starts listening
-    http = PoolManager(retries=Retry(connect=8, backoff_factor=1))
+    http = PoolManager(retries=Retry(connect=8, backoff_factor=1), ca_cert_dir=ca_cert_dir)
     http.request('GET', url)
