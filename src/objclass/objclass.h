@@ -90,11 +90,13 @@ extern int cls_cxx_read2(cls_method_context_t hctx, int ofs, int len,
 extern int cls_cxx_write2(cls_method_context_t hctx, int ofs, int len,
                           ceph::buffer::list *bl, uint32_t op_flags);
 extern int cls_cxx_write_full(cls_method_context_t hctx, ceph::buffer::list *bl);
+extern int cls_cxx_write_zero(cls_method_context_t hctx, int ofs, int len);
 extern int cls_cxx_getxattrs(cls_method_context_t hctx, std::map<std::string,
 			     ceph::buffer::list> *attrset);
 extern int cls_cxx_replace(cls_method_context_t hctx, int ofs, int len,
 			   ceph::buffer::list *bl);
 extern int cls_cxx_truncate(cls_method_context_t hctx, int ofs);
+extern int cls_cxx_write_zero(cls_method_context_t hctx, int ofs, int len);
 extern int cls_cxx_snap_revert(cls_method_context_t hctx, snapid_t snapid);
 extern int cls_cxx_map_clear(cls_method_context_t hctx);
 extern int cls_cxx_map_get_all_vals(cls_method_context_t hctx,
