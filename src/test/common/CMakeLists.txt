@@ -325,4 +325,6 @@ add_executable(unittest_rabin_chunk test_rabin_chunk.cc
 target_link_libraries(unittest_rabin_chunk global ceph-common)
 add_ceph_unittest(unittest_rabin_chunk)
 
-
+add_executable(unittest_double_index_map test_double_index_map.cc)
+target_link_libraries(unittest_double_index_map)
+add_ceph_unittest(unittest_double_index_map)
