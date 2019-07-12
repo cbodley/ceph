@@ -62,7 +62,6 @@ class OSD;
 class OSDService;
 class OSDShard;
 class OSDShardPGSlot;
-class MOSDOp;
 class MOSDPGScan;
 class MOSDPGBackfill;
 class MOSDPGInfo;

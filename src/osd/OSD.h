@@ -90,7 +90,6 @@ class TestOpsSocketHook;
 struct C_FinishSplits;
 struct C_OpenPGs;
 class LogChannel;
-class MOSDOp;
 
 class MOSDPGCreate2;
 class MOSDPGQuery;
