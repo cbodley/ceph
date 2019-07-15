@@ -17,14 +17,17 @@ class RGWSI_Zone;
 template <class T>
 static int parse_decode_json(T& t, bufferlist& bl)
 {
+  lsubdout(g_ceph_context, rgw, 20) << "parse_decode_json: " << bl.c_str() << dendl;
   JSONParser p;
   if (!p.parse(bl.c_str(), bl.length())) {
+    lsubdout(g_ceph_context, rgw, 1) << "parse_decode_json failed to parse" << dendl;
     return -EINVAL;
   }
 
   try {
     decode_json_obj(t, &p);
   } catch (JSONDecoder::err& e) {
+    lsubdout(g_ceph_context, rgw, 1) << "parse_decode_json failed to decode" << dendl;
     return -EINVAL;
   }
   return 0;
