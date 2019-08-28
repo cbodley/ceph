@@ -578,6 +578,9 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
                             accept(l, ec);
                           });
 
+  static constexpr size_t cr_stack_size = 1048576; // override default 128k
+  const boost::coroutines::attributes cr_attributes{cr_stack_size};
+
   // spawn a coroutine to handle the connection
 #ifdef WITH_RADOSGW_BEAST_OPENSSL
   if (l.use_ssl) {
@@ -604,7 +607,7 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
           stream.async_shutdown(yield[ec]);
         }
         s.shutdown(tcp::socket::shutdown_both, ec);
-      });
+      }, cr_attributes);
   } else {
 #else
   {
@@ -618,7 +621,7 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
         handle_connection(context, env, s, buffer, false, pause_mutex,
                           scheduler.get(), ec, yield);
         s.shutdown(tcp::socket::shutdown_both, ec);
-      });
+      }, cr_attributes);
   }
 }
 
