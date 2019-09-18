@@ -4496,7 +4496,37 @@ int RGWRados::Object::complete_atomic_modification()
   }
 
   string tag = (state->tail_tag.length() > 0 ? state->tail_tag.to_str() : state->obj_tag.to_str());
-  return store->gc->send_chain(chain, tag, false);  // do it async
+  auto ret = store->gc->send_chain(chain, tag, true);  // do it synchronously
+  //Delete tail objects inline, if failed to send chain to gc
+  if (ret < 0) {
+    string last_pool;
+    std::unique_ptr<IoCtx> ctx(new IoCtx);
+    for (auto liter = chain.objs.begin(); liter != chain.objs.end(); ++liter) {
+      cls_rgw_obj& obj = *liter;
+      if (obj.pool != last_pool) {
+        ctx.reset(new IoCtx);
+        ret = rgw_init_ioctx(store->get_rados_handle(), obj.pool, *ctx);
+        if (ret < 0) {
+          last_pool = "";
+          ldout(store->cct, 0) << "ERROR: failed to create ioctx pool=" <<
+          obj.pool << dendl;
+          continue;
+        }
+        last_pool = obj.pool;
+      }
+      ctx->locator_set_key(obj.loc);
+      const string& oid = obj.key.name; /* just stored raw oid there */
+      ldout(store->cct, 5) << "complete_atomic_modification: removing " << obj.pool <<
+      ":" << obj.key.name << dendl;
+      ObjectWriteOperation op;
+      cls_refcount_put(op, tag, true);
+      ret = ctx->operate(oid, &op);
+      if (ret < 0) {
+        ldout(store->cct, 5) << "complete_atomic_modification: refcount put returned error " << ret << dendl;
+      }
+    }
+  }
+  return 0;
 }
 
 void RGWRados::update_gc_chain(rgw_obj& head_obj, RGWObjManifest& manifest, cls_rgw_obj_chain *chain)
