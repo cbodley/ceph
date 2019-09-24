@@ -50,8 +50,14 @@ public:
   vector<bool> transitioned_objects_cache;
   bool ready_to_transition{true}; //set to false, in case osd is not upgraded and cls_rgw_gc module hasn't been loaded
   void add_chain(librados::ObjectWriteOperation& op, cls_rgw_obj_chain& chain, const string& tag);
-  int send_chain(cls_rgw_obj_chain& chain, const string& tag, bool sync);
-  int defer_chain(const string& tag, cls_rgw_obj_chain& info, bool sync);
+  int send_chain(cls_rgw_obj_chain& chain, const string& tag);
+
+  // asynchronously defer garbage collection on an object that's still being read
+  int async_defer_chain(const string& tag, const cls_rgw_obj_chain& info);
+
+  // callback for when async_defer_chain() fails with ECANCELED
+  void on_defer_canceled(const cls_rgw_gc_obj_info& info);
+
   int remove(int index, const std::vector<string>& tags, librados::AioCompletion **pc);
   int remove(int index, int num_entries, librados::AioCompletion **pc);
 
