@@ -2587,7 +2587,7 @@ int bi_log_record_decode(bufferlist& bl, rgw_bi_log_entry& e)
 }
 
 static int bi_log_iterate_entries(cls_method_context_t hctx, const string& marker, const string& end_marker,
-                              string& key_iter, uint32_t max_entries, bool *truncated,
+                              string& key_iter, uint64_t max_entries, bool *truncated,
                               int (*cb)(cls_method_context_t, const string&, rgw_bi_log_entry&, void *),
                               void *param)
 {
@@ -2726,12 +2726,13 @@ static int bi_log_list_trim_entries(cls_method_context_t hctx,
                                     const string& start_marker, const string& end_marker,
 			            list<rgw_bi_log_entry>& entries, bool *truncated)
 {
+  // let the osd enforce its own limit based on osd_max_omap_entries_per_request
+  constexpr uint64_t max_entries = std::numeric_limits<uint64_t>::max();
+
   string key_iter;
-#define MAX_TRIM_ENTRIES 1000 /* max entries to trim in a single operation */
-  int ret = bi_log_iterate_entries(hctx, start_marker, end_marker,
-                              key_iter, MAX_TRIM_ENTRIES, truncated,
-                              bi_log_list_trim_cb, &entries);
-  return ret;
+  return bi_log_iterate_entries(hctx, start_marker, end_marker,
+                                key_iter, max_entries, truncated,
+                                bi_log_list_trim_cb, &entries);
 }
 
 static int rgw_bi_log_trim(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
@@ -2748,7 +2749,6 @@ static int rgw_bi_log_trim(cls_method_context_t hctx, bufferlist *in, bufferlist
 
   cls_rgw_bi_log_list_ret op_ret;
   list<rgw_bi_log_entry> entries;
-#define MAX_TRIM_ENTRIES 1000 /* don't do more than that in a single operation */
   bool truncated;
   int ret = bi_log_list_trim_entries(hctx, op.start_marker, op.end_marker, entries, &truncated);
   if (ret < 0)
