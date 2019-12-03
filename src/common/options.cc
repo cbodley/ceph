@@ -5641,6 +5641,12 @@ std::vector<Option> get_rgw_options() {
     .add_see_also("rgw_sync_log_trim_max_buckets")
     .add_see_also("rgw_sync_log_trim_min_cold_buckets"),
 
+    Option("rgw_sync_log_trim_ops_per_shard", Option::TYPE_INT, Option::LEVEL_ADVANCED)
+    .set_default(16)
+    .set_description("Maximum number of osd trim requests to send per log shard, where the number of entries trimmed by each request is limited to osd_max_omap_entries_per_request.")
+    .add_see_also("rgw_sync_log_trim_interval")
+    .add_see_also("osd_max_omap_entries_per_request"),
+
     Option("rgw_sync_data_inject_err_probability", Option::TYPE_FLOAT, Option::LEVEL_DEV)
     .set_default(0)
     .set_description(""),

@@ -47,6 +47,8 @@ struct BucketTrimConfig {
   uint32_t min_cold_buckets_per_interval{0};
   /// maximum number of buckets to process in parallel
   uint32_t concurrent_buckets{0};
+  /// maximum number of consecutive trim ops to issue per shard
+  uint32_t trims_per_shard{0};
   /// timeout in ms for bucket trim notify replies
   uint64_t notify_timeout_ms{0};
   /// maximum number of recently trimmed buckets to remember (should be small

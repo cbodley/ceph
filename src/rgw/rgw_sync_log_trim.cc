@@ -374,6 +374,41 @@ int take_min_status(CephContext *cct, Iter first, Iter last,
   return 0;
 }
 
+/// sends repeated bilog trim requests until ENODATA
+class BILogTrimRepeatCR : public RGWCoroutine {
+  RGWRados* store;
+  const RGWBucketInfo& bucket_info;
+  const int shard_id;
+  const std::string& end_marker;
+  int count;
+ public:
+  BILogTrimRepeatCR(RGWRados *store, const RGWBucketInfo& bucket_info,
+                    int shard_id, const std::string& end_marker, int count)
+    : RGWCoroutine(store->ctx()), store(store), bucket_info(bucket_info),
+      shard_id(shard_id), end_marker(end_marker), count(count)
+  {}
+
+  int operate() override;
+};
+
+int BILogTrimRepeatCR::operate()
+{
+  reenter(this) {
+    while (count--) {
+      yield call(new RGWRadosBILogTrimCR(store, bucket_info, shard_id,
+                                         std::string{}, end_marker));
+      if (retcode == -ENODATA) { // nothing left to trim
+        return set_cr_done();
+      }
+      if (retcode < 0) {
+        return set_cr_error(retcode);
+      }
+    }
+    return set_cr_done();
+  }
+  return 0;
+}
+
 /// trim each bilog shard to the given marker, while limiting the number of
 /// concurrent requests
 class BucketTrimShardCollectCR : public RGWShardCollectCR {
@@ -381,12 +416,14 @@ class BucketTrimShardCollectCR : public RGWShardCollectCR {
   RGWRados *const store;
   const RGWBucketInfo& bucket_info;
   const std::vector<std::string>& markers; //< shard markers to trim
+  const int trims_per_shard;
   size_t i{0}; //< index of current shard marker
  public:
   BucketTrimShardCollectCR(RGWRados *store, const RGWBucketInfo& bucket_info,
-                           const std::vector<std::string>& markers)
+                           const std::vector<std::string>& markers, int trims_per_shard)
     : RGWShardCollectCR(store->ctx(), MAX_CONCURRENT_SHARDS),
-      store(store), bucket_info(bucket_info), markers(markers)
+      store(store), bucket_info(bucket_info), markers(markers),
+      trims_per_shard(trims_per_shard)
   {}
   bool spawn_next() override;
 };
@@ -401,8 +438,7 @@ bool BucketTrimShardCollectCR::spawn_next()
     if (!marker.empty()) {
       ldout(cct, 10) << "trimming bilog shard " << shard_id
           << " of " << bucket_info.bucket << " at marker " << marker << dendl;
-      spawn(new RGWRadosBILogTrimCR(store, bucket_info, shard_id,
-                                    std::string{}, marker),
+      spawn(new BILogTrimRepeatCR(store, bucket_info, shard_id, marker, trims_per_shard),
             false);
       return true;
     }
@@ -416,6 +452,7 @@ class BucketTrimInstanceCR : public RGWCoroutine {
   RGWHTTPManager *const http;
   BucketTrimObserver *const observer;
   std::string bucket_instance;
+  const int trims_per_shard;
   const std::string& zone_id; //< my zone id
   RGWBucketInfo bucket_info; //< bucket instance info to locate bucket indices
 
@@ -426,10 +463,12 @@ class BucketTrimInstanceCR : public RGWCoroutine {
  public:
   BucketTrimInstanceCR(RGWRados *store, RGWHTTPManager *http,
                        BucketTrimObserver *observer,
-                       const std::string& bucket_instance)
+                       const std::string& bucket_instance,
+                       int trims_per_shard)
     : RGWCoroutine(store->ctx()), store(store),
       http(http), observer(observer),
       bucket_instance(bucket_instance),
+      trims_per_shard(trims_per_shard),
       zone_id(store->get_zone().id),
       peer_status(store->zone_conn_map.size())
   {}
@@ -489,7 +528,7 @@ int BucketTrimInstanceCR::operate()
     ldout(cct, 10) << "trimming bilogs for bucket=" << bucket_info.bucket
        << " markers=" << min_markers << ", shards=" << min_markers.size() << dendl;
     set_status("trimming bilog shards");
-    yield call(new BucketTrimShardCollectCR(store, bucket_info, min_markers));
+    yield call(new BucketTrimShardCollectCR(store, bucket_info, min_markers, trims_per_shard));
     // ENODATA just means there were no keys to trim
     if (retcode == -ENODATA) {
       retcode = 0;
@@ -511,15 +550,17 @@ class BucketTrimInstanceCollectCR : public RGWShardCollectCR {
   RGWRados *const store;
   RGWHTTPManager *const http;
   BucketTrimObserver *const observer;
+  const int trims_per_shard;
   std::vector<std::string>::const_iterator bucket;
   std::vector<std::string>::const_iterator end;
  public:
   BucketTrimInstanceCollectCR(RGWRados *store, RGWHTTPManager *http,
                               BucketTrimObserver *observer,
                               const std::vector<std::string>& buckets,
-                              int max_concurrent)
+                              int max_concurrent, int trims_per_shard)
     : RGWShardCollectCR(store->ctx(), max_concurrent),
       store(store), http(http), observer(observer),
+      trims_per_shard(trims_per_shard),
       bucket(buckets.begin()), end(buckets.end())
   {}
   bool spawn_next() override;
@@ -530,7 +571,7 @@ bool BucketTrimInstanceCollectCR::spawn_next()
   if (bucket == end) {
     return false;
   }
-  spawn(new BucketTrimInstanceCR(store, http, observer, *bucket), false);
+  spawn(new BucketTrimInstanceCR(store, http, observer, *bucket, trims_per_shard), false);
   ++bucket;
   return true;
 }
@@ -829,7 +870,8 @@ int BucketTrimCR::operate()
     set_status("trimming buckets");
     ldout(cct, 4) << "collected " << buckets.size() << " buckets for trim" << dendl;
     yield call(new BucketTrimInstanceCollectCR(store, http, observer, buckets,
-                                               config.concurrent_buckets));
+                                               config.concurrent_buckets,
+                                               config.trims_per_shard));
     // ignore errors from individual buckets
 
     // write updated trim status
@@ -986,6 +1028,8 @@ void configure_bucket_trim(CephContext *cct, BucketTrimConfig& config)
       conf->get_val<int64_t>("rgw_sync_log_trim_min_cold_buckets");
   config.concurrent_buckets =
       conf->get_val<int64_t>("rgw_sync_log_trim_concurrent_buckets");
+  config.trims_per_shard =
+      conf->get_val<int64_t>("rgw_sync_log_trim_ops_per_shard");
   config.notify_timeout_ms = 10000;
   config.recent_size = 128;
   config.recent_duration = std::chrono::hours(2);
