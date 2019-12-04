@@ -236,8 +236,8 @@ static int cls_log_trim(cls_method_context_t hctx, bufferlist *in, bufferlist *o
     to_index = op.to_marker;
   }
 
-#define MAX_TRIM_ENTRIES 1000
-  size_t max_entries = MAX_TRIM_ENTRIES;
+  // let the osd enforce its own limit based on osd_max_omap_entries_per_request
+  constexpr uint64_t max_entries = std::numeric_limits<uint64_t>::max();
   bool more;
 
   int rc = cls_cxx_map_get_vals(hctx, from_index, log_index_prefix, max_entries, &keys, &more);
