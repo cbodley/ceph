@@ -3307,15 +3307,16 @@ public:
     return http.set_threaded();
   }
   int process() override {
+    int trims_per_shard = cct->_conf->get_val<int64_t>("rgw_sync_log_trim_ops_per_shard");
+
     list<RGWCoroutinesStack*> stacks;
     auto meta = new RGWCoroutinesStack(store->ctx(), &crs);
     meta->call(create_meta_log_trim_cr(store, &http,
                                        cct->_conf->rgw_md_log_max_shards,
-                                       trim_interval));
+                                       trims_per_shard, trim_interval));
     stacks.push_back(meta);
 
     auto data = new RGWCoroutinesStack(store->ctx(), &crs);
-    int trims_per_shard = cct->_conf->get_val<int64_t>("rgw_sync_log_trim_ops_per_shard");
     data->call(create_data_log_trim_cr(store, &http,
                                        cct->_conf->rgw_data_log_num_shards,
                                        trims_per_shard, trim_interval));

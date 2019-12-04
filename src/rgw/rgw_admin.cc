@@ -6647,7 +6647,8 @@ next:
     }
 
     auto num_shards = g_conf->rgw_md_log_max_shards;
-    ret = crs.run(create_admin_meta_log_trim_cr(store, &http, num_shards));
+    int trims_per_shard = cct->_conf->get_val<int64_t>("rgw_sync_log_trim_ops_per_shard");
+    ret = crs.run(create_admin_meta_log_trim_cr(store, &http, num_shards, trims_per_shard));
     if (ret < 0) {
       cerr << "automated mdlog trim failed with " << cpp_strerror(ret) << std::endl;
       return -ret;

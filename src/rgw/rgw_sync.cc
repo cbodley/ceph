@@ -2528,12 +2528,15 @@ struct TrimEnv {
   RGWRados *const store;
   RGWHTTPManager *const http;
   int num_shards;
+  int trims_per_shard;
   const std::string& zone;
   Cursor current; //< cursor to current period
   epoch_t last_trim_epoch{0}; //< epoch of last mdlog that was purged
 
-  TrimEnv(RGWRados *store, RGWHTTPManager *http, int num_shards)
+  TrimEnv(RGWRados *store, RGWHTTPManager *http,
+          int num_shards, int trims_per_shard)
     : store(store), http(http), num_shards(num_shards),
+      trims_per_shard(trims_per_shard),
       zone(store->get_zone_params().get_id()),
       current(store->period_history->get_current())
   {}
@@ -2545,8 +2548,8 @@ struct MasterTrimEnv : public TrimEnv {
   /// last trim marker for each shard, only applies to current period's mdlog
   std::vector<std::string> last_trim_markers;
 
-  MasterTrimEnv(RGWRados *store, RGWHTTPManager *http, int num_shards)
-    : TrimEnv(store, http, num_shards),
+  MasterTrimEnv(RGWRados *store, RGWHTTPManager *http, int num_shards, int trims_per_shard)
+    : TrimEnv(store, http, num_shards, trims_per_shard),
       last_trim_markers(num_shards)
   {
     auto& period = current.get_period();
@@ -2560,8 +2563,8 @@ struct PeerTrimEnv : public TrimEnv {
   /// last trim timestamp for each shard, only applies to current period's mdlog
   std::vector<ceph::real_time> last_trim_timestamps;
 
-  PeerTrimEnv(RGWRados *store, RGWHTTPManager *http, int num_shards)
-    : TrimEnv(store, http, num_shards),
+  PeerTrimEnv(RGWRados *store, RGWHTTPManager *http, int num_shards, int trims_per_shard)
+    : TrimEnv(store, http, num_shards, trims_per_shard),
       last_trim_timestamps(num_shards)
   {}
 
@@ -2623,7 +2626,8 @@ bool MetaMasterTrimShardCollectCR::spawn_next()
         << " at marker=" << stable
         << " last_trim=" << last_trim
         << " realm_epoch=" << sync_status.sync_info.realm_epoch << dendl;
-    spawn(new RGWSyncLogTrimCR(env.store, oid, stable, &last_trim), false);
+    spawn(new RGWSyncLogTrimCR(env.store, oid, stable, &last_trim,
+                               env.trims_per_shard), false);
     shard_id++;
     return true;
   }
@@ -2981,9 +2985,9 @@ class MetaMasterTrimPollCR : public MetaTrimPollCR  {
   }
  public:
   MetaMasterTrimPollCR(RGWRados *store, RGWHTTPManager *http,
-                       int num_shards, utime_t interval)
+                       int num_shards, int trims_per_shard, utime_t interval)
     : MetaTrimPollCR(store, interval),
-      env(store, http, num_shards)
+      env(store, http, num_shards, trims_per_shard)
   {}
 };
 
@@ -2994,42 +2998,43 @@ class MetaPeerTrimPollCR : public MetaTrimPollCR {
   }
  public:
   MetaPeerTrimPollCR(RGWRados *store, RGWHTTPManager *http,
-                     int num_shards, utime_t interval)
+                     int num_shards, int trims_per_shard, utime_t interval)
     : MetaTrimPollCR(store, interval),
-      env(store, http, num_shards)
+      env(store, http, num_shards, trims_per_shard)
   {}
 };
 
 RGWCoroutine* create_meta_log_trim_cr(RGWRados *store, RGWHTTPManager *http,
-                                      int num_shards, utime_t interval)
+                                      int num_shards, int trims_per_shard,
+                                      utime_t interval)
 {
   if (store->is_meta_master()) {
-    return new MetaMasterTrimPollCR(store, http, num_shards, interval);
+    return new MetaMasterTrimPollCR(store, http, num_shards, trims_per_shard, interval);
   }
-  return new MetaPeerTrimPollCR(store, http, num_shards, interval);
+  return new MetaPeerTrimPollCR(store, http, num_shards, trims_per_shard, interval);
 }
 
 
 struct MetaMasterAdminTrimCR : private MasterTrimEnv, public MetaMasterTrimCR {
-  MetaMasterAdminTrimCR(RGWRados *store, RGWHTTPManager *http, int num_shards)
-    : MasterTrimEnv(store, http, num_shards),
+  MetaMasterAdminTrimCR(RGWRados *store, RGWHTTPManager *http, int num_shards, int trims_per_shard)
+    : MasterTrimEnv(store, http, num_shards, trims_per_shard),
       MetaMasterTrimCR(*static_cast<MasterTrimEnv*>(this))
   {}
 };
 
 struct MetaPeerAdminTrimCR : private PeerTrimEnv, public MetaPeerTrimCR {
-  MetaPeerAdminTrimCR(RGWRados *store, RGWHTTPManager *http, int num_shards)
-    : PeerTrimEnv(store, http, num_shards),
+  MetaPeerAdminTrimCR(RGWRados *store, RGWHTTPManager *http, int num_shards, int trims_per_shard)
+    : PeerTrimEnv(store, http, num_shards, trims_per_shard),
       MetaPeerTrimCR(*static_cast<PeerTrimEnv*>(this))
   {}
 };
 
 RGWCoroutine* create_admin_meta_log_trim_cr(RGWRados *store,
                                             RGWHTTPManager *http,
-                                            int num_shards)
+                                            int num_shards, int trims_per_shard)
 {
   if (store->is_meta_master()) {
-    return new MetaMasterAdminTrimCR(store, http, num_shards);
+    return new MetaMasterAdminTrimCR(store, http, num_shards, trims_per_shard);
   }
-  return new MetaPeerAdminTrimCR(store, http, num_shards);
+  return new MetaPeerAdminTrimCR(store, http, num_shards, trims_per_shard);
 }
