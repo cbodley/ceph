@@ -563,13 +563,13 @@ public:
 
 // DataLogTrimCR factory function
 extern RGWCoroutine* create_data_log_trim_cr(RGWRados *store,
-                                             RGWHTTPManager *http,
-                                             int num_shards, utime_t interval);
+                                             RGWHTTPManager *http, int num_shards,
+                                             int trims_per_shard, utime_t interval);
 
 // factory function for datalog trim via radosgw-admin
 RGWCoroutine* create_admin_data_log_trim_cr(RGWRados *store,
                                             RGWHTTPManager *http,
-                                            int num_shards,
+                                            int num_shards, int trims_per_shard,
                                             std::vector<std::string>& markers);
 
 #endif

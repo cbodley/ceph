@@ -3372,6 +3372,7 @@ class DataLogTrimCR : public RGWCoroutine {
   RGWRados *store;
   RGWHTTPManager *http;
   const int num_shards;
+  const int trims_per_shard;
   const std::string& zone_id; //< my zone id
   std::vector<rgw_data_sync_status> peer_status; //< sync status for each peer
   std::vector<rgw_data_sync_marker> min_shard_markers; //< min marker per shard
@@ -3380,9 +3381,11 @@ class DataLogTrimCR : public RGWCoroutine {
 
  public:
   DataLogTrimCR(RGWRados *store, RGWHTTPManager *http,
-                   int num_shards, std::vector<std::string>& last_trim)
+                   int num_shards, int trims_per_shard,
+                   std::vector<std::string>& last_trim)
     : RGWCoroutine(store->ctx()), store(store), http(http),
       num_shards(num_shards),
+      trims_per_shard(trims_per_shard),
       zone_id(store->get_zone().id),
       peer_status(store->zone_conn_map.size()),
       min_shard_markers(num_shards),
@@ -3445,9 +3448,8 @@ int DataLogTrimCR::operate()
         ldout(cct, 10) << "trimming log shard " << i
             << " at marker=" << stable
             << " last_trim=" << last_trim[i] << dendl;
-        using TrimCR = RGWSyncLogTrimCR;
-        spawn(new TrimCR(store, store->data_log->get_oid(i),
-                         stable, &last_trim[i]),
+        spawn(new RGWSyncLogTrimCR(store, store->data_log->get_oid(i),
+                                   stable, &last_trim[i], trims_per_shard),
               true);
       }
     }
@@ -3458,16 +3460,17 @@ int DataLogTrimCR::operate()
 
 RGWCoroutine* create_admin_data_log_trim_cr(RGWRados *store,
                                             RGWHTTPManager *http,
-                                            int num_shards,
+                                            int num_shards, int trims_per_shard,
                                             std::vector<std::string>& markers)
 {
-  return new DataLogTrimCR(store, http, num_shards, markers);
+  return new DataLogTrimCR(store, http, num_shards, trims_per_shard, markers);
 }
 
 class DataLogTrimPollCR : public RGWCoroutine {
   RGWRados *store;
   RGWHTTPManager *http;
   const int num_shards;
+  const int trims_per_shard;
   const utime_t interval; //< polling interval
   const std::string lock_oid; //< use first data log shard for lock
   const std::string lock_cookie;
@@ -3475,9 +3478,9 @@ class DataLogTrimPollCR : public RGWCoroutine {
 
  public:
   DataLogTrimPollCR(RGWRados *store, RGWHTTPManager *http,
-                    int num_shards, utime_t interval)
+                    int num_shards, int trims_per_shard, utime_t interval)
     : RGWCoroutine(store->ctx()), store(store), http(http),
-      num_shards(num_shards), interval(interval),
+      num_shards(num_shards), trims_per_shard(trims_per_shard), interval(interval),
       lock_oid(store->data_log->get_oid(0)),
       lock_cookie(RGWSimpleRadosLockCR::gen_random_cookie(cct)),
       last_trim(num_shards)
@@ -3508,7 +3511,7 @@ int DataLogTrimPollCR::operate()
       }
 
       set_status("trimming");
-      yield call(new DataLogTrimCR(store, http, num_shards, last_trim));
+      yield call(new DataLogTrimCR(store, http, num_shards, trims_per_shard, last_trim));
 
       // note that the lock is not released. this is intentional, as it avoids
       // duplicating this work in other gateways
@@ -3518,8 +3521,8 @@ int DataLogTrimPollCR::operate()
 }
 
 RGWCoroutine* create_data_log_trim_cr(RGWRados *store,
-                                      RGWHTTPManager *http,
-                                      int num_shards, utime_t interval)
+                                      RGWHTTPManager *http, int num_shards,
+                                      int trims_per_shard, utime_t interval)
 {
-  return new DataLogTrimPollCR(store, http, num_shards, interval);
+  return new DataLogTrimPollCR(store, http, num_shards, trims_per_shard, interval);
 }

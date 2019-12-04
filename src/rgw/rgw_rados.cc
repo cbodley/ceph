@@ -3315,9 +3315,10 @@ public:
     stacks.push_back(meta);
 
     auto data = new RGWCoroutinesStack(store->ctx(), &crs);
+    int trims_per_shard = cct->_conf->get_val<int64_t>("rgw_sync_log_trim_ops_per_shard");
     data->call(create_data_log_trim_cr(store, &http,
                                        cct->_conf->rgw_data_log_num_shards,
-                                       trim_interval));
+                                       trims_per_shard, trim_interval));
     stacks.push_back(data);
 
     auto bucket = new RGWCoroutinesStack(store->ctx(), &crs);
