@@ -785,25 +785,24 @@ int RGWRadosTimelogTrimCR::request_complete()
   return r;
 }
 
-
-RGWSyncLogTrimCR::RGWSyncLogTrimCR(RGWRados *store, const std::string& oid,
-                                   const std::string& to_marker,
-                                   std::string *last_trim_marker)
-  : RGWRadosTimelogTrimCR(store, oid, real_time{}, real_time{},
-                          std::string{}, to_marker),
-    cct(store->ctx()), last_trim_marker(last_trim_marker)
+int RGWSyncLogTrimCR::operate()
 {
-}
-
-int RGWSyncLogTrimCR::request_complete()
-{
-  int r = RGWRadosTimelogTrimCR::request_complete();
-  if (r != -ENODATA) {
-    return r;
-  }
-  // nothing left to trim, update last_trim_marker
-  if (*last_trim_marker < to_marker) {
-    *last_trim_marker = to_marker;
+  reenter(this) {
+    while (request_count--) {
+      yield call(new RGWRadosTimelogTrimCR(store, oid, real_time{}, real_time{},
+                                           std::string{}, to_marker));
+      if (retcode == -ENODATA) {
+        // nothing left to trim, update last_trim_marker
+        if (*last_trim_marker < to_marker) {
+          *last_trim_marker = to_marker;
+        }
+        return set_cr_done();
+      }
+      if (retcode < 0) {
+        return set_cr_error(retcode);
+      }
+    }
+    return set_cr_done();
   }
   return 0;
 }

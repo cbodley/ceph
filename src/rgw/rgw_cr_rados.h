@@ -1100,13 +1100,11 @@ public:
 class RGWRadosTimelogTrimCR : public RGWSimpleCoroutine {
   RGWRados *store;
   boost::intrusive_ptr<RGWAioCompletionNotifier> cn;
- protected:
   std::string oid;
   real_time start_time;
   real_time end_time;
   std::string from_marker;
   std::string to_marker;
-
  public:
   RGWRadosTimelogTrimCR(RGWRados *store, const std::string& oid,
                         const real_time& start_time, const real_time& end_time,
@@ -1117,14 +1115,22 @@ class RGWRadosTimelogTrimCR : public RGWSimpleCoroutine {
   int request_complete() override;
 };
 
-// wrapper to update last_trim_marker on success
-class RGWSyncLogTrimCR : public RGWRadosTimelogTrimCR {
-  CephContext *cct;
+// repeatedly issue trim requests until ENODATA and update last_trim_marker
+class RGWSyncLogTrimCR : public RGWCoroutine {
+  RGWRados *store;
+  std::string oid;
+  std::string to_marker;
   std::string *last_trim_marker;
+  int request_count;
  public:
   RGWSyncLogTrimCR(RGWRados *store, const std::string& oid,
-                   const std::string& to_marker, std::string *last_trim_marker);
-  int request_complete() override;
+                   const std::string& to_marker,
+                   std::string *last_trim_marker, int max_requests = 1)
+    : RGWCoroutine(store->ctx()), store(store), oid(oid), to_marker(to_marker),
+      last_trim_marker(last_trim_marker), request_count(max_requests)
+  {}
+
+  int operate() override;
 };
 
 class RGWAsyncStatObj : public RGWAsyncRadosRequest {
