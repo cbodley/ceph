@@ -1112,7 +1112,6 @@ add_subdirectory(brag)
 add_custom_target(vstart-base DEPENDS
     ceph-osd
     ceph-mon
-    ceph-mgr
     ceph-authtool
     ceph-conf
     monmaptool
@@ -1124,6 +1123,9 @@ add_custom_target(vstart-base DEPENDS
 add_custom_target(vstart DEPENDS
     vstart-base
     ceph-mds)
+if(WITH_MGR)
+  add_dependencies(vstart ceph-mgr)
+endif()
 if(WITH_RADOSGW)
   add_dependencies(vstart radosgw radosgw-admin)
 endif(WITH_RADOSGW)

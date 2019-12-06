@@ -170,6 +170,8 @@ static ostream& _prefix(std::ostream* _dout, int whoami, epoch_t epoch) {
   return *_dout << "osd." << whoami << " " << epoch << " ";
 }
 
+constexpr int OSD::HeartbeatInfo::HEARTBEAT_MAX_CONN;
+
 //Initial features in new superblock.
 //Features here are also automatically upgraded
 CompatSet OSD::get_osd_initial_compat_set() {

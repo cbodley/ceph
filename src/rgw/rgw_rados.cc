@@ -5619,6 +5619,7 @@ static inline std::string after_delim(std::string delim)
   return result;
 }
 
+constexpr int64_t RGWRados::Bucket::List::bucket_list_objects_absolute_max;
 
 /**
  * Get ordered listing of the objects in a bucket.
