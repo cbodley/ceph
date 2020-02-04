@@ -15,4 +15,11 @@
 #include <string>
 #include <string_view>
 
+#include <boost/asio/spawn.hpp>
+
+#include "include/RADOS/RADOS.hpp"
+
 std::string get_temp_pool_name(std::string_view prefix = {});
+
+std::int64_t create_pool(RADOS::RADOS& r, std::string_view pname,
+			 boost::asio::yield_context y);

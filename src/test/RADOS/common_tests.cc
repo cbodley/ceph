@@ -18,9 +18,18 @@
 
 #include <unistd.h>
 
+#include <boost/range/begin.hpp>
+#include <boost/range/end.hpp>
+
+#include <boost/asio/spawn.hpp>
+
 #include <fmt/format.h>
 
 #include "common_tests.h"
+#include "include/RADOS/RADOS.hpp"
+
+namespace ba = boost::asio;
+namespace R = RADOS;
 
 std::string get_temp_pool_name(std::string_view prefix)
 {
@@ -29,4 +38,11 @@ std::string get_temp_pool_name(std::string_view prefix)
   std::memset(hostname, 0, sizeof(hostname));
   gethostname(hostname, sizeof(hostname) - 1);
   return fmt::format("{}{}-{}-{}", prefix, hostname, getpid(), num++);
+}
+
+std::int64_t create_pool(R::RADOS& r, std::string_view pname,
+			 ba::yield_context y)
+{
+  r.create_pool(pname, std::nullopt, y);
+  return r.lookup_pool(pname, y);
 }
