@@ -17,6 +17,8 @@
 
 #include "rgw_asio_client.h"
 #include "rgw_asio_frontend.h"
+#include "rgw_crypt_sanitize.h"
+#include "rgw_client_io.h"
 
 #ifdef WITH_RADOSGW_BEAST_OPENSSL
 #include <boost/asio/ssl.hpp>
@@ -179,6 +181,22 @@ void handle_connection(boost::asio::io_context& context,
       auto y = optional_yield{context, yield};
       process_request(env.store, env.rest, &req, env.uri_prefix,
                       *env.auth_registry, &client, env.olog, y, scheduler);
+      
+      // access log line elements begin per Apache Combined Log Format with additions following
+      RGWEnv& rgw_env = client.get_env();
+      struct req_state s(g_ceph_context, &rgw_env, nullptr, req.id);
+      s.cio = &client;
+      std::stringstream buf;
+      bool user_agent_hdr = rgw_env.get("HTTP_USER_AGENT") != nullptr;
+      bool referer_hdr = rgw_env.get("HTTP_REFERER") != nullptr;
+      buf << rgw_env.get("REMOTE_ADDR", "") << " - - [" << s.time << "] \"" << s.info.method 
+      << " " << s.info.request_uri << (!s.info.request_params.empty() ? "?" : "") << s.info.request_params
+      << " HTTP/" << rgw_env.get("HTTP_VERSION", "-") << "\" " << s.err.http_ret << " "
+      << ACCOUNTING_IO(&s)->get_bytes_sent() + ACCOUNTING_IO(&s)->get_bytes_received() << " "
+      << (referer_hdr ? "\"" : "") << rgw_env.get("HTTP_REFERER", "-") << (referer_hdr ? "\"" : "") << " "
+      << (user_agent_hdr ? "\"" : "") << rgw_env.get("HTTP_USER_AGENT", "-") << (user_agent_hdr ? "\"" : "")
+      << " " << rgw_env.get("HTTP_RANGE", "-");
+      ldout(cct, 1) << "beast: " << hex << &req << dec << ": " << rgw::crypt_sanitize::log_content(buf.str()) << dendl;
     }
 
     if (!parser.keep_alive()) {
