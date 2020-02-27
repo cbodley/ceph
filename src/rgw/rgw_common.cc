@@ -1570,19 +1570,18 @@ static bool char_needs_url_encoding(char c)
   return false;
 }
 
-void url_encode(const string& src, string& dst, bool encode_slash)
+void url_encode(const std::string_view& src, string& dst, bool encode_slash)
 {
-  const char *p = src.c_str();
-  for (unsigned i = 0; i < src.size(); i++, p++) {
-    if ((!encode_slash && *p == 0x2F) || !char_needs_url_encoding(*p)) {
-      dst.append(p, 1);
+  for (auto c : src) {
+    if ((!encode_slash && c == 0x2F) || !char_needs_url_encoding(c)) {
+      dst.append(1, c);
     }else {
-      rgw_uri_escape_char(*p, dst);
+      rgw_uri_escape_char(c, dst);
     }
   }
 }
 
-std::string url_encode(const std::string& src, bool encode_slash)
+std::string url_encode(const std::string_view& src, bool encode_slash)
 {
   std::string dst;
   url_encode(src, dst, encode_slash);

@@ -2275,9 +2275,9 @@ extern bool verify_object_permission_no_policy(const DoutPrefixProvider* dpp, st
 extern void rgw_uri_escape_char(char c, string& dst);
 extern std::string url_decode(const boost::string_view& src_str,
                               bool in_query = false);
-extern void url_encode(const std::string& src, string& dst,
+extern void url_encode(const std::string_view& src, string& dst,
                        bool encode_slash = true);
-extern std::string url_encode(const std::string& src, bool encode_slash = true);
+extern std::string url_encode(const std::string_view& src, bool encode_slash = true);
 /* destination should be CEPH_CRYPTO_HMACSHA1_DIGESTSIZE bytes long */
 extern void calc_hmac_sha1(const char *key, int key_len,
                           const char *msg, int msg_len, char *dest);
