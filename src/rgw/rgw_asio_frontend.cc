@@ -17,8 +17,6 @@
 
 #include "rgw_asio_client.h"
 #include "rgw_asio_frontend.h"
-#include "rgw_crypt_sanitize.h"
-#include "rgw_client_io.h"
 
 #ifdef WITH_RADOSGW_BEAST_OPENSSL
 #include <boost/asio/ssl.hpp>
@@ -97,6 +95,34 @@ class StreamIO : public rgw::asio::ClientIO {
   }
 };
 
+// output the http version as a string, ie 'HTTP/1.1'
+struct http_version {
+  unsigned major;
+  unsigned minor;
+  explicit http_version(unsigned version)
+    : major(version / 10), minor(version % 10) {}
+};
+std::ostream& operator<<(std::ostream& out, const http_version& v) {
+  return out << "HTTP/" << v.major << '.' << v.minor;
+}
+
+// log an http header value or '-' if it's missing
+struct log_header {
+  const http::fields& fields;
+  http::field field;
+  std::string_view quote;
+  log_header(const http::fields& fields, http::field field,
+             std::string_view quote = "")
+    : fields(fields), field(field), quote(quote) {}
+};
+std::ostream& operator<<(std::ostream& out, const log_header& h) {
+  auto p = h.fields.find(h.field);
+  if (p == h.fields.end()) {
+    return out << '-';
+  }
+  return out << h.quote << p->value() << h.quote;
+}
+
 using SharedMutex = ceph::async::SharedMutex<boost::asio::io_context::executor_type>;
 
 template <typename Stream>
@@ -134,9 +160,9 @@ void handle_connection(boost::asio::io_context& context,
       ldout(cct, 20) << "failed to read header: " << ec.message() << dendl;
       return;
     }
+    auto& message = parser.get();
     if (ec) {
       ldout(cct, 1) << "failed to read header: " << ec.message() << dendl;
-      auto& message = parser.get();
       http::response<http::empty_body> response;
       response.result(http::status::bad_request);
       response.version(message.version() == 10 ? 10 : 11);
@@ -179,24 +205,24 @@ void handle_connection(boost::asio::io_context& context,
                                     &real_client))));
       RGWRestfulIO client(cct, &real_client_io);
       auto y = optional_yield{context, yield};
+      int http_ret = 0;
       process_request(env.store, env.rest, &req, env.uri_prefix,
-                      *env.auth_registry, &client, env.olog, y, scheduler);
-      
-      // access log line elements begin per Apache Combined Log Format with additions following
-      RGWEnv& rgw_env = client.get_env();
-      struct req_state s(g_ceph_context, &rgw_env, nullptr, req.id);
-      s.cio = &client;
-      std::stringstream buf;
-      bool user_agent_hdr = rgw_env.get("HTTP_USER_AGENT") != nullptr;
-      bool referer_hdr = rgw_env.get("HTTP_REFERER") != nullptr;
-      buf << rgw_env.get("REMOTE_ADDR", "") << " - - [" << s.time << "] \"" << s.info.method 
-      << " " << s.info.request_uri << (!s.info.request_params.empty() ? "?" : "") << s.info.request_params
-      << " HTTP/" << rgw_env.get("HTTP_VERSION", "-") << "\" " << s.err.http_ret << " "
-      << ACCOUNTING_IO(&s)->get_bytes_sent() + ACCOUNTING_IO(&s)->get_bytes_received() << " "
-      << (referer_hdr ? "\"" : "") << rgw_env.get("HTTP_REFERER", "-") << (referer_hdr ? "\"" : "") << " "
-      << (user_agent_hdr ? "\"" : "") << rgw_env.get("HTTP_USER_AGENT", "-") << (user_agent_hdr ? "\"" : "")
-      << " " << rgw_env.get("HTTP_RANGE", "-");
-      ldout(cct, 1) << "beast: " << hex << &req << dec << ": " << rgw::crypt_sanitize::log_content(buf.str()) << dendl;
+                      *env.auth_registry, &client, env.olog, y,
+                      scheduler, &http_ret);
+
+      if (cct->_conf->subsys.should_gather(dout_subsys, 1)) {
+        // access log line elements begin per Apache Combined Log Format with additions following
+        const auto now = ceph::coarse_real_clock::now();
+        using ceph::operator<<; // for coarse_real_time
+        ldout(cct, 1) << "beast: " << hex << &req << dec << ": "
+            << remote_endpoint.address() << " - - [" << now << "] \""
+            << message.method_string() << ' ' << message.target() << ' '
+            << http_version{message.version()} << "\" " << http_ret << ' '
+            << client.get_bytes_sent() + client.get_bytes_received() << ' '
+            << log_header{message, http::field::referer, "\""} << ' '
+            << log_header{message, http::field::user_agent, "\""} << ' '
+            << log_header{message, http::field::range} << dendl;
+      }
     }
 
     if (!parser.keep_alive()) {
