@@ -4,12 +4,14 @@ tasks:
 - rgw: [client.0]
 - ragweed:
     client.0:
-      default-branch: ceph-nautilus
+      force-branch: ceph-nautilus-BackendUnavailable
+      git_remote: https://github.com/badone/
       rgw_server: client.0
       stages: prepare
 - ragweed:
     client.0:
-      default-branch: ceph-nautilus
+      force-branch: ceph-nautilus-BackendUnavailable
+      git_remote: https://github.com/badone/
       rgw_server: client.0
       stages: check
 overrides:
