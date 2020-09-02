@@ -5,9 +5,14 @@ overrides:
         setuser: ceph
         setgroup: ceph
         debug rgw: 20
+        debug ms: 1
         rgw crypt s3 kms backend: testing
         rgw crypt s3 kms encryption keys: testkey-1=YmluCmJvb3N0CmJvb3N0LWJ1aWxkCmNlcGguY29uZgo= testkey-2=aWIKTWFrZWZpbGUKbWFuCm91dApzcmMKVGVzdGluZwo=
         rgw crypt require ssl: false
+      osd:
+        debug osd: 20
+        debug objclass: 20
+        debug ms: 1
   rgw:
     compression type: random
     storage classes: LUKEWARM, FROZEN
