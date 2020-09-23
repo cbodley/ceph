@@ -7530,6 +7530,8 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
   map<string, bufferlist> unfiltered_attrset;
   uint64_t size = 0;
   struct timespec mtime_ts;
+  int prefetch_ret = 0;
+  uint64_t prefetch_offset = 0;
 
   ObjectReadOperation op;
   if (objv_tracker) {
@@ -7542,7 +7544,9 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
     op.stat2(&size, &mtime_ts, NULL);
   }
   if (first_chunk) {
-    op.read(0, cct->_conf->rgw_max_chunk_size, first_chunk, NULL);
+    cls_rgw_head_prefetch(op, 0, std::numeric_limits<uint64_t>::max(),
+                          cct->_conf->rgw_max_chunk_size,
+                          &prefetch_ret, &prefetch_offset, first_chunk);
   }
   bufferlist outbl;
   r = rgw_rados_operate(ref.pool.ioctx(), ref.obj.oid, &op, &outbl, null_yield);
@@ -7553,6 +7557,9 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
 
   if (r < 0)
     return r;
+  if (prefetch_ret < 0)
+    return prefetch_ret;
+  // TODO: make use of prefetch_offset
 
   if (psize)
     *psize = size;
