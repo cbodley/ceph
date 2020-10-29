@@ -4,6 +4,7 @@
 #include <atomic>
 #include <thread>
 #include <vector>
+#include "time.h"
 
 #include <boost/asio.hpp>
 #include <boost/intrusive/list.hpp>
@@ -211,6 +212,12 @@ void handle_connection(boost::asio::io_context& context,
       auto y = optional_yield{context, yield};
       int http_ret = 0;
       const auto started = ceph::coarse_real_clock::now();
+
+      auto time_t_started = ceph::coarse_real_clock::to_time_t(started);
+      const tm* local_tm = localtime(&time_t_started);
+      char apache_formatted_time [80];
+      strftime(apache_formatted_time,80,"%d/%b/%Y:%T %z",local_tm);
+
       process_request(env.store, env.rest, &req, env.uri_prefix,
                       *env.auth_registry, &client, env.olog, y,
                       scheduler, &http_ret);
@@ -219,7 +226,7 @@ void handle_connection(boost::asio::io_context& context,
         // access log line elements begin per Apache Combined Log Format with additions following
         using ceph::operator<<; // for coarse_real_time
         ldout(cct, 1) << "beast: " << hex << &req << dec << ": "
-            << remote_endpoint.address() << " - - [" << started << "] \""
+            << remote_endpoint.address() << " - - [" << apache_formatted_time << "] \""
             << message.method_string() << ' ' << message.target() << ' '
             << http_version{message.version()} << "\" " << http_ret << ' '
             << client.get_bytes_sent() + client.get_bytes_received() << ' '
