@@ -215,8 +215,6 @@ void handle_connection(boost::asio::io_context& context,
 
       auto time_t_started = ceph::coarse_real_clock::to_time_t(started);
       const tm* local_tm = localtime(&time_t_started);
-      char apache_formatted_time [80];
-      strftime(apache_formatted_time,80,"%d/%b/%Y:%T %z",local_tm);
 
       process_request(env.store, env.rest, &req, env.uri_prefix,
                       *env.auth_registry, &client, env.olog, y,
@@ -226,7 +224,9 @@ void handle_connection(boost::asio::io_context& context,
         // access log line elements begin per Apache Combined Log Format with additions following
         using ceph::operator<<; // for coarse_real_time
         ldout(cct, 1) << "beast: " << hex << &req << dec << ": "
-            << remote_endpoint.address() << " - - [" << apache_formatted_time << "] \""
+            << remote_endpoint.address() << " - - [" << put_time(local_tm, "%d/%b/%Y:%T.")
+            << setfill('0') << setw(3) << std::chrono::duration_cast<std::chrono::milliseconds>(started.time_since_epoch()).count() % 1000
+            << put_time(local_tm, " %z") << "] \""
             << message.method_string() << ' ' << message.target() << ' '
             << http_version{message.version()} << "\" " << http_ret << ' '
             << client.get_bytes_sent() + client.get_bytes_received() << ' '
