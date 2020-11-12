@@ -211,6 +211,7 @@ void handle_connection(boost::asio::io_context& context,
       RGWRestfulIO client(cct, &real_client_io);
       auto y = optional_yield{context, yield};
       int http_ret = 0;
+      string user;
       const auto started = ceph::coarse_real_clock::now();
 
       auto time_t_started = ceph::coarse_real_clock::to_time_t(started);
@@ -218,7 +219,7 @@ void handle_connection(boost::asio::io_context& context,
 
       process_request(env.store, env.rest, &req, env.uri_prefix,
                       *env.auth_registry, &client, env.olog, y,
-                      scheduler, &http_ret);
+                      scheduler, &user, &http_ret);
 
       if (cct->_conf->subsys.should_gather(dout_subsys, 1)) {
         // access log line elements begin per Apache Combined Log Format with additions following
@@ -232,7 +233,8 @@ void handle_connection(boost::asio::io_context& context,
             << client.get_bytes_sent() + client.get_bytes_received() << ' '
             << log_header{message, http::field::referer, "\""} << ' '
             << log_header{message, http::field::user_agent, "\""} << ' '
-            << log_header{message, http::field::range} << dendl;
+            << log_header{message, http::field::range} << ' '
+            << user << dendl;
       }
     }
 
