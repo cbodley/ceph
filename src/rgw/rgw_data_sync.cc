@@ -45,11 +45,12 @@
 #undef dout_prefix
 #define dout_prefix (*_dout << "data sync: ")
 
-static string datalog_sync_status_oid_prefix = "datalog.sync-status";
-static string datalog_sync_status_shard_prefix = "datalog.sync-status.shard";
-static string datalog_sync_full_sync_index_prefix = "data.full-sync.index";
-static string bucket_status_oid_prefix = "bucket.sync-status";
-static string object_status_oid_prefix = "bucket.sync-status";
+static const string datalog_sync_status_oid_prefix = "datalog.sync-status";
+static const string datalog_sync_status_shard_prefix = "datalog.sync-status.shard";
+static const string datalog_sync_full_sync_index_prefix = "data.full-sync.index";
+static const string bucket_full_status_oid_prefix = "bucket.full-sync-status";
+static const string bucket_status_oid_prefix = "bucket.sync-status";
+static const string object_status_oid_prefix = "bucket.sync-status";
 
 
 void rgw_datalog_info::decode_json(JSONObj *obj) {
@@ -80,6 +81,16 @@ class RGWReadDataSyncStatusMarkersCR : public RGWShardCollectCR {
 
   map<uint32_t, rgw_data_sync_marker>& markers;
 
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to read data sync status: "
+          << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
  public:
   RGWReadDataSyncStatusMarkersCR(RGWDataSyncCtx *sc, int num_shards,
                                  map<uint32_t, rgw_data_sync_marker>& markers)
@@ -116,6 +127,16 @@ class RGWReadDataSyncRecoveringShardsCR : public RGWShardCollectCR {
   string marker;
   std::vector<RGWRadosGetOmapKeysCR::ResultPtr>& omapkeys;
 
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to list recovering data sync: "
+          << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
  public:
   RGWReadDataSyncRecoveringShardsCR(RGWDataSyncCtx *sc, uint64_t _max_entries, int _num_shards,
                                     std::vector<RGWRadosGetOmapKeysCR::ResultPtr>& omapkeys)
@@ -351,6 +372,16 @@ class RGWReadRemoteDataLogInfoCR : public RGWShardCollectCR {
   int shard_id;
 #define READ_DATALOG_MAX_CONCURRENT 10
 
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to fetch remote datalog info: "
+          << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
 public:
   RGWReadRemoteDataLogInfoCR(RGWDataSyncCtx *_sc,
                      int _num_shards,
@@ -441,6 +472,16 @@ class RGWListRemoteDataLogCR : public RGWShardCollectCR {
   map<int, string>::iterator iter;
 #define READ_DATALOG_MAX_CONCURRENT 10
 
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to list remote datalog: "
+          << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
 public:
   RGWListRemoteDataLogCR(RGWDataSyncCtx *_sc,
                      map<int, string>& _shards,
@@ -987,37 +1028,6 @@ std::ostream& operator<<(std::ostream& out, const bucket_shard_str& rhs) {
   return out;
 }
 
-class RGWRunBucketSyncCoroutine : public RGWCoroutine {
-  RGWDataSyncCtx *sc;
-  RGWDataSyncEnv *sync_env;
-  boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr;
-  rgw_bucket_sync_pair_info sync_pair;
-  rgw_bucket_sync_pipe sync_pipe;
-  rgw_bucket_shard_sync_info sync_status;
-  RGWMetaSyncEnv meta_sync_env;
-  RGWObjVersionTracker objv_tracker;
-  ceph::real_time* progress;
-
-  const std::string status_oid;
-
-  RGWSyncTraceNodeRef tn;
-
-public:
-  RGWRunBucketSyncCoroutine(RGWDataSyncCtx *_sc,
-                            boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr,
-                            const rgw_bucket_sync_pair_info& _sync_pair,
-                            const RGWSyncTraceNodeRef& _tn_parent,
-                            ceph::real_time* progress)
-    : RGWCoroutine(_sc->cct), sc(_sc), sync_env(_sc->env),
-      lease_cr(std::move(lease_cr)), sync_pair(_sync_pair), progress(progress),
-      status_oid(RGWBucketPipeSyncStatusManager::status_oid(sc->source_zone, sync_pair)),
-      tn(sync_env->sync_tracer->add_node(_tn_parent, "bucket",
-                                         SSTR(bucket_shard_str{_sync_pair.dest_bs} << "<-" << bucket_shard_str{_sync_pair.source_bs} ))) {
-  }
-
-  int operate() override;
-};
-
 struct all_bucket_info {
   RGWBucketInfo bucket_info;
   map<string, bufferlist> attrs;
@@ -1178,26 +1188,6 @@ struct rgw_sync_pipe_info_set {
 
     handlers = std::move(p);
   }
-};
-
-class RGWRunBucketsSyncBySourceCR : public RGWCoroutine {
-  RGWDataSyncCtx *sc;
-  RGWDataSyncEnv *sync_env;
-
-  rgw_bucket_shard source;
-
-  RGWSyncTraceNodeRef tn;
-
-public:
-  RGWRunBucketsSyncBySourceCR(RGWDataSyncCtx *_sc, const rgw_bucket_shard& _source, const RGWSyncTraceNodeRef& _tn_parent)
-    : RGWCoroutine(_sc->cct), sc(_sc), sync_env(_sc->env), source(_source),
-      tn(sync_env->sync_tracer->add_node(_tn_parent, "source",
-                                         SSTR(bucket_shard_str{_source} ))) {
-  }
-  ~RGWRunBucketsSyncBySourceCR() override {
-  }
-
-  int operate() override;
 };
 
 class RGWRunBucketSourcesSyncCR : public RGWCoroutine {
@@ -2746,15 +2736,17 @@ class RGWInitBucketShardSyncStatusCoroutine : public RGWCoroutine {
   rgw_bucket_shard_sync_info& status;
   RGWObjVersionTracker& objv_tracker;
   rgw_bucket_index_marker_info info;
+  bool exclusive;
 public:
   RGWInitBucketShardSyncStatusCoroutine(RGWDataSyncCtx *_sc,
                                         const rgw_bucket_sync_pair_info& _sync_pair,
                                         rgw_bucket_shard_sync_info& _status,
-                                        RGWObjVersionTracker& objv_tracker)
+                                        RGWObjVersionTracker& objv_tracker,
+                                        bool exclusive)
     : RGWCoroutine(_sc->cct), sc(_sc), sync_env(_sc->env),
       sync_pair(_sync_pair),
-      sync_status_oid(RGWBucketPipeSyncStatusManager::status_oid(sc->source_zone, _sync_pair)),
-      status(_status), objv_tracker(objv_tracker)
+      sync_status_oid(RGWBucketPipeSyncStatusManager::inc_status_oid(sc->source_zone, _sync_pair)),
+      status(_status), objv_tracker(objv_tracker), exclusive(exclusive)
   {}
 
   int operate() override {
@@ -2779,23 +2771,18 @@ public:
         } else {
           // whether or not to do full sync, incremental sync will follow anyway
           if (sync_env->sync_module->should_full_sync()) {
-            status.state = rgw_bucket_shard_sync_info::StateFullSync;
             status.inc_marker.position = info.max_marker;
-          } else {
-            // clear the marker position unless we're resuming from SYNCSTOP
-            if (!stopped) {
-              status.inc_marker.position = "";
-            }
-            status.state = rgw_bucket_shard_sync_info::StateIncrementalSync;
           }
           write_status = true;
           status.inc_marker.timestamp = ceph::real_clock::now();
+          status.state = rgw_bucket_shard_sync_info::StateIncrementalSync;
         }
 
         if (write_status) {
           map<string, bufferlist> attrs;
           status.encode_all_attrs(attrs);
-          call(new RGWSimpleRadosWriteAttrsCR(sync_env->async_rados, sync_env->svc->sysobj, obj, attrs, &objv_tracker));
+          call(new RGWSimpleRadosWriteAttrsCR(sync_env->async_rados, sync_env->svc->sysobj,
+                                              obj, attrs, &objv_tracker, exclusive));
         } else {
           call(new RGWRadosRemoveCR(store, obj, &objv_tracker));
         }
@@ -2817,11 +2804,13 @@ RGWRemoteBucketManager::RGWRemoteBucketManager(const DoutPrefixProvider *_dpp,
                                                const rgw_zone_id& _source_zone,
                                                RGWRESTConn *_conn,
                                                const RGWBucketInfo& source_bucket_info,
-                                               const rgw_bucket& dest_bucket) : dpp(_dpp), sync_env(_sync_env)
+                                               const rgw_bucket& dest_bucket)
+  : dpp(_dpp), sync_env(_sync_env), conn(_conn), source_zone(_source_zone),
+    full_status_obj(sync_env->svc->zone->get_zone_params().log_pool,
+                    RGWBucketPipeSyncStatusManager::full_status_oid(source_zone,
+                                                                    source_bucket_info.bucket,
+                                                                    dest_bucket))
 {
-  conn = _conn;
-  source_zone = _source_zone;
-
   int num_shards = (source_bucket_info.layout.current_index.layout.normal.num_shards <= 0 ? 
                     1 : source_bucket_info.layout.current_index.layout.normal.num_shards);
 
@@ -2845,14 +2834,6 @@ RGWRemoteBucketManager::RGWRemoteBucketManager(const DoutPrefixProvider *_dpp,
   }
 
   sc.init(sync_env, conn, source_zone);
-}
-
-RGWCoroutine *RGWRemoteBucketManager::init_sync_status_cr(int num, RGWObjVersionTracker& objv_tracker)
-{
-  if ((size_t)num >= sync_pairs.size()) {
-    return nullptr;
-  }
-  return new RGWInitBucketShardSyncStatusCoroutine(&sc, sync_pairs[num], init_status, objv_tracker);
 }
 
 #define BUCKET_SYNC_ATTR_PREFIX RGW_ATTR_PREFIX "bucket-sync."
@@ -2927,7 +2908,7 @@ public:
                                    rgw_bucket_shard_sync_info *_status,
                                    RGWObjVersionTracker* objv_tracker)
     : RGWCoroutine(_sc->cct), sc(_sc), sync_env(_sc->env),
-      oid(RGWBucketPipeSyncStatusManager::status_oid(sc->source_zone, sync_pair)),
+      oid(RGWBucketPipeSyncStatusManager::inc_status_oid(sc->source_zone, sync_pair)),
       status(_status), objv_tracker(objv_tracker)
   {}
   int operate() override;
@@ -2951,6 +2932,234 @@ int RGWReadBucketPipeSyncStatusCoroutine::operate()
     return set_cr_done();
   }
   return 0;
+}
+
+// wrap ReadSyncStatus and set a flag if it's not in incremental
+class CheckBucketShardStatusIsIncremental : public RGWReadBucketPipeSyncStatusCoroutine {
+  bool* result;
+  rgw_bucket_shard_sync_info status;
+ public:
+  CheckBucketShardStatusIsIncremental(RGWDataSyncCtx* sc,
+                                      const rgw_bucket_sync_pair_info& sync_pair,
+                                      bool* result)
+    : RGWReadBucketPipeSyncStatusCoroutine(sc, sync_pair, &status, nullptr),
+      result(result)
+  {}
+
+  int operate() override {
+    int r = RGWReadBucketPipeSyncStatusCoroutine::operate();
+    if (state == RGWCoroutine_Done &&
+        status.state != rgw_bucket_shard_sync_info::StateIncrementalSync) {
+      *result = false;
+    }
+    return r;
+  }
+};
+
+class CheckAllBucketShardStatusIsIncremental : public RGWShardCollectCR {
+  // start with 1 shard, and only spawn more if we detect an existing shard.
+  // this makes the backward compatilibility check far less expensive in the
+  // general case where no shards exist
+  static constexpr int initial_concurrent_shards = 1;
+  static constexpr int max_concurrent_shards = 16;
+
+  RGWDataSyncCtx* sc;
+  rgw_bucket_sync_pair_info sync_pair;
+  const int num_shards;
+  bool* result;
+  int shard = 0;
+ public:
+  CheckAllBucketShardStatusIsIncremental(RGWDataSyncCtx* sc,
+                                         const rgw_bucket_sync_pair_info& sync_pair,
+                                         int num_shards, bool* result)
+    : RGWShardCollectCR(sc->cct, initial_concurrent_shards),
+      sc(sc), sync_pair(sync_pair), num_shards(num_shards), result(result)
+  {}
+
+  bool spawn_next() override {
+    // stop spawning if we saw any errors or non-incremental shards
+    if (shard >= num_shards || status < 0 || !*result) {
+      return false;
+    }
+    sync_pair.dest_bs.shard_id = shard++;
+    spawn(new CheckBucketShardStatusIsIncremental(sc, sync_pair, result), false);
+    return true;
+  }
+
+ private:
+  int handle_result(int r) override {
+    if (r < 0) {
+      ldout(cct, 4) << "failed to read bucket shard status: "
+          << cpp_strerror(r) << dendl;
+    } else if (shard == 0) {
+      // enable concurrency once the first shard succeeds
+      max_concurrent = max_concurrent_shards;
+    }
+    return r;
+  }
+};
+
+// wrap InitBucketShardSyncStatus with local storage for 'status' and 'objv'
+// and a loop to retry on racing writes
+class InitBucketShardStatusCR : public RGWCoroutine {
+  RGWDataSyncCtx* sc;
+  const rgw_bucket_sync_pair_info& pair;
+  rgw_bucket_shard_sync_info status;
+  RGWObjVersionTracker objv;
+  int tries = 10; // retry on racing writes
+  bool exclusive = true; // first try is exclusive
+  using ReadCR = RGWReadBucketPipeSyncStatusCoroutine;
+  using InitCR = RGWInitBucketShardSyncStatusCoroutine;
+ public:
+  InitBucketShardStatusCR(RGWDataSyncCtx* sc, const rgw_bucket_sync_pair_info& pair)
+    : RGWCoroutine(sc->cct), sc(sc), pair(pair)
+  {}
+  int operate() {
+    reenter(this) {
+      // try exclusive create with empty status
+      objv.generate_new_write_ver(cct);
+      yield call(new InitCR(sc, pair, status, objv, exclusive));
+      if (retcode >= 0) {
+        return set_cr_done();
+      } else if (retcode != -EEXIST) {
+        return set_cr_error(retcode);
+      }
+
+      exclusive = false;
+      // retry loop to reinitialize
+      while (--tries) {
+        objv.clear();
+        // read current status and objv
+        yield call(new ReadCR(sc, pair, &status, &objv));
+        if (retcode < 0) {
+          return set_cr_error(retcode);
+        }
+        yield call(new InitCR(sc, pair, status, objv, exclusive));
+        if (retcode >= 0) {
+          return set_cr_done();
+        } else if (retcode != -ECANCELED) {
+          return set_cr_error(retcode);
+        }
+      }
+      return set_cr_error(retcode);
+    }
+    return 0;
+  }
+};
+
+class InitBucketShardStatusCollectCR : public RGWShardCollectCR {
+  static constexpr int max_concurrent_shards = 16;
+  RGWDataSyncCtx* sc;
+  rgw_bucket_sync_pair_info sync_pair;
+  const int num_shards;
+  int shard = 0;
+
+  int handle_result(int r) override {
+    if (r < 0) {
+      ldout(cct, 4) << "failed to init bucket shard status: "
+          << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
+ public:
+  InitBucketShardStatusCollectCR(RGWDataSyncCtx* sc,
+                                 const rgw_bucket_sync_pair_info& sync_pair,
+                                 int num_shards)
+    : RGWShardCollectCR(sc->cct, max_concurrent_shards),
+      sc(sc), sync_pair(sync_pair), num_shards(num_shards)
+  {}
+
+  bool spawn_next() override {
+    if (shard >= num_shards || status < 0) { // stop spawning on any errors
+      return false;
+    }
+    sync_pair.dest_bs.shard_id = shard++;
+    spawn(new InitBucketShardStatusCR(sc, sync_pair), false);
+    return true;
+  }
+};
+
+class InitBucketFullSyncStatusCR : public RGWCoroutine {
+  RGWDataSyncCtx *sc;
+  RGWDataSyncEnv *sync_env;
+
+  const rgw_bucket_sync_pair_info& sync_pair;
+  const rgw_raw_obj& status_obj;
+  rgw_bucket_sync_status& status;
+  RGWObjVersionTracker& objv;
+  const int num_shards;
+  const bool check_compat;
+
+  bool all_incremental = true;
+public:
+  InitBucketFullSyncStatusCR(RGWDataSyncCtx* sc,
+                             const rgw_bucket_sync_pair_info& sync_pair,
+                             const rgw_raw_obj& status_obj,
+                             rgw_bucket_sync_status& status,
+                             RGWObjVersionTracker& objv,
+                             int num_shards, bool check_compat)
+    : RGWCoroutine(sc->cct), sc(sc), sync_env(sc->env),
+      sync_pair(sync_pair), status_obj(status_obj),
+      status(status), objv(objv), num_shards(num_shards),
+      check_compat(check_compat)
+  {}
+
+  int operate() override {
+    reenter(this) {
+      status.state = BucketSyncState::Init;
+
+      if (check_compat) {
+        // try to convert existing per-shard incremental status for backward compatibility
+        yield call(new CheckAllBucketShardStatusIsIncremental(sc, sync_pair, num_shards, &all_incremental));
+        if (retcode < 0) {
+          return set_cr_error(retcode);
+        }
+        if (all_incremental) {
+          // we can use existing status and resume incremental sync
+          status.state = BucketSyncState::Incremental;
+        }
+      }
+
+      if (status.state != BucketSyncState::Incremental) {
+        // initialize all shard sync status. this will populate the log marker
+        // positions where incremental sync will resume after full sync
+        yield call(new InitBucketShardStatusCollectCR(sc, sync_pair, num_shards));
+        if (retcode < 0) {
+          ldout(cct, 20) << "failed to init bucket shard status: "
+              << cpp_strerror(retcode) << dendl;
+          return set_cr_error(retcode);
+        }
+
+        if (sync_env->sync_module->should_full_sync()) {
+          status.state = BucketSyncState::Full;
+        } else {
+          status.state = BucketSyncState::Incremental;
+        }
+      }
+
+      ldout(cct, 20) << "writing bucket sync state=" << status.state << dendl;
+
+      // write bucket sync status
+      using CR = RGWSimpleRadosWriteCR<rgw_bucket_sync_status>;
+      yield call(new CR(sync_env->async_rados, sync_env->svc->sysobj,
+                        status_obj, status, &objv, false));
+      if (retcode < 0) {
+        ldout(cct, 20) << "failed to write bucket shard status: "
+            << cpp_strerror(retcode) << dendl;
+        return set_cr_error(retcode);
+      }
+      return set_cr_done();
+    }
+    return 0;
+  }
+};
+
+RGWCoroutine *RGWRemoteBucketManager::init_sync_status_cr(RGWObjVersionTracker& objv)
+{
+  constexpr bool check_compat = false;
+  const int num_shards = num_pipes();
+  return new InitBucketFullSyncStatusCR(&sc, sync_pairs[0], full_status_obj,
+                                        full_status, objv, num_shards, check_compat);
 }
 
 #define OMAP_READ_MAX_ENTRIES 10
@@ -3242,34 +3451,30 @@ struct bucket_list_result {
   }
 };
 
-class RGWListBucketShardCR: public RGWCoroutine {
+class RGWListRemoteBucketCR: public RGWCoroutine {
   RGWDataSyncCtx *sc;
   RGWDataSyncEnv *sync_env;
   const rgw_bucket_shard& bs;
-  const string instance_key;
   rgw_obj_key marker_position;
 
   bucket_list_result *result;
 
 public:
-  RGWListBucketShardCR(RGWDataSyncCtx *_sc, const rgw_bucket_shard& bs,
-                       rgw_obj_key& _marker_position, bucket_list_result *_result)
+  RGWListRemoteBucketCR(RGWDataSyncCtx *_sc, const rgw_bucket_shard& bs,
+                        rgw_obj_key& _marker_position, bucket_list_result *_result)
     : RGWCoroutine(_sc->cct), sc(_sc), sync_env(_sc->env), bs(bs),
-      instance_key(bs.get_key()), marker_position(_marker_position),
-      result(_result) {}
+      marker_position(_marker_position), result(_result) {}
 
   int operate() override {
     reenter(this) {
       yield {
-        rgw_http_param_pair pairs[] = { { "rgwx-bucket-instance", instance_key.c_str() },
-					{ "versions" , NULL },
+        rgw_http_param_pair pairs[] = { { "versions" , NULL },
 					{ "format" , "json" },
 					{ "objs-container" , "true" },
 					{ "key-marker" , marker_position.name.c_str() },
 					{ "version-id-marker" , marker_position.instance.c_str() },
 	                                { NULL, NULL } };
-        // don't include tenant in the url, it's already part of instance_key
-        string p = string("/") + bs.bucket.name;
+        string p = string("/") + bs.bucket.get_key(':', 0);
         call(new RGWReadRESTResourceCR<bucket_list_result>(sync_env->cct, sc->conn, sync_env->http_manager, p, pairs, result));
       }
       if (retcode < 0) {
@@ -3325,37 +3530,34 @@ public:
 
 #define BUCKET_SYNC_UPDATE_MARKER_WINDOW 10
 
-class RGWBucketFullSyncShardMarkerTrack : public RGWSyncShardMarkerTrack<rgw_obj_key, rgw_obj_key> {
+class RGWBucketFullSyncMarkerTrack : public RGWSyncShardMarkerTrack<rgw_obj_key, rgw_obj_key> {
   RGWDataSyncCtx *sc;
   RGWDataSyncEnv *sync_env;
 
-  string marker_oid;
-  rgw_bucket_shard_full_sync_marker sync_marker;
+  const rgw_raw_obj& status_obj;
+  rgw_bucket_sync_status& sync_status;
   RGWSyncTraceNodeRef tn;
   RGWObjVersionTracker& objv_tracker;
 
 public:
-  RGWBucketFullSyncShardMarkerTrack(RGWDataSyncCtx *_sc,
-                                    const string& _marker_oid,
-                                    const rgw_bucket_shard_full_sync_marker& _marker,
-                                    RGWSyncTraceNodeRef tn,
-                                    RGWObjVersionTracker& objv_tracker)
+  RGWBucketFullSyncMarkerTrack(RGWDataSyncCtx *_sc,
+                               const rgw_raw_obj& status_obj,
+                               rgw_bucket_sync_status& sync_status,
+                               RGWSyncTraceNodeRef tn,
+                               RGWObjVersionTracker& objv_tracker)
     : RGWSyncShardMarkerTrack(BUCKET_SYNC_UPDATE_MARKER_WINDOW),
-      sc(_sc), sync_env(_sc->env), marker_oid(_marker_oid),
-      sync_marker(_marker), tn(std::move(tn)), objv_tracker(objv_tracker)
+      sc(_sc), sync_env(_sc->env), status_obj(status_obj),
+      sync_status(sync_status), tn(std::move(tn)), objv_tracker(objv_tracker)
   {}
 
   RGWCoroutine *store_marker(const rgw_obj_key& new_marker, uint64_t index_pos, const real_time& timestamp) override {
-    sync_marker.position = new_marker;
-    sync_marker.count = index_pos;
+    sync_status.full.position = new_marker;
+    sync_status.full.count = index_pos;
 
-    map<string, bufferlist> attrs;
-    sync_marker.encode_attr(attrs);
-
-    tn->log(20, SSTR("updating marker marker_oid=" << marker_oid << " marker=" << new_marker));
-    return new RGWSimpleRadosWriteAttrsCR(sync_env->async_rados, sync_env->svc->sysobj,
-                                          rgw_raw_obj(sync_env->svc->zone->get_zone_params().log_pool, marker_oid),
-                                          attrs, &objv_tracker);
+    tn->log(20, SSTR("updating marker oid=" << status_obj.oid << " marker=" << new_marker));
+    return new RGWSimpleRadosWriteCR<rgw_bucket_sync_status>(
+        sync_env->async_rados, sync_env->svc->sysobj,
+        status_obj, sync_status, &objv_tracker);
   }
 
   RGWOrderCallCR *allocate_order_control_cr() override {
@@ -3654,28 +3856,29 @@ done:
 
 #define BUCKET_SYNC_SPAWN_WINDOW 20
 
-class RGWBucketShardFullSyncCR : public RGWCoroutine {
+class RGWBucketFullSyncCR : public RGWCoroutine {
   RGWDataSyncCtx *sc;
   RGWDataSyncEnv *sync_env;
   rgw_bucket_sync_pipe& sync_pipe;
+  rgw_bucket_sync_status& sync_status;
   rgw_bucket_shard& bs;
   boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr;
   bucket_list_result list_result;
   list<bucket_list_entry>::iterator entries_iter;
-  rgw_bucket_shard_sync_info& sync_info;
   rgw_obj_key list_marker;
   bucket_list_entry *entry{nullptr};
 
   int total_entries{0};
 
-  int sync_status{0};
+  int sync_result{0};
 
-  const string& status_oid;
+  const rgw_raw_obj& status_obj;
+  RGWObjVersionTracker& objv;
 
   rgw_zone_set zones_trace;
 
   RGWSyncTraceNodeRef tn;
-  RGWBucketFullSyncShardMarkerTrack marker_tracker;
+  RGWBucketFullSyncMarkerTrack marker_tracker;
 
   struct _prefix_handler {
     RGWBucketSyncFlowManager::pipe_rules_ref rules;
@@ -3722,20 +3925,20 @@ class RGWBucketShardFullSyncCR : public RGWCoroutine {
   } prefix_handler;
 
 public:
-  RGWBucketShardFullSyncCR(RGWDataSyncCtx *_sc,
-                           rgw_bucket_sync_pipe& _sync_pipe,
-                           const std::string& status_oid,
-                           boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr,
-                           rgw_bucket_shard_sync_info& sync_info,
-                           RGWSyncTraceNodeRef tn_parent,
-                           RGWObjVersionTracker& objv_tracker)
+  RGWBucketFullSyncCR(RGWDataSyncCtx *_sc,
+                      rgw_bucket_sync_pipe& _sync_pipe,
+                      const rgw_raw_obj& status_obj,
+                      boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr,
+                      rgw_bucket_sync_status& sync_status,
+                      RGWSyncTraceNodeRef tn_parent,
+                      RGWObjVersionTracker& objv_tracker)
     : RGWCoroutine(_sc->cct), sc(_sc), sync_env(_sc->env),
-      sync_pipe(_sync_pipe), bs(_sync_pipe.info.source_bs),
-      lease_cr(std::move(lease_cr)), sync_info(sync_info),
-      status_oid(status_oid),
+      sync_pipe(_sync_pipe), sync_status(sync_status),
+      bs(_sync_pipe.info.source_bs),
+      lease_cr(std::move(lease_cr)), status_obj(status_obj), objv(objv_tracker),
       tn(sync_env->sync_tracer->add_node(tn_parent, "full_sync",
                                          SSTR(bucket_shard_str{bs}))),
-      marker_tracker(sc, status_oid, sync_info.full_marker, tn, objv_tracker)
+      marker_tracker(sc, status_obj, sync_status, tn, objv_tracker)
   {
     zones_trace.insert(sc->source_zone.id, sync_pipe.info.dest_bs.bucket.get_key());
     prefix_handler.set_rules(sync_pipe.get_rules());
@@ -3744,13 +3947,13 @@ public:
   int operate() override;
 };
 
-int RGWBucketShardFullSyncCR::operate()
+int RGWBucketFullSyncCR::operate()
 {
   int ret;
   reenter(this) {
-    list_marker = sync_info.full_marker.position;
+    list_marker = sync_status.full.position;
 
-    total_entries = sync_info.full_marker.count;
+    total_entries = sync_status.full.count;
     do {
       if (lease_cr && !lease_cr->is_locked()) {
         drain_all();
@@ -3765,8 +3968,7 @@ int RGWBucketShardFullSyncCR::operate()
         break;
       }
 
-      yield call(new RGWListBucketShardCR(sc, bs, list_marker,
-                                          &list_result));
+      yield call(new RGWListRemoteBucketCR(sc, bs, list_marker, &list_result));
       if (retcode < 0 && retcode != -ENOENT) {
         set_status("failed bucket listing, going down");
         drain_all();
@@ -3809,13 +4011,13 @@ int RGWBucketShardFullSyncCR::operate()
             again = collect(&ret, nullptr);
             if (ret < 0) {
               tn->log(10, "a sync operation returned error");
-              sync_status = ret;
+              sync_result = ret;
               /* we have reported this error */
             }
           }
         }
       }
-    } while (list_result.is_truncated && sync_status == 0);
+    } while (list_result.is_truncated && sync_result == 0);
     set_status("done iterating over all objects");
     /* wait for all operations to complete */
     while (num_spawned()) {
@@ -3825,7 +4027,7 @@ int RGWBucketShardFullSyncCR::operate()
         again = collect(&ret, nullptr);
         if (ret < 0) {
           tn->log(10, "a sync operation returned error");
-          sync_status = ret;
+          sync_result = ret;
           /* we have reported this error */
         }
       }
@@ -3834,26 +4036,29 @@ int RGWBucketShardFullSyncCR::operate()
     if (lease_cr && !lease_cr->is_locked()) {
       return set_cr_error(-ECANCELED);
     }
-    /* update sync state to incremental */
-    if (sync_status == 0) {
-      yield {
-        sync_info.state = rgw_bucket_shard_sync_info::StateIncrementalSync;
-        map<string, bufferlist> attrs;
-        sync_info.encode_state_attr(attrs);
-        call(new RGWSimpleRadosWriteAttrsCR(sync_env->async_rados, sync_env->svc->sysobj,
-                                            rgw_raw_obj(sync_env->svc->zone->get_zone_params().log_pool, status_oid),
-                                            attrs));
-      }
-    } else {
-      tn->log(10, SSTR("backing out with sync_status=" << sync_status));
+    yield call(marker_tracker.flush());
+    if (retcode < 0) {
+      tn->log(0, SSTR("ERROR: marker_tracker.flush() returned retcode=" << retcode));
+      return set_cr_error(retcode);
     }
-    if (retcode < 0 && sync_status == 0) { /* actually tried to set incremental state and failed */
+    /* update sync state to incremental */
+    if (sync_result == 0) {
+      sync_status.state = BucketSyncState::Incremental;
+      tn->log(5, SSTR("set bucket state=" << sync_status.state));
+      yield call(new RGWSimpleRadosWriteCR<rgw_bucket_sync_status>(
+              sync_env->async_rados, sync_env->svc->sysobj,
+              status_obj, sync_status, &objv));
+      tn->log(5, SSTR("bucket status objv=" << objv));
+    } else {
+      tn->log(10, SSTR("backing out with sync_status=" << sync_result));
+    }
+    if (retcode < 0 && sync_result == 0) { /* actually tried to set incremental state and failed */
       tn->log(0, SSTR("ERROR: failed to set sync state on bucket "
           << bucket_shard_str{bs} << " retcode=" << retcode));
       return set_cr_error(retcode);
     }
-    if (sync_status < 0) {
-      return set_cr_error(sync_status);
+    if (sync_result < 0) {
+      return set_cr_error(sync_result);
     }
     return set_cr_done();
   }
@@ -3938,7 +4143,7 @@ int RGWBucketShardIncrementalSyncCR::operate()
         tn->log(0, "ERROR: lease is not taken, abort");
         return set_cr_error(-ECANCELED);
       }
-      tn->log(20, SSTR("listing bilog for incremental sync" << sync_info.inc_marker.position));
+      tn->log(20, SSTR("listing bilog for incremental sync; position=" << sync_info.inc_marker.position));
       set_status() << "listing bilog; position=" << sync_info.inc_marker.position;
       yield call(new RGWListBucketIndexLogCR(sc, bs, sync_info.inc_marker.position,
                                              &list_result));
@@ -4140,7 +4345,7 @@ int RGWBucketShardIncrementalSyncCR::operate()
     tn->unset_flag(RGW_SNS_FLAG_ACTIVE);
 
     if (syncstopped) {
-      // transition to StateStopped in RGWRunBucketSyncCoroutine. if sync is
+      // transition to StateStopped in RGWSyncBucketShardCR. if sync is
       // still disabled, we'll delete the sync status object. otherwise we'll
       // restart full sync to catch any changes that happened while sync was
       // disabled
@@ -4301,6 +4506,12 @@ std::ostream& operator<<(std::ostream& out, std::optional<rgw_bucket_shard>& bs)
   return out;
 }
 
+static RGWCoroutine* sync_bucket_shard_cr(RGWDataSyncCtx* sc,
+                                          boost::intrusive_ptr<const RGWContinuousLeaseCR> lease,
+                                          const rgw_bucket_sync_pair_info& sync_pair,
+                                          const RGWSyncTraceNodeRef& tn,
+                                          ceph::real_time* progress);
+
 RGWRunBucketSourcesSyncCR::RGWRunBucketSourcesSyncCR(RGWDataSyncCtx *_sc,
                                                      boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr,
                                                      std::optional<rgw_bucket_shard> _target_bs,
@@ -4379,8 +4590,8 @@ int RGWRunBucketSourcesSyncCR::operate()
 
         ldpp_dout(sync_env->dpp, 20) << __func__ << "(): sync_pair=" << sync_pair << dendl;
 
-        yield spawn(new RGWRunBucketSyncCoroutine(sc, lease_cr, sync_pair, tn,
-                                                  &*cur_shard_progress), false);
+        yield spawn(sync_bucket_shard_cr(sc, lease_cr, sync_pair, tn,
+                                         &*cur_shard_progress), false);
         while (num_spawned() > BUCKET_SYNC_SPAWN_WINDOW) {
           set_status() << "num_spawned() > spawn_window";
           yield wait_for_child();
@@ -4693,90 +4904,236 @@ int RGWGetBucketPeersCR::operate()
   return 0;
 }
 
-int RGWRunBucketsSyncBySourceCR::operate()
+class RGWSyncBucketShardCR : public RGWCoroutine {
+  RGWDataSyncCtx *sc;
+  RGWDataSyncEnv *sync_env;
+  boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr;
+  rgw_bucket_sync_pair_info sync_pair;
+  rgw_bucket_sync_pipe& sync_pipe;
+  BucketSyncState& bucket_state;
+  ceph::real_time* progress;
+
+  const std::string status_oid;
+  rgw_bucket_shard_sync_info sync_status;
+  RGWObjVersionTracker objv_tracker;
+
+  RGWSyncTraceNodeRef tn;
+
+public:
+  RGWSyncBucketShardCR(RGWDataSyncCtx *_sc,
+                       boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr,
+                       const rgw_bucket_sync_pair_info& _sync_pair,
+                       rgw_bucket_sync_pipe& sync_pipe,
+                       BucketSyncState& bucket_state,
+                       const RGWSyncTraceNodeRef& tn,
+                       ceph::real_time* progress)
+    : RGWCoroutine(_sc->cct), sc(_sc), sync_env(_sc->env),
+      lease_cr(std::move(lease_cr)), sync_pair(_sync_pair),
+      sync_pipe(sync_pipe), bucket_state(bucket_state), progress(progress),
+      status_oid(RGWBucketPipeSyncStatusManager::inc_status_oid(sc->source_zone, sync_pair)),
+      tn(tn) {
+  }
+
+  int operate() override;
+};
+
+int RGWSyncBucketShardCR::operate()
 {
   reenter(this) {
+    yield call(new RGWReadBucketPipeSyncStatusCoroutine(sc, sync_pair, &sync_status, &objv_tracker));
+    if (retcode < 0 && retcode != -ENOENT) {
+      tn->log(0, "ERROR: failed to read sync status for bucket");
+      return set_cr_error(retcode);
+    }
+
+    tn->log(20, SSTR("sync status for source bucket shard: " << sync_status.state));
+    sync_status.state = rgw_bucket_shard_sync_info::StateIncrementalSync;
+    if (progress) {
+      *progress = sync_status.inc_marker.timestamp;
+    }
+
+    yield call(new RGWBucketShardIncrementalSyncCR(sc, sync_pipe,
+                                                   status_oid, lease_cr,
+                                                   sync_status, tn,
+                                                   objv_tracker, progress));
+    if (retcode < 0) {
+      tn->log(5, SSTR("incremental sync on bucket failed, retcode=" << retcode));
+      return set_cr_error(retcode);
+    }
+    // TODO: handle transition to StateStopped
     return set_cr_done();
   }
 
   return 0;
 }
 
-int RGWRunBucketSyncCoroutine::operate()
+class RGWSyncBucketCR : public RGWCoroutine {
+  RGWDataSyncCtx *sc;
+  RGWDataSyncEnv *env;
+  boost::intrusive_ptr<const RGWContinuousLeaseCR> data_lease_cr;
+  boost::intrusive_ptr<RGWContinuousLeaseCR> bucket_lease_cr;
+  rgw_bucket_sync_pair_info sync_pair;
+  rgw_bucket_sync_pipe sync_pipe;
+  ceph::real_time* progress;
+
+  const std::string lock_name = "bucket sync";
+  const uint32_t lock_duration;
+  const rgw_raw_obj status_obj;
+  rgw_bucket_sync_status bucket_status;
+  RGWObjVersionTracker objv;
+  bool init_check_compat = false;
+
+  RGWSyncTraceNodeRef tn;
+
+public:
+  RGWSyncBucketCR(RGWDataSyncCtx *_sc,
+                  boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr,
+                  const rgw_bucket_sync_pair_info& _sync_pair,
+                  const RGWSyncTraceNodeRef& _tn_parent,
+                  ceph::real_time* progress)
+    : RGWCoroutine(_sc->cct), sc(_sc), env(_sc->env),
+      data_lease_cr(std::move(lease_cr)), sync_pair(_sync_pair), progress(progress),
+      lock_duration(cct->_conf->rgw_sync_lease_period),
+      status_obj(env->svc->zone->get_zone_params().log_pool,
+                 RGWBucketPipeSyncStatusManager::full_status_oid(sc->source_zone,
+                                                                 sync_pair.source_bs.bucket,
+                                                                 sync_pair.dest_bs.bucket)),
+      tn(env->sync_tracer->add_node(_tn_parent, "bucket",
+                                    SSTR(bucket_shard_str{_sync_pair.dest_bs} << "<-" << bucket_shard_str{_sync_pair.source_bs} ))) {
+  }
+
+  int operate() override;
+};
+
+static RGWCoroutine* sync_bucket_shard_cr(RGWDataSyncCtx* sc,
+                                          boost::intrusive_ptr<const RGWContinuousLeaseCR> lease,
+                                          const rgw_bucket_sync_pair_info& sync_pair,
+                                          const RGWSyncTraceNodeRef& tn,
+                                          ceph::real_time* progress)
+{
+  return new RGWSyncBucketCR(sc, std::move(lease), sync_pair, tn, progress);
+}
+
+int RGWSyncBucketCR::operate()
 {
   reenter(this) {
-    yield call(new RGWReadBucketPipeSyncStatusCoroutine(sc, sync_pair, &sync_status, &objv_tracker));
-    if (retcode < 0 && retcode != -ENOENT) {
-      tn->log(0, "ERROR: failed to read sync status for bucket");
-      drain_all();
-      return set_cr_error(retcode);
-    }
-
-    tn->log(20, SSTR("sync status for source bucket: " << sync_status.state));
-
-    yield call(new RGWSyncGetBucketInfoCR(sync_env, sync_pair.source_bs.bucket, &sync_pipe.source_bucket_info,
+    // read source/destination bucket info
+    yield call(new RGWSyncGetBucketInfoCR(env, sync_pair.source_bs.bucket, &sync_pipe.source_bucket_info,
                                           &sync_pipe.source_bucket_attrs, tn));
     if (retcode < 0) {
       tn->log(0, SSTR("ERROR: failed to retrieve bucket info for bucket=" << bucket_str{sync_pair.source_bs.bucket}));
-      drain_all();
       return set_cr_error(retcode);
     }
 
-    yield call(new RGWSyncGetBucketInfoCR(sync_env, sync_pair.dest_bs.bucket, &sync_pipe.dest_bucket_info, 
+    yield call(new RGWSyncGetBucketInfoCR(env, sync_pair.dest_bs.bucket, &sync_pipe.dest_bucket_info,
                                           &sync_pipe.dest_bucket_attrs, tn));
     if (retcode < 0) {
       tn->log(0, SSTR("ERROR: failed to retrieve bucket info for bucket=" << bucket_str{sync_pair.source_bs.bucket}));
-      drain_all();
       return set_cr_error(retcode);
     }
 
     sync_pipe.info = sync_pair;
 
+    // read bucket sync status
+    using ReadCR = RGWSimpleRadosReadCR<rgw_bucket_sync_status>;
+    yield call(new ReadCR(env->async_rados, env->svc->sysobj,
+                          status_obj, &bucket_status, false, &objv));
+    if (retcode == -ENOENT) {
+      // use exclusive create to set state=Init
+      objv.generate_new_write_ver(cct);
+      using WriteCR = RGWSimpleRadosWriteCR<rgw_bucket_sync_status>;
+      yield call(new WriteCR(env->async_rados, env->svc->sysobj,
+                             status_obj, bucket_status, &objv, true));
+      if (retcode == -EEXIST) {
+        // raced with another create, read its status
+        yield call(new ReadCR(env->async_rados, env->svc->sysobj,
+                              status_obj, &bucket_status, false, &objv));
+      }
+    }
+    if (retcode < 0) {
+      return set_cr_error(retcode);
+    }
+
     do {
-      if (sync_status.state == rgw_bucket_shard_sync_info::StateInit ||
-          sync_status.state == rgw_bucket_shard_sync_info::StateStopped) {
-        yield call(new RGWInitBucketShardSyncStatusCoroutine(sc, sync_pair, sync_status, objv_tracker));
-        if (retcode == -ENOENT) {
-          tn->log(0, "bucket sync disabled");
-          drain_all();
-          return set_cr_done();
+      tn->log(20, SSTR("sync status for source bucket: " << bucket_status.state));
+
+      // if the state wasn't Incremental, take a bucket-wide lease to prevent
+      // different shards from duplicating the init and full sync
+      if (bucket_status.state != BucketSyncState::Incremental) {
+        assert(!bucket_lease_cr);
+        bucket_lease_cr.reset(new RGWContinuousLeaseCR(env->async_rados, env->store, status_obj,
+                                                       lock_name, lock_duration, this));
+        yield spawn(bucket_lease_cr.get(), false);
+        while (!bucket_lease_cr->is_locked()) {
+          if (bucket_lease_cr->is_done()) {
+            tn->log(5, "failed to take bucket lease");
+            set_status("lease lock failed, early abort");
+            drain_all();
+            return set_cr_error(bucket_lease_cr->get_ret_status());
+          }
+          tn->log(5, "waiting on bucket lease");
+          yield set_sleeping(true);
         }
+        // reread the status after acquiring the lock
+        yield call(new ReadCR(env->async_rados, env->svc->sysobj,
+                              status_obj, &bucket_status, false, &objv));
         if (retcode < 0) {
-          tn->log(0, SSTR("ERROR: init sync on bucket failed, retcode=" << retcode));
+          bucket_lease_cr->go_down();
           drain_all();
+          bucket_lease_cr.reset();
           return set_cr_error(retcode);
         }
       }
-      if (progress) {
-        *progress = sync_status.inc_marker.timestamp;
-      }
 
-      if (sync_status.state == rgw_bucket_shard_sync_info::StateFullSync) {
-        yield call(new RGWBucketShardFullSyncCR(sc, sync_pipe,
-                                                status_oid, lease_cr,
-                                                sync_status, tn, objv_tracker));
+      if (bucket_status.state == BucketSyncState::Init ||
+          bucket_status.state == BucketSyncState::Stopped) {
+        assert(bucket_lease_cr);
+        // init sync status
+        yield {
+          init_check_compat = objv.read_version.ver <= 1; // newly-created
+          int num_shards = sync_pipe.dest_bucket_info.layout.current_index.layout.normal.num_shards;
+          call(new InitBucketFullSyncStatusCR(sc, sync_pair, status_obj,
+                                              bucket_status, objv, num_shards,
+                                              init_check_compat));
+        }
         if (retcode < 0) {
-          tn->log(5, SSTR("full sync on bucket failed, retcode=" << retcode));
+          bucket_lease_cr->go_down();
           drain_all();
+          bucket_lease_cr.reset();
           return set_cr_error(retcode);
         }
       }
 
-      if (sync_status.state == rgw_bucket_shard_sync_info::StateIncrementalSync) {
-        yield call(new RGWBucketShardIncrementalSyncCR(sc, sync_pipe,
-                                                       status_oid, lease_cr,
-                                                       sync_status, tn,
-                                                       objv_tracker, progress));
+      if (bucket_status.state == BucketSyncState::Full) {
+        assert(bucket_lease_cr);
+        yield call(new RGWBucketFullSyncCR(sc, sync_pipe, status_obj,
+                                           bucket_lease_cr, bucket_status,
+                                           tn, objv));
         if (retcode < 0) {
-          tn->log(5, SSTR("incremental sync on bucket failed, retcode=" << retcode));
+          bucket_lease_cr->go_down();
           drain_all();
+          bucket_lease_cr.reset();
+          return set_cr_error(retcode);
+        }
+      }
+
+      if (bucket_status.state == BucketSyncState::Incremental) {
+        // lease not required for incremental sync
+        if (bucket_lease_cr) {
+          bucket_lease_cr->go_down();
+          drain_all();
+          bucket_lease_cr.reset();
+        }
+        yield call(new RGWSyncBucketShardCR(sc, data_lease_cr, sync_pair,
+                                            sync_pipe, bucket_status.state,
+                                            tn, progress));
+        if (retcode < 0) {
           return set_cr_error(retcode);
         }
       }
       // loop back to previous states unless incremental sync returns normally
-    } while (sync_status.state != rgw_bucket_shard_sync_info::StateIncrementalSync);
+    } while (bucket_status.state != BucketSyncState::Incremental);
 
-    drain_all();
     return set_cr_done();
   }
 
@@ -4789,7 +5146,7 @@ RGWCoroutine *RGWRemoteBucketManager::run_sync_cr(int num)
     return nullptr;
   }
 
-  return new RGWRunBucketSyncCoroutine(&sc, nullptr, sync_pairs[num], sync_env->sync_tracer->root_node, nullptr);
+  return sync_bucket_shard_cr(&sc, nullptr, sync_pairs[num], sync_env->sync_tracer->root_node, nullptr);
 }
 
 int RGWBucketPipeSyncStatusManager::init()
@@ -4854,11 +5211,8 @@ int RGWBucketPipeSyncStatusManager::init_sync_status()
 
   for (auto& mgr : source_mgrs) {
     RGWCoroutinesStack *stack = new RGWCoroutinesStack(store->ctx(), &cr_mgr);
-
-    for (int i = 0; i < mgr->num_pipes(); ++i) {
-      objvs.emplace_back();
-      stack->call(mgr->init_sync_status_cr(i, objvs.back()));
-    }
+    objvs.emplace_back();
+    stack->call(mgr->init_sync_status_cr(objvs.back()));
 
     stacks.push_back(stack);
   }
@@ -4924,8 +5278,21 @@ std::ostream& RGWBucketPipeSyncStatusManager::gen_prefix(std::ostream& out) cons
     << " bucket:" << dest_bucket << ' ';
 }
 
-string RGWBucketPipeSyncStatusManager::status_oid(const rgw_zone_id& source_zone,
-                                              const rgw_bucket_sync_pair_info& sync_pair)
+string RGWBucketPipeSyncStatusManager::full_status_oid(const rgw_zone_id& source_zone,
+                                                       const rgw_bucket& source_bucket,
+                                                       const rgw_bucket& dest_bucket)
+{
+  if (source_bucket == dest_bucket) {
+    return bucket_full_status_oid_prefix + "." + source_zone.id + ":"
+        + dest_bucket.get_key();
+  } else {
+    return bucket_full_status_oid_prefix + "." + source_zone.id + ":"
+        + dest_bucket.get_key() + ":" + source_bucket.get_key();
+  }
+}
+
+string RGWBucketPipeSyncStatusManager::inc_status_oid(const rgw_zone_id& source_zone,
+                                                      const rgw_bucket_sync_pair_info& sync_pair)
 {
   if (sync_pair.source_bs == sync_pair.dest_bs) {
     return bucket_status_oid_prefix + "." + source_zone.id + ":" + sync_pair.dest_bs.get_key();
@@ -4989,6 +5356,16 @@ class RGWCollectBucketSyncStatusCR : public RGWShardCollectCR {
   using Vector = std::vector<rgw_bucket_shard_sync_info>;
   Vector::iterator i, end;
 
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to read bucket shard sync status: "
+          << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
  public:
   RGWCollectBucketSyncStatusCR(rgw::sal::RGWRadosStore *store, RGWDataSyncCtx *sc,
                                const RGWBucketInfo& source_bucket_info,
@@ -5028,12 +5405,43 @@ class RGWCollectBucketSyncStatusCR : public RGWShardCollectCR {
   }
 };
 
-int rgw_bucket_sync_status(const DoutPrefixProvider *dpp,
-                           rgw::sal::RGWRadosStore *store,
-                           const rgw_sync_bucket_pipe& pipe,
-                           const RGWBucketInfo& dest_bucket_info,
-                           const RGWBucketInfo *psource_bucket_info,
-                           std::vector<rgw_bucket_shard_sync_info> *status)
+int rgw_read_bucket_full_sync_status(const DoutPrefixProvider *dpp,
+                                     rgw::sal::RGWRadosStore *store,
+                                     const rgw_sync_bucket_pipe& pipe,
+                                     rgw_bucket_sync_status *status,
+                                     optional_yield y)
+{
+  auto get_oid = RGWBucketPipeSyncStatusManager::full_status_oid;
+  const rgw_raw_obj obj{store->svc()->zone->get_zone_params().log_pool,
+                        get_oid(*pipe.source.zone, *pipe.source.bucket, *pipe.dest.bucket)};
+
+  auto svc = store->svc()->sysobj;
+  auto obj_ctx = svc->init_obj_ctx();
+  auto sysobj = svc->get_obj(obj_ctx, obj);
+  bufferlist bl;
+  int ret = sysobj.rop().read(&bl, y);
+  if (ret < 0)
+    return ret;
+
+  try {
+    auto iter = bl.cbegin();
+    using ceph::decode;
+    rgw_bucket_sync_status result;
+    decode(result, iter);
+    *status = result;
+    return 0;
+  } catch (const buffer::error& err) {
+    lderr(svc->ctx()) << "error decoding " << obj << ": " << err.what() << dendl;
+    return -EIO;
+  }
+}
+
+int rgw_read_bucket_inc_sync_status(const DoutPrefixProvider *dpp,
+                                    rgw::sal::RGWRadosStore *store,
+                                    const rgw_sync_bucket_pipe& pipe,
+                                    const RGWBucketInfo& dest_bucket_info,
+                                    const RGWBucketInfo *psource_bucket_info,
+                                    std::vector<rgw_bucket_shard_sync_info> *status)
 {
   if (!pipe.source.zone ||
       !pipe.source.bucket ||

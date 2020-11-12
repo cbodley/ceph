@@ -561,6 +561,71 @@ struct rgw_bucket_shard_sync_info {
 };
 WRITE_CLASS_ENCODER(rgw_bucket_shard_sync_info)
 
+struct rgw_bucket_full_sync_status {
+  rgw_obj_key position;
+  uint64_t count = 0;
+
+  void encode(bufferlist& bl) const {
+    ENCODE_START(1, 1, bl);
+    encode(position, bl);
+    encode(count, bl);
+    ENCODE_FINISH(bl);
+  }
+
+  void decode(bufferlist::const_iterator& bl) {
+    DECODE_START(1, bl);
+    decode(position, bl);
+    decode(count, bl);
+    DECODE_FINISH(bl);
+  }
+
+  void dump(Formatter *f) const;
+  void decode_json(JSONObj *obj);
+};
+WRITE_CLASS_ENCODER(rgw_bucket_full_sync_status)
+
+enum class BucketSyncState : uint8_t {
+  Init = 0,
+  Full,
+  Incremental,
+  Stopped,
+};
+inline std::ostream& operator<<(std::ostream& out, const BucketSyncState& s) {
+  switch (s) {
+  case BucketSyncState::Init: out << "init"; break;
+  case BucketSyncState::Full: out << "full"; break;
+  case BucketSyncState::Incremental: out << "incremental"; break;
+  case BucketSyncState::Stopped: out << "stopped"; break;
+  }
+  return out;
+}
+
+void encode_json(const char *name, BucketSyncState state, Formatter *f);
+void decode_json_obj(BucketSyncState& state, JSONObj *obj);
+
+struct rgw_bucket_sync_status {
+  BucketSyncState state = BucketSyncState::Init;
+  rgw_bucket_full_sync_status full;
+
+  void encode(bufferlist& bl) const {
+    ENCODE_START(1, 1, bl);
+    encode(state, bl);
+    encode(full, bl);
+    ENCODE_FINISH(bl);
+  }
+
+  void decode(bufferlist::const_iterator& bl) {
+    DECODE_START(1, bl);
+    decode(state, bl);
+    decode(full, bl);
+    DECODE_FINISH(bl);
+  }
+
+  void dump(Formatter *f) const;
+  void decode_json(JSONObj *obj);
+};
+WRITE_CLASS_ENCODER(rgw_bucket_sync_status)
+
 struct rgw_bucket_index_marker_info {
   string bucket_ver;
   string master_ver;
@@ -584,10 +649,12 @@ class RGWRemoteBucketManager {
   RGWRESTConn *conn{nullptr};
   rgw_zone_id source_zone;
 
+  rgw_raw_obj full_status_obj;
   vector<rgw_bucket_sync_pair_info> sync_pairs;
 
   RGWDataSyncCtx sc;
-  rgw_bucket_shard_sync_info init_status;
+  rgw_bucket_sync_status full_status;
+  rgw_bucket_shard_sync_info shard_status;
 
   RGWBucketSyncCR *sync_cr{nullptr};
 
@@ -598,12 +665,8 @@ public:
                      const RGWBucketInfo& source_bucket_info,
                      const rgw_bucket& dest_bucket);
 
-  void init(const rgw_zone_id& _source_zone, RGWRESTConn *_conn,
-            const rgw_bucket& source_bucket, int shard_id,
-            const rgw_bucket& dest_bucket);
-
   RGWCoroutine *read_sync_status_cr(int num, rgw_bucket_shard_sync_info *sync_status);
-  RGWCoroutine *init_sync_status_cr(int num, RGWObjVersionTracker& objv_tracker);
+  RGWCoroutine *init_sync_status_cr(RGWObjVersionTracker& objv_tracker);
   RGWCoroutine *run_sync_cr(int num);
 
   int num_pipes() {
@@ -660,7 +723,12 @@ public:
   map<int, rgw_bucket_shard_sync_info>& get_sync_status() { return sync_status; }
   int init_sync_status();
 
-  static string status_oid(const rgw_zone_id& source_zone, const rgw_bucket_sync_pair_info& bs);
+  static string full_status_oid(const rgw_zone_id& source_zone,
+                                const rgw_bucket& source_bucket,
+                                const rgw_bucket& dest_bucket);
+  static string inc_status_oid(const rgw_zone_id& source_zone,
+                               const rgw_bucket_sync_pair_info& bs);
+  // specific source obj sync status, can be used by sync modules
   static string obj_status_oid(const rgw_bucket_sync_pipe& sync_pipe,
                                const rgw_zone_id& source_zone, const rgw::sal::RGWObject* obj); /* specific source obj sync status,
                                                                                        can be used by sync modules */
@@ -674,13 +742,20 @@ public:
   int run();
 };
 
-/// read the sync status of all bucket shards from the given source zone
-int rgw_bucket_sync_status(const DoutPrefixProvider *dpp,
-                           rgw::sal::RGWRadosStore *store,
-                           const rgw_sync_bucket_pipe& pipe,
-                           const RGWBucketInfo& dest_bucket_info,
-                           const RGWBucketInfo *psource_bucket_info,
-                           std::vector<rgw_bucket_shard_sync_info> *status);
+/// read the full sync status with respect to a source bucket
+int rgw_read_bucket_full_sync_status(const DoutPrefixProvider *dpp,
+                                     rgw::sal::RGWRadosStore *store,
+                                     const rgw_sync_bucket_pipe& pipe,
+                                     rgw_bucket_sync_status *status,
+                                     optional_yield y);
+
+/// read the incremental sync status of all bucket shards from the given source zone
+int rgw_read_bucket_inc_sync_status(const DoutPrefixProvider *dpp,
+                                    rgw::sal::RGWRadosStore *store,
+                                    const rgw_sync_bucket_pipe& pipe,
+                                    const RGWBucketInfo& dest_bucket_info,
+                                    const RGWBucketInfo *psource_bucket_info,
+                                    std::vector<rgw_bucket_shard_sync_info> *status);
 
 class RGWDefaultSyncModule : public RGWSyncModule {
 public:
