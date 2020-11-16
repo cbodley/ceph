@@ -1478,7 +1478,13 @@ int RGWListBucket_ObjStore_S3::get_params(optional_yield y)
     marker = s->info.args.get("marker");
   } else {
     marker.name = s->info.args.get("key-marker");
-    marker.instance = s->info.args.get("version-id-marker");
+    auto ver = s->info.args.get_optional("version-id-marker");
+    if (ver) {
+      marker.instance = *ver;
+    } else {
+      // compares larger than anything from gen_rand_obj_instance_name()
+      marker.instance = std::string{OBJ_INSTANCE_LEN, '~'}; // '~' = 0x127
+    }
   }
   return 0;
 }

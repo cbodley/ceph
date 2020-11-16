@@ -7356,7 +7356,6 @@ int RGWRados::unlink_obj_instance(RGWObjectCtx& obj_ctx, RGWBucketInfo& bucket_i
 
 void RGWRados::gen_rand_obj_instance_name(rgw_obj_key *target_key)
 {
-#define OBJ_INSTANCE_LEN 32
   char buf[OBJ_INSTANCE_LEN + 1];
 
   gen_rand_alphanumeric_no_underscore(cct, buf, OBJ_INSTANCE_LEN); /* don't want it to get url escaped,

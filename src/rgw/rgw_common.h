@@ -265,6 +265,8 @@ using ceph::crypto::MD5;
 #define UINT32_MAX (0xffffffffu)
 #endif
 
+#define OBJ_INSTANCE_LEN 32 // length of object version ids
+
 struct req_state;
 
 typedef void *RGWAccessHandle;
