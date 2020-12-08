@@ -2687,11 +2687,18 @@ class RGWReadRemoteBucketIndexLogInfoCR : public RGWCoroutine {
   rgw_bucket_index_marker_info *info;
 
 public:
+  // read bilog info for a single shard
   RGWReadRemoteBucketIndexLogInfoCR(RGWDataSyncCtx *_sc,
-                                  const rgw_bucket_shard& bs,
-                                  rgw_bucket_index_marker_info *_info)
+                                    const rgw_bucket_shard& bs,
+                                    rgw_bucket_index_marker_info *_info)
     : RGWCoroutine(_sc->cct), sc(_sc), sync_env(_sc->env),
       instance_key(bs.get_key()), info(_info) {}
+  // read bilog info for all shards
+  RGWReadRemoteBucketIndexLogInfoCR(RGWDataSyncCtx *_sc,
+                                    const rgw_bucket& bucket,
+                                    rgw_bucket_index_marker_info *_info)
+    : RGWCoroutine(_sc->cct), sc(_sc), sync_env(_sc->env),
+      instance_key(bucket.get_key()), info(_info) {}
 
   int operate() override {
     reenter(this) {
@@ -3067,6 +3074,9 @@ class InitBucketFullSyncStatusCR : public RGWCoroutine {
   RGWDataSyncEnv *sync_env;
 
   const rgw_bucket_sync_pair_info& sync_pair;
+  rgw_bucket_index_marker_info info;
+  BucketIndexShardsManager markers;
+
   const rgw_raw_obj& status_obj;
   rgw_bucket_sync_status& status;
   RGWObjVersionTracker& objv;
@@ -3089,6 +3099,22 @@ public:
 
   int operate() override {
     reenter(this) {
+      // fetch bilog info
+      yield call(new RGWReadRemoteBucketIndexLogInfoCR(sc, sync_pair.dest_bs.bucket, &info));
+      if (retcode < 0) {
+        lderr(cct) << "failed to read remote bilog info: "
+            << cpp_strerror(retcode) << dendl;
+        return set_cr_error(retcode);
+      }
+
+      // parse shard markers
+      retcode = markers.from_string(info.markers, -1);
+      if (retcode < 0) {
+        lderr(cct) << "failed to parse bilog shard markers: "
+            << cpp_strerror(retcode) << dendl;
+        return set_cr_error(retcode);
+      }
+
       status.state = BucketSyncState::Init;
 
       if (check_compat) {
