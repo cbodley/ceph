@@ -2530,14 +2530,30 @@ int RGWBucketInstanceMetadataHandler::do_put(RGWSI_MetaBackend_Handler::Op *op,
   return do_put_operate(&put_op);
 }
 
-void init_default_bucket_layout(CephContext *cct, RGWBucketInfo& info, const RGWZone& zone) {
-  info.layout.current_index.gen = 0;
-  info.layout.current_index.layout.normal.hash_type = rgw::BucketHashType::Mod;
-  info.layout.current_index.layout.type = rgw::BucketIndexType::Normal;
+void init_default_bucket_layout(CephContext *cct, rgw::BucketLayout& layout,
+                                uint32_t* override_num_shards,
+                                rgw::BucketIndexType* override_index_type,
+                                const RGWZone& zone)
+{
+  layout.current_index.gen = 0;
+  layout.current_index.layout.normal.hash_type = rgw::BucketHashType::Mod;
 
-  info.layout.current_index.layout.normal.num_shards = (
-      cct->_conf->rgw_override_bucket_index_max_shards > 0 ?
-      cct->_conf->rgw_override_bucket_index_max_shards : zone.bucket_index_max_shards);
+  if (override_index_type) {
+    layout.current_index.layout.type = *override_index_type;
+  } else {
+    layout.current_index.layout.type = rgw::BucketIndexType::Normal;
+  }
+  if (override_num_shards) {
+    layout.current_index.layout.normal.num_shards = *override_num_shards;
+  } else if (cct->_conf->rgw_override_bucket_index_max_shards > 0) {
+    layout.current_index.layout.normal.num_shards = cct->_conf->rgw_override_bucket_index_max_shards;
+  } else {
+    layout.current_index.layout.normal.num_shards = zone.bucket_index_max_shards;
+  }
+
+  if (layout.current_index.layout.type == rgw::BucketIndexType::Normal) {
+    layout.logs.push_back(rgw::log_layout_from_index(0, layout.current_index.layout.normal));
+  }
 }
 
 int RGWMetadataHandlerPut_BucketInstance::put_check()
@@ -2550,16 +2566,7 @@ int RGWMetadataHandlerPut_BucketInstance::put_check()
 
   RGWBucketCompleteInfo *old_bci = (orig_obj ? &orig_obj->get_bci() : nullptr);
 
-  bool exists = (!!orig_obj);
-
-  if (from_remote_zone) {
-    // don't sync bucket layout changes
-    if (!exists) {
-      init_default_bucket_layout(cct, bci.info, bihandler->svc.zone->get_zone());
-    } else {
-      bci.info.layout = old_bci->info.layout;
-    }
-  }
+  const bool exists = (!!orig_obj);
 
   if (!exists || old_bci->info.bucket.bucket_id != bci.info.bucket.bucket_id) {
     /* a new bucket, we need to select a new bucket placement for it */
@@ -2585,6 +2592,20 @@ int RGWMetadataHandlerPut_BucketInstance::put_check()
     /* existing bucket, keep its placement */
     bci.info.bucket.explicit_placement = old_bci->info.bucket.explicit_placement;
     bci.info.placement_rule = old_bci->info.placement_rule;
+  }
+
+  if (from_remote_zone) {
+    // don't sync bucket layout changes
+    if (!exists) {
+      auto& bci_index = bci.info.layout.current_index.layout;
+      auto index_type = bci_index.type;
+      auto num_shards = bci_index.normal.num_shards;
+      init_default_bucket_layout(cct, bci.info.layout,
+                                 &num_shards, &index_type,
+                                 bihandler->svc.zone->get_zone());
+    } else {
+      bci.info.layout = old_bci->info.layout;
+    }
   }
 
   /* record the read version (if any), store the new version */
