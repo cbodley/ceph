@@ -98,6 +98,40 @@ static std::string to_string(const rgw_bucket_shard_gen& b)
   return key;
 }
 
+// prefix for the binary encoding of error-repo keys. this particular value
+// is not valid as the first byte of a utf8 code point, so we use this to
+// differentiate the binary encoding from existing string keys for
+// backward-compatibility
+constexpr uint8_t binary_encoding_prefix = 0x80;
+
+static std::string encode_error_key(const rgw_bucket_shard_gen& key)
+{
+  bufferlist bl;
+  encode(binary_encoding_prefix, bl);
+  encode(key, bl);
+  return bl.to_str();
+}
+
+static int decode_error_key(std::string encoded, rgw_bucket_shard_gen& key)
+{
+  const auto bl = bufferlist::static_from_string(encoded);
+  auto p = bl.cbegin();
+  try {
+    uint8_t prefix;
+    decode(prefix, p);
+    if (prefix != binary_encoding_prefix) {
+      return -EINVAL;
+    }
+    decode(key, p);
+  } catch (const buffer::error&) {
+    return -EIO;
+  }
+  if (!p.end()) {
+    return -EIO; // buffer contained unexpected bytes
+  }
+  return 0;
+}
+
 class RGWReadDataSyncStatusMarkersCR : public RGWShardCollectCR {
   static constexpr int MAX_CONCURRENT_SHARDS = 16;
 
