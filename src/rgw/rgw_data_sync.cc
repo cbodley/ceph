@@ -70,6 +70,33 @@ void rgw_datalog_shard_data::decode_json(JSONObj *obj) {
   JSONDecoder::decode_json("entries", entries, obj);
 };
 
+void encode(const rgw_bucket_shard_gen& b, bufferlist& bl, uint64_t f)
+{
+  ENCODE_START(1, 1, bl);
+  encode(b.bs, bl, f);
+  encode(b.gen, bl, f);
+  ENCODE_FINISH(bl);
+}
+
+void decode(rgw_bucket_shard_gen& b, bufferlist::const_iterator& bl)
+{
+  DECODE_START(1, bl);
+  decode(b.bs, bl);
+  decode(b.gen, bl);
+  DECODE_FINISH(bl);
+}
+
+// return a printable string representation of rgw_bucket_shard_gen
+static std::string to_string(const rgw_bucket_shard_gen& b)
+{
+  constexpr auto digits10 = std::numeric_limits<uint64_t>::digits10;
+  constexpr auto reserve = 2 + digits10; // "[value]"
+  auto key = b.bs.get_key('/', ':', ':', reserve);
+  key.append(1, '[');
+  key.append(std::to_string(b.gen));
+  key.append(1, ']');
+  return key;
+}
 
 class RGWReadDataSyncStatusMarkersCR : public RGWShardCollectCR {
   static constexpr int MAX_CONCURRENT_SHARDS = 16;

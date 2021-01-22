@@ -20,6 +20,19 @@
 
 #include "rgw_bucket_sync.h"
 
+// the bucket, shard, and log generation number of a data change event
+struct rgw_bucket_shard_gen {
+  rgw_bucket_shard bs;
+  uint64_t gen; // log generation number
+};
+
+void encode(const rgw_bucket_shard_gen& b, bufferlist& bl, uint64_t f=0);
+void decode(rgw_bucket_shard_gen& b, bufferlist::const_iterator& bl);
+
+inline std::ostream& operator<<(std::ostream& out, const rgw_bucket_shard_gen& o) {
+  return out << o.bs << '[' << o.gen << ']';
+}
+
 // represents an obligation to sync an entry up a given time
 struct rgw_data_sync_obligation {
   std::string key;
