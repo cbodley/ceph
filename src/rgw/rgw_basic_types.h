@@ -449,6 +449,9 @@ struct rgw_bucket_shard {
   }
 };
 
+void encode(const rgw_bucket_shard& b, bufferlist& bl, uint64_t f=0);
+void decode(rgw_bucket_shard& b, bufferlist::const_iterator& bl);
+
 inline std::ostream& operator<<(std::ostream& out, const rgw_bucket_shard& bs) {
   if (bs.shard_id <= 0) {
     return out << bs.bucket;

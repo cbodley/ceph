@@ -81,6 +81,18 @@ std::string rgw_bucket_shard::get_key(char tenant_delim, char id_delim,
   return key;
 }
 
+void encode(const rgw_bucket_shard& b, bufferlist& bl, uint64_t f)
+{
+  encode(b.bucket, bl, f);
+  encode(b.shard_id, bl, f);
+}
+
+void decode(rgw_bucket_shard& b, bufferlist::const_iterator& bl)
+{
+  decode(b.bucket, bl);
+  decode(b.shard_id, bl);
+}
+
 void encode_json_impl(const char *name, const rgw_zone_id& zid, Formatter *f)
 {
   encode_json(name, zid.id, f);
