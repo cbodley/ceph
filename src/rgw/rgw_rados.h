@@ -1225,7 +1225,8 @@ public:
   int delete_bucket(RGWBucketInfo& bucket_info, RGWObjVersionTracker& objv_tracker, optional_yield y, const DoutPrefixProvider *dpp, bool check_empty = true);
 
   void wakeup_meta_sync_shards(set<int>& shard_ids);
-  void wakeup_data_sync_shards(const rgw_zone_id& source_zone, map<int, set<string> >& shard_ids);
+  template<typename T>
+  void wakeup_data_sync_shards(const rgw_zone_id& source_zone, T& shard_ids);
 
   RGWMetaSyncStatusManager* get_meta_sync_manager();
   RGWDataSyncStatusManager* get_data_sync_manager(const rgw_zone_id& source_zone);

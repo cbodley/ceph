@@ -345,6 +345,24 @@ public:
     }
     return run(stacks);
   }
+
+  int notify2_all(map<rgw_zone_id, RGWRESTConn *>& conn_map,
+		 bc::flat_map<int, std::set<rgw_data_notify_entry> >& shards) {
+    rgw_http_param_pair pairs[] = { { "type", "data" },
+                                    { "notify2", NULL },
+                                    { "source-zone", store->svc.zone->get_zone_params().get_id().c_str() },
+                                    { NULL, NULL } };
+
+    list<RGWCoroutinesStack *> stacks;
+    for (auto iter = conn_map.begin(); iter != conn_map.end(); ++iter) {
+      RGWRESTConn *conn = iter->second;
+      RGWCoroutinesStack *stack = new RGWCoroutinesStack(store->ctx(), this);
+      stack->call(new RGWPostRESTResourceCR<bc::flat_map<int, std::set<rgw_data_notify_entry> >, int>(store->ctx(), conn, &http_manager, "/admin/log", pairs, shards, NULL));
+
+      stacks.push_back(stack);
+    }
+    return run(stacks);
+  }
 };
 
 /* class RGWRadosThread */
@@ -433,7 +451,7 @@ int RGWMetaNotifier::process()
   for (set<int>::iterator iter = shards.begin(); iter != shards.end(); ++iter) {
     ldout(cct, 20) << __func__ << "(): notifying mdlog change, shard_id=" << *iter << dendl;
   }
-
+  
   notify_mgr.notify_all(store->svc.zone->get_zone_conn_map(), shards);
 
   return 0;
@@ -441,6 +459,7 @@ int RGWMetaNotifier::process()
 
 class RGWDataNotifier : public RGWRadosThread {
   RGWDataNotifierManager notify_mgr;
+  std::set<rgw_data_notify_entry> entry;
 
   uint64_t interval_msec() override {
     return cct->_conf.get_val<int64_t>("rgw_data_notify_interval_msec");
@@ -467,12 +486,15 @@ int RGWDataNotifier::process()
     return 0;
   }
 
-  for (const auto& [shard_id, keys] : shards) {
-    ldout(cct, 20) << __func__ << "(): notifying datalog change, shard_id="
-		   << shard_id << ": " << keys << dendl;
+  for (const auto& [shard_id, entry] : shards) {
+    std::set<rgw_data_notify_entry>::iterator it;
+    for (it = entry.begin(); it != entry.end(); it++) {
+      ldout(cct, 20) << __func__ << "(): notifying datalog change, shard_id="
+        << shard_id << ":" << (*it).gen << ":" << (*it).key << dendl;
+    }
   }
 
-  notify_mgr.notify_all(store->svc.zone->get_zone_data_notify_to_map(), shards);
+  notify_mgr.notify2_all(store->svc.zone->get_zone_data_notify_to_map(), shards);
 
   return 0;
 }
@@ -549,6 +571,12 @@ public:
 
   void wakeup_sync_shards(map<int, set<string> >& shard_ids) {
     for (map<int, set<string> >::iterator iter = shard_ids.begin(); iter != shard_ids.end(); ++iter) {
+      sync.wakeup(iter->first, iter->second);
+    }
+  }
+
+  void wakeup_sync_shards(map<int, std::set<rgw_data_notify_entry> >& shard_ids) {
+    for (map<int, std::set<rgw_data_notify_entry> >::iterator iter = shard_ids.begin(); iter != shard_ids.end(); ++iter) {
       sync.wakeup(iter->first, iter->second);
     }
   }
@@ -645,7 +673,8 @@ void RGWRados::wakeup_meta_sync_shards(set<int>& shard_ids)
   }
 }
 
-void RGWRados::wakeup_data_sync_shards(const rgw_zone_id& source_zone, map<int, set<string> >& shard_ids)
+template<typename T>
+void RGWRados::wakeup_data_sync_shards(const rgw_zone_id& source_zone, T& shard_ids)
 {
   ldout(ctx(), 20) << __func__ << ": source_zone=" << source_zone << ", shard_ids=" << shard_ids << dendl;
   std::lock_guard l{data_sync_thread_lock};

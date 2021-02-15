@@ -1497,6 +1497,12 @@ public:
     std::lock_guard l{inc_lock};
     modified_shards.insert(keys.begin(), keys.end());
   }
+/*
+  void append_modified_shards(set<rgw_data_notify_entry>& data_notify) {
+    std::lock_guard l{inc_lock};
+    modified_shards.insert(keys.begin(), keys.end());
+  }
+*/
 
   int operate() override {
     int r;
@@ -1816,7 +1822,8 @@ public:
                                                           &sync_marker);
   }
 
-  void append_modified_shards(set<string>& keys) {
+  template<typename T>
+  void append_modified_shards(T& keys) {
     std::lock_guard l{cr_lock()};
 
     RGWDataSyncShardCR *cr = static_cast<RGWDataSyncShardCR *>(get_cr());
@@ -1949,7 +1956,8 @@ public:
                                                          sync_status.sync_info);
   }
 
-  void wakeup(int shard_id, set<string>& keys) {
+  template<typename T>
+  void wakeup(int shard_id, T& keys) {
     std::lock_guard l{shard_crs_lock};
     map<int, RGWDataSyncShardControlCR *>::iterator iter = shard_crs.find(shard_id);
     if (iter == shard_crs.end()) {
@@ -2571,7 +2579,8 @@ public:
     return new RGWDataSyncCR(sc, num_shards, tn, backoff_ptr());
   }
 
-  void wakeup(int shard_id, set<string>& keys) {
+  template<typename T>
+  void wakeup(int shard_id, T& keys) {
     ceph::mutex& m = cr_lock();
 
     m.lock();
@@ -2593,7 +2602,8 @@ public:
   }
 };
 
-void RGWRemoteDataLog::wakeup(int shard_id, set<string>& keys) {
+template<typename T>
+void RGWRemoteDataLog::wakeup(int shard_id, T& keys) {
   std::shared_lock rl{lock};
   if (!data_sync_cr) {
     return;

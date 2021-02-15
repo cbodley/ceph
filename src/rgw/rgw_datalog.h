@@ -125,6 +125,40 @@ struct RGWDataChangesLogMarker {
   RGWDataChangesLogMarker() = default;
 };
 
+struct rgw_data_notify_entry {
+  std::string key;
+  uint64_t gen = 0;
+
+  rgw_data_notify_entry(const std::string key, uint64_t gen): key(key), gen(gen) {}
+
+  rgw_data_notify_entry(const std::string& strKey = "")
+  : key(strKey) {}
+
+  void encode(ceph::buffer::list& bl) const {
+    ENCODE_START(1, 1, bl);
+    encode(key, bl);
+    encode(gen, bl);
+    ENCODE_FINISH(bl);
+  }
+
+  void decode(ceph::buffer::list::const_iterator& bl) {
+     DECODE_START(1, bl);
+     decode(key, bl);
+     decode(gen, bl);
+     DECODE_FINISH(bl);
+  }
+
+  void dump(ceph::Formatter* f) const;
+  void decode_json(JSONObj* obj);
+
+  rgw_data_notify_entry& operator=(const rgw_data_notify_entry&) = default;
+
+  bool operator<(const rgw_data_notify_entry& d) const {
+    return (key < d.key && gen < d.gen);
+  }
+};
+WRITE_CLASS_ENCODER(rgw_data_notify_entry)
+
 class RGWDataChangesBE {
 protected:
   CephContext* const cct;
@@ -181,11 +215,13 @@ class RGWDataChangesLog {
   std::unique_ptr<RGWDataChangesBE> be;
 
   const int num_shards;
+  std::set<rgw_data_notify_entry> notify_entries;
+  uint64_t gen = 0; // used for testing async notifications
 
   ceph::mutex lock = ceph::make_mutex("RGWDataChangesLog::lock");
   ceph::shared_mutex modified_lock =
     ceph::make_shared_mutex("RGWDataChangesLog::modified_lock");
-  bc::flat_map<int, bc::flat_set<std::string>> modified_shards;
+  bc::flat_map<int, std::set<rgw_data_notify_entry>> modified_shards;
 
   std::atomic<bool> down_flag = { false };
 
@@ -247,7 +283,7 @@ public:
 		   std::vector<rgw_data_change_log_entry>& entries,
 		   LogMarker& marker, bool* ptruncated);
 
-  void mark_modified(int shard_id, const rgw_bucket_shard& bs);
+  void mark_modified(int shard_id, const rgw_bucket_shard& bs, uint64_t gen);
   auto read_clear_modified() {
     std::unique_lock wl{modified_lock};
     decltype(modified_shards) modified;

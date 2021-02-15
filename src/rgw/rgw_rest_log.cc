@@ -791,6 +791,55 @@ void RGWOp_DATALog_Notify::execute(optional_yield y) {
   op_ret = 0;
 }
 
+void RGWOp_DATALog_Notify2::execute(optional_yield y) {
+  string  source_zone = s->info.args.get("source-zone");
+#define LARGE_ENOUGH_BUF (128 * 1024)
+
+  int r = 0;
+  bufferlist data;
+  std::tie(r, data) = rgw_rest_read_all_input(s, LARGE_ENOUGH_BUF);
+  if (r < 0) {
+    op_ret = r;
+    return;
+  }
+
+  char* buf = data.c_str();
+  ldout(s->cct, 20) << __func__ << "(): read data: " << buf << dendl;
+
+  JSONParser p;
+  r = p.parse(buf, data.length());
+  if (r < 0) {
+    ldout(s->cct, 0) << "ERROR: failed to parse JSON" << dendl;
+    op_ret = r;
+    return;
+  }
+
+  map<int, std::set<rgw_data_notify_entry> > updated_shards;
+  try {
+    decode_json_obj(updated_shards, &p);
+  } catch (JSONDecoder::err& err) {
+    ldout(s->cct, 0) << "ERROR: failed to decode JSON" << dendl;
+    op_ret = -EINVAL;
+    return;
+  }
+
+  if (store->ctx()->_conf->subsys.should_gather<ceph_subsys_rgw, 20>()) {
+    for (map<int, std::set<rgw_data_notify_entry> >::iterator iter =
+        updated_shards.begin(); iter != updated_shards.end(); ++iter) {
+      ldout(s->cct, 20) << __func__ << "(): updated shard=" << iter->first << dendl;
+      std::set<rgw_data_notify_entry>& entries = iter->second;
+      for (std::set<rgw_data_notify_entry>::iterator kiter = entries.begin(); kiter != entries.end(); ++kiter) {
+      ldout(s->cct, 20) << __func__ << "(): modified key=" << (*kiter).key <<
+      " of generation=" << (*kiter).gen << dendl;
+      }
+    }
+  }
+
+  store->getRados()->wakeup_data_sync_shards(source_zone, updated_shards);
+
+  op_ret = 0;
+}
+
 void RGWOp_DATALog_Delete::execute(optional_yield y) {
   string   marker = s->info.args.get("marker"),
            shard = s->info.args.get("id"),
@@ -1155,8 +1204,11 @@ RGWOp *RGWHandler_Log::op_post() {
     else if (s->info.args.exists("notify"))
       return new RGWOp_MDLog_Notify;	    
   } else if (type.compare("data") == 0) {
-    if (s->info.args.exists("notify"))
-      return new RGWOp_DATALog_Notify;	    
+    if (s->info.args.exists("notify")) {
+      return new RGWOp_DATALog_Notify;
+    } else if (s->info.args.exists("notify2")) {
+      return new RGWOp_DATALog_Notify2;
+    }
   }
   return NULL;
 }

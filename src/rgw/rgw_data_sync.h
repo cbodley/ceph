@@ -390,7 +390,8 @@ public:
   int init_sync_status(int num_shards);
   int run_sync(int num_shards);
 
-  void wakeup(int shard_id, set<string>& keys);
+  template<typename T>
+  void wakeup(int shard_id, T& keys);
 };
 
 class RGWDataSyncStatusManager : public DoutPrefixProvider {
@@ -457,7 +458,9 @@ public:
 
   int run() { return source_log.run_sync(num_shards); }
 
-  void wakeup(int shard_id, set<string>& keys) { return source_log.wakeup(shard_id, keys); }
+  template<typename T>
+  void wakeup(int shard_id, T& keys) { return source_log.wakeup(shard_id, keys); }
+
   void stop() {
     source_log.finish();
   }
