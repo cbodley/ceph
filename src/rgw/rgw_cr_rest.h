@@ -238,7 +238,7 @@ class RGWSendRESTResourceCR : public RGWSendRawRESTResourceCR<T, E> {
                            RGWHTTPManager *_http_manager,
                            const string& _method, const string& _path,
                         rgw_http_param_pair *_params, map<string, string> *_attrs,
-                        S& _input, T *_result, E *_err_result = nullptr)
+                        const S& _input, T *_result, E *_err_result = nullptr)
     : RGWSendRawRESTResourceCR<T, E>(_cct, _conn, _http_manager, _method, _path, _params, _attrs, _result, _err_result) {
 
     JSONFormatter jf;
@@ -257,7 +257,7 @@ public:
   RGWPostRESTResourceCR(CephContext *_cct, RGWRESTConn *_conn,
                         RGWHTTPManager *_http_manager,
                         const string& _path,
-                        rgw_http_param_pair *_params, S& _input,
+                        rgw_http_param_pair *_params, const S& _input,
                         T *_result, E *_err_result = nullptr)
     : RGWSendRESTResourceCR<S, T, E>(_cct, _conn, _http_manager,
                             "POST", _path,

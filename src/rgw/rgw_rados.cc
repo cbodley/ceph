@@ -32,6 +32,7 @@
 #include "rgw_cr_rados.h"
 #include "rgw_cr_rest.h"
 #include "rgw_datalog.h"
+#include "rgw_datalog_notify.h"
 #include "rgw_putobj_processor.h"
 
 #include "cls/rgw/cls_rgw_ops.h"
@@ -329,18 +330,13 @@ public:
   }
 
   int notify_all(map<rgw_zone_id, RGWRESTConn *>& conn_map,
-		 bc::flat_map<int, bc::flat_set<string> >& shards) {
-    rgw_http_param_pair pairs[] = { { "type", "data" },
-                                    { "notify", NULL },
-                                    { "source-zone", store->svc.zone->get_zone_params().get_id().c_str() },
-                                    { NULL, NULL } };
-
+		 bc::flat_map<int, bc::flat_set<rgw_data_notify_entry> >& shards) {
+    const char* source_zone = store->svc.zone->get_zone_params().get_id().c_str();
     list<RGWCoroutinesStack *> stacks;
     for (auto iter = conn_map.begin(); iter != conn_map.end(); ++iter) {
       RGWRESTConn *conn = iter->second;
       RGWCoroutinesStack *stack = new RGWCoroutinesStack(store->ctx(), this);
-      stack->call(new RGWPostRESTResourceCR<bc::flat_map<int, bc::flat_set<string> >, int>(store->ctx(), conn, &http_manager, "/admin/log", pairs, shards, NULL));
-
+      stack->call(rgw_datalog_notify_peer_cr(&http_manager, conn, source_zone, shards));
       stacks.push_back(stack);
     }
     return run(stacks);

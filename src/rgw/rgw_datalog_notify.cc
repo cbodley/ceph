@@ -3,6 +3,64 @@
 
 #include "rgw_datalog_notify.h"
 #include "rgw_datalog.h"
+#include "rgw_coroutine.h"
+#include "rgw_cr_rest.h"
+
+#include <boost/asio/yield.hpp>
+
+class DatalogNotifyCR : public RGWCoroutine {
+  RGWHTTPManager* http;
+  RGWRESTConn* conn;
+  const char* source_zone;
+  const bc::flat_map<int, bc::flat_set<rgw_data_notify_entry>>& shards;
+ public:
+  DatalogNotifyCR(RGWHTTPManager* http, RGWRESTConn* conn, const char* source_zone,
+                  const bc::flat_map<int, bc::flat_set<rgw_data_notify_entry> >& shards)
+    : RGWCoroutine(conn->get_ctx()), conn(conn), shards(shards)
+  {}
+
+  int operate() override {
+    reenter(this) {
+      // try the notify2 API
+      yield {
+        rgw_http_param_pair params[] = {
+          { "type", "data" },
+          { "notify2", nullptr },
+          { "source-zone", source_zone },
+          { nullptr, nullptr }
+        };
+        using PostNotify2 = RGWPostRESTResourceCR<bc::flat_map<int, bc::flat_set<rgw_data_notify_entry>>, int>;
+        call(new PostNotify2(cct, conn, http, "/admin/log", params, shards, nullptr));
+      }
+
+      // if the remote doesn't understand notify v2, retry with notify v1
+      if (retcode == -ERR_METHOD_NOT_ALLOWED) yield {
+        rgw_http_param_pair params[] = {
+          { "type", "data" },
+          { "notify", nullptr },
+          { "source-zone", source_zone },
+          { nullptr, nullptr }
+        };
+        auto encoder = rgw_data_notify_v1_encoder{shards};
+        using PostNotify1 = RGWPostRESTResourceCR<rgw_data_notify_v1_encoder, int>;
+        call(new PostNotify1(cct, conn, http, "/admin/log", params, encoder, nullptr));
+      }
+
+      if (retcode < 0) {
+        return set_cr_error(retcode);
+      }
+      return set_cr_done();
+    }
+    return 0;
+  }
+};
+
+RGWCoroutine* rgw_datalog_notify_peer_cr(RGWHTTPManager* http, RGWRESTConn* conn,
+                                         const char* source_zone,
+                                         const bc::flat_map<int, bc::flat_set<rgw_data_notify_entry>>& shards)
+{
+  return new DatalogNotifyCR(http, conn, source_zone, shards);
+}
 
 // custom encoding for v1 notify API
 struct EntryEncoderV1 {

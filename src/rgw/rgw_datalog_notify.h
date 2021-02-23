@@ -17,6 +17,11 @@ class RGWRESTConn;
 
 struct rgw_data_notify_entry;
 
+// send a datalog notification over the given peer connection
+RGWCoroutine* rgw_datalog_notify_peer_cr(RGWHTTPManager* http, RGWRESTConn* conn,
+                                         const char* source_zone,
+                                         bc::flat_map<int, bc::flat_set<rgw_data_notify_entry> >& shards);
+
 // json encoder and decoder for notify v1 API
 struct rgw_data_notify_v1_encoder {
   const bc::flat_map<int, bc::flat_set<rgw_data_notify_entry>>& shards;
