@@ -347,7 +347,7 @@ public:
   }
 
   int notify2_all(map<rgw_zone_id, RGWRESTConn *>& conn_map,
-		 bc::flat_map<int, std::set<rgw_data_notify_entry> >& shards) {
+		 bc::flat_map<int, bc::flat_set<rgw_data_notify_entry> >& shards) {
     rgw_http_param_pair pairs[] = { { "type", "data" },
                                     { "notify2", NULL },
                                     { "source-zone", store->svc.zone->get_zone_params().get_id().c_str() },
@@ -357,7 +357,7 @@ public:
     for (auto iter = conn_map.begin(); iter != conn_map.end(); ++iter) {
       RGWRESTConn *conn = iter->second;
       RGWCoroutinesStack *stack = new RGWCoroutinesStack(store->ctx(), this);
-      stack->call(new RGWPostRESTResourceCR<bc::flat_map<int, std::set<rgw_data_notify_entry> >, int>(store->ctx(), conn, &http_manager, "/admin/log", pairs, shards, NULL));
+      stack->call(new RGWPostRESTResourceCR<bc::flat_map<int, bc::flat_set<rgw_data_notify_entry> >, int>(store->ctx(), conn, &http_manager, "/admin/log", pairs, shards, NULL));
 
       stacks.push_back(stack);
     }
@@ -459,7 +459,7 @@ int RGWMetaNotifier::process()
 
 class RGWDataNotifier : public RGWRadosThread {
   RGWDataNotifierManager notify_mgr;
-  std::set<rgw_data_notify_entry> entry;
+  bc::flat_set<rgw_data_notify_entry> entry;
 
   uint64_t interval_msec() override {
     return cct->_conf.get_val<int64_t>("rgw_data_notify_interval_msec");
@@ -486,8 +486,8 @@ int RGWDataNotifier::process()
     return 0;
   }
 
-  for (const auto& [shard_id, entry] : shards) {
-    std::set<rgw_data_notify_entry>::iterator it;
+  for (auto& [shard_id, entry] : shards) {
+    bc::flat_set<rgw_data_notify_entry>::iterator it;
     for (it = entry.begin(); it != entry.end(); it++) {
       ldout(cct, 20) << __func__ << "(): notifying datalog change, shard_id="
         << shard_id << ":" << (*it).gen << ":" << (*it).key << dendl;
@@ -575,8 +575,8 @@ public:
     }
   }
 
-  void wakeup_sync_shards(map<int, std::set<rgw_data_notify_entry> >& shard_ids) {
-    for (map<int, std::set<rgw_data_notify_entry> >::iterator iter = shard_ids.begin(); iter != shard_ids.end(); ++iter) {
+  void wakeup_sync_shards(map<int, set<rgw_data_notify_entry> >& shard_ids) {
+    for (map<int, set<rgw_data_notify_entry> >::iterator iter = shard_ids.begin(); iter != shard_ids.end(); ++iter) {
       sync.wakeup(iter->first, iter->second);
     }
   }

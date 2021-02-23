@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <boost/container/flat_map.hpp>
+#include <boost/container/flat_set.hpp>
 
 #include "include/rados/librados.hpp"
 #include "include/Context.h"

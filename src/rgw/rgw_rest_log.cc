@@ -814,7 +814,7 @@ void RGWOp_DATALog_Notify2::execute(optional_yield y) {
     return;
   }
 
-  map<int, std::set<rgw_data_notify_entry> > updated_shards;
+  map<int, set<rgw_data_notify_entry> > updated_shards;
   try {
     decode_json_obj(updated_shards, &p);
   } catch (JSONDecoder::err& err) {
@@ -824,11 +824,11 @@ void RGWOp_DATALog_Notify2::execute(optional_yield y) {
   }
 
   if (store->ctx()->_conf->subsys.should_gather<ceph_subsys_rgw, 20>()) {
-    for (map<int, std::set<rgw_data_notify_entry> >::iterator iter =
+    for (map<int, set<rgw_data_notify_entry> >::iterator iter =
         updated_shards.begin(); iter != updated_shards.end(); ++iter) {
       ldout(s->cct, 20) << __func__ << "(): updated shard=" << iter->first << dendl;
-      std::set<rgw_data_notify_entry>& entries = iter->second;
-      for (std::set<rgw_data_notify_entry>::iterator kiter = entries.begin(); kiter != entries.end(); ++kiter) {
+      set<rgw_data_notify_entry>& entries = iter->second;
+      for (set<rgw_data_notify_entry>::iterator kiter = entries.begin(); kiter != entries.end(); ++kiter) {
       ldout(s->cct, 20) << __func__ << "(): modified key=" << (*kiter).key <<
       " of generation=" << (*kiter).gen << dendl;
       }

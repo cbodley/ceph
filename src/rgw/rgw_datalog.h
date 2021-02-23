@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <boost/container/flat_map.hpp>
+#include <boost/container/flat_set.hpp>
 
 #undef FMT_HEADER_ONLY
 #define FMT_HEADER_ONLY 1
@@ -134,30 +135,21 @@ struct rgw_data_notify_entry {
   rgw_data_notify_entry(const std::string& strKey = "")
   : key(strKey) {}
 
-  void encode(ceph::buffer::list& bl) const {
-    ENCODE_START(1, 1, bl);
-    encode(key, bl);
-    encode(gen, bl);
-    ENCODE_FINISH(bl);
-  }
-
-  void decode(ceph::buffer::list::const_iterator& bl) {
-     DECODE_START(1, bl);
-     decode(key, bl);
-     decode(gen, bl);
-     DECODE_FINISH(bl);
-  }
-
   void dump(ceph::Formatter* f) const;
   void decode_json(JSONObj* obj);
 
   rgw_data_notify_entry& operator=(const rgw_data_notify_entry&) = default;
 
   bool operator<(const rgw_data_notify_entry& d) const {
-    return (key < d.key && gen < d.gen);
+    if (key < d.key) {
+      return true;
+    }
+    if (d.key < key) {
+      return false;
+    }
+    return gen < d.gen;
   }
 };
-WRITE_CLASS_ENCODER(rgw_data_notify_entry)
 
 class RGWDataChangesBE {
 protected:
@@ -215,13 +207,13 @@ class RGWDataChangesLog {
   std::unique_ptr<RGWDataChangesBE> be;
 
   const int num_shards;
-  std::set<rgw_data_notify_entry> notify_entries;
+  bc::flat_set<rgw_data_notify_entry> notify_entries;
   uint64_t gen = 0; // used for testing async notifications
 
   ceph::mutex lock = ceph::make_mutex("RGWDataChangesLog::lock");
   ceph::shared_mutex modified_lock =
     ceph::make_shared_mutex("RGWDataChangesLog::modified_lock");
-  bc::flat_map<int, std::set<rgw_data_notify_entry>> modified_shards;
+  bc::flat_map<int, bc::flat_set<rgw_data_notify_entry>> modified_shards;
 
   std::atomic<bool> down_flag = { false };
 
