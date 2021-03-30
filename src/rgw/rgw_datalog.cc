@@ -710,7 +710,6 @@ int RGWDataChangesLog::add_entry(const DoutPrefixProvider *dpp, const RGWBucketI
   rgw_bucket_shard bs(bucket, shard_id);
 
   int index = choose_oid(bs);
-  mark_modified(index, bs);
 
   std::unique_lock l(lock);
 
@@ -886,21 +885,6 @@ void RGWDataChangesLog::renew_stop()
 {
   std::lock_guard l{renew_lock};
   renew_cond.notify_all();
-}
-
-void RGWDataChangesLog::mark_modified(int shard_id, const rgw_bucket_shard& bs)
-{
-  auto key = bs.get_key();
-  {
-    std::shared_lock rl{modified_lock}; // read lock to check for existence
-    auto shard = modified_shards.find(shard_id);
-    if (shard != modified_shards.end() && shard->second.count(key)) {
-      return;
-    }
-  }
-
-  std::unique_lock wl{modified_lock}; // write lock for insertion
-  modified_shards[shard_id].insert(key);
 }
 
 std::string_view RGWDataChangesLog::max_marker() const {

@@ -1414,17 +1414,8 @@ class RGWDataSyncShardCR : public RGWCoroutine {
   list<rgw_data_change_log_entry>::iterator log_iter;
   bool truncated = false;
 
-  ceph::mutex inc_lock = ceph::make_mutex("RGWDataSyncShardCR::inc_lock");
-  ceph::condition_variable inc_cond;
-
   boost::asio::coroutine incremental_cr;
   boost::asio::coroutine full_cr;
-
-
-  set<string> modified_shards;
-  set<string> current_modified;
-
-  set<string>::iterator modified_iter;
 
   uint64_t total_entries = 0;
   static constexpr int spawn_window = BUCKET_SHARD_SYNC_SPAWN_WINDOW;
@@ -1486,11 +1477,6 @@ public:
     if (lease_cr) {
       lease_cr->abort();
     }
-  }
-
-  void append_modified_shards(set<string>& keys) {
-    std::lock_guard l{inc_lock};
-    modified_shards.insert(keys.begin(), keys.end());
   }
 
   int operate() override {
@@ -1656,25 +1642,6 @@ public:
           drain_all();
           return set_cr_error(-ECANCELED);
         }
-        current_modified.clear();
-        inc_lock.lock();
-        current_modified.swap(modified_shards);
-        inc_lock.unlock();
-
-        if (current_modified.size() > 0) {
-          tn->set_flag(RGW_SNS_FLAG_ACTIVE); /* actually have entries to sync */
-        }
-        /* process out of band updates */
-        for (modified_iter = current_modified.begin(); modified_iter != current_modified.end(); ++modified_iter) {
-          retcode = parse_bucket_key(*modified_iter, source_bs);
-          if (retcode < 0) {
-            tn->log(1, SSTR("failed to parse bucket shard: " << *modified_iter));
-            continue;
-          }
-          tn->log(20, SSTR("received async update notification: " << *modified_iter));
-          spawn(sync_single_entry(source_bs, *modified_iter, string(),
-                                  ceph::real_time{}, false), false);
-        }
 
         if (error_retry_time <= ceph::coarse_real_clock::now()) {
           /* process bucket shards that previously failed */
@@ -1815,17 +1782,6 @@ public:
                                                           rgw_raw_obj(sync_env->svc->zone->get_zone_params().log_pool, RGWDataSyncStatusManager::shard_obj_name(sc->source_zone, shard_id)),
                                                           &sync_marker);
   }
-
-  void append_modified_shards(set<string>& keys) {
-    std::lock_guard l{cr_lock()};
-
-    RGWDataSyncShardCR *cr = static_cast<RGWDataSyncShardCR *>(get_cr());
-    if (!cr) {
-      return;
-    }
-
-    cr->append_modified_shards(keys);
-  }
 };
 
 class RGWDataSyncCR : public RGWCoroutine {
@@ -1834,10 +1790,6 @@ class RGWDataSyncCR : public RGWCoroutine {
   uint32_t num_shards;
 
   rgw_data_sync_status sync_status;
-
-  ceph::mutex shard_crs_lock =
-    ceph::make_mutex("RGWDataSyncCR::shard_crs_lock");
-  map<int, RGWDataSyncShardControlCR *> shard_crs;
 
   bool *reset_backoff;
 
@@ -1850,12 +1802,6 @@ public:
                                                       num_shards(_num_shards),
                                                       reset_backoff(_reset_backoff), tn(_tn) {
 
-  }
-
-  ~RGWDataSyncCR() override {
-    for (auto iter : shard_crs) {
-      iter.second->put();
-    }
   }
 
   int operate() override {
@@ -1927,13 +1873,8 @@ public:
           tn->log(10, SSTR("spawning " << num_shards << " shards sync"));
           for (map<uint32_t, rgw_data_sync_marker>::iterator iter = sync_status.sync_markers.begin();
                iter != sync_status.sync_markers.end(); ++iter) {
-            RGWDataSyncShardControlCR *cr = new RGWDataSyncShardControlCR(sc, sync_env->svc->zone->get_zone_params().log_pool,
-                                                                          iter->first, iter->second, tn);
-            cr->get();
-            shard_crs_lock.lock();
-            shard_crs[iter->first] = cr;
-            shard_crs_lock.unlock();
-            spawn(cr, true);
+            spawn(new RGWDataSyncShardControlCR(sc, sync_env->svc->zone->get_zone_params().log_pool,
+                                                iter->first, iter->second, tn), true);
           }
         }
       }
@@ -1947,16 +1888,6 @@ public:
     return new RGWSimpleRadosWriteCR<rgw_data_sync_info>(sync_env->async_rados, sync_env->svc->sysobj,
                                                          rgw_raw_obj(sync_env->svc->zone->get_zone_params().log_pool, RGWDataSyncStatusManager::sync_status_oid(sc->source_zone)),
                                                          sync_status.sync_info);
-  }
-
-  void wakeup(int shard_id, set<string>& keys) {
-    std::lock_guard l{shard_crs_lock};
-    map<int, RGWDataSyncShardControlCR *>::iterator iter = shard_crs.find(shard_id);
-    if (iter == shard_crs.end()) {
-      return;
-    }
-    iter->second->append_modified_shards(keys);
-    iter->second->wakeup();
   }
 };
 
@@ -2570,36 +2501,7 @@ public:
   RGWCoroutine *alloc_cr() override {
     return new RGWDataSyncCR(sc, num_shards, tn, backoff_ptr());
   }
-
-  void wakeup(int shard_id, set<string>& keys) {
-    ceph::mutex& m = cr_lock();
-
-    m.lock();
-    RGWDataSyncCR *cr = static_cast<RGWDataSyncCR *>(get_cr());
-    if (!cr) {
-      m.unlock();
-      return;
-    }
-
-    cr->get();
-    m.unlock();
-
-    if (cr) {
-      tn->log(20, SSTR("notify shard=" << shard_id << " keys=" << keys));
-      cr->wakeup(shard_id, keys);
-    }
-
-    cr->put();
-  }
 };
-
-void RGWRemoteDataLog::wakeup(int shard_id, set<string>& keys) {
-  std::shared_lock rl{lock};
-  if (!data_sync_cr) {
-    return;
-  }
-  data_sync_cr->wakeup(shard_id, keys);
-}
 
 int RGWRemoteDataLog::run_sync(int num_shards)
 {

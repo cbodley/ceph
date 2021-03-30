@@ -318,35 +318,6 @@ public:
   }
 };
 
-class RGWDataNotifierManager : public RGWCoroutinesManager {
-  RGWRados *store;
-  RGWHTTPManager http_manager;
-
-public:
-  RGWDataNotifierManager(RGWRados *_store) : RGWCoroutinesManager(_store->ctx(), _store->get_cr_registry()), store(_store),
-                                             http_manager(store->ctx(), completion_mgr) {
-    http_manager.start();
-  }
-
-  int notify_all(map<rgw_zone_id, RGWRESTConn *>& conn_map,
-		 bc::flat_map<int, bc::flat_set<string> >& shards) {
-    rgw_http_param_pair pairs[] = { { "type", "data" },
-                                    { "notify", NULL },
-                                    { "source-zone", store->svc.zone->get_zone_params().get_id().c_str() },
-                                    { NULL, NULL } };
-
-    list<RGWCoroutinesStack *> stacks;
-    for (auto iter = conn_map.begin(); iter != conn_map.end(); ++iter) {
-      RGWRESTConn *conn = iter->second;
-      RGWCoroutinesStack *stack = new RGWCoroutinesStack(store->ctx(), this);
-      stack->call(new RGWPostRESTResourceCR<bc::flat_map<int, bc::flat_set<string> >, int>(store->ctx(), conn, &http_manager, "/admin/log", pairs, shards, NULL));
-
-      stacks.push_back(stack);
-    }
-    return run(stacks);
-  }
-};
-
 /* class RGWRadosThread */
 
 void RGWRadosThread::start()
@@ -439,44 +410,6 @@ int RGWMetaNotifier::process()
   return 0;
 }
 
-class RGWDataNotifier : public RGWRadosThread {
-  RGWDataNotifierManager notify_mgr;
-
-  uint64_t interval_msec() override {
-    return cct->_conf.get_val<int64_t>("rgw_data_notify_interval_msec");
-  }
-  void stop_process() override {
-    notify_mgr.stop();
-  }
-public:
-  RGWDataNotifier(RGWRados *_store) : RGWRadosThread(_store, "data-notifier"), notify_mgr(_store) {}
-
-  int process() override;
-};
-
-int RGWDataNotifier::process()
-{
-  auto data_log = store->svc.datalog_rados;
-  if (!data_log) {
-    return 0;
-  }
-
-  auto shards = data_log->read_clear_modified();
-
-  if (shards.empty()) {
-    return 0;
-  }
-
-  for (const auto& [shard_id, keys] : shards) {
-    ldout(cct, 20) << __func__ << "(): notifying datalog change, shard_id="
-		   << shard_id << ": " << keys << dendl;
-  }
-
-  notify_mgr.notify_all(store->svc.zone->get_zone_data_notify_to_map(), shards);
-
-  return 0;
-}
-
 class RGWSyncProcessorThread : public RGWRadosThread {
 public:
   RGWSyncProcessorThread(RGWRados *_store, const string& thread_name = "radosgw") : RGWRadosThread(_store, thread_name) {}
@@ -547,11 +480,6 @@ public:
       sync(_store, async_rados, source_zone->id, counters.get()),
       initialized(false) {}
 
-  void wakeup_sync_shards(map<int, set<string> >& shard_ids) {
-    for (map<int, set<string> >::iterator iter = shard_ids.begin(); iter != shard_ids.end(); ++iter) {
-      sync.wakeup(iter->first, iter->second);
-    }
-  }
   RGWDataSyncStatusManager* get_manager() { return &sync; }
 
   int init() override {
@@ -643,21 +571,6 @@ void RGWRados::wakeup_meta_sync_shards(set<int>& shard_ids)
   if (meta_sync_processor_thread) {
     meta_sync_processor_thread->wakeup_sync_shards(shard_ids);
   }
-}
-
-void RGWRados::wakeup_data_sync_shards(const rgw_zone_id& source_zone, map<int, set<string> >& shard_ids)
-{
-  ldout(ctx(), 20) << __func__ << ": source_zone=" << source_zone << ", shard_ids=" << shard_ids << dendl;
-  std::lock_guard l{data_sync_thread_lock};
-  auto iter = data_sync_processor_threads.find(source_zone);
-  if (iter == data_sync_processor_threads.end()) {
-    ldout(ctx(), 10) << __func__ << ": couldn't find sync thread for zone " << source_zone << ", skipping async data sync processing" << dendl;
-    return;
-  }
-
-  RGWDataSyncProcessorThread *thread = iter->second;
-  ceph_assert(thread);
-  thread->wakeup_sync_shards(shard_ids);
 }
 
 RGWMetaSyncStatusManager* RGWRados::get_meta_sync_manager()
@@ -1057,10 +970,6 @@ void RGWRados::finalize()
     meta_notifier->stop();
     delete meta_notifier;
   }
-  if (data_notifier) {
-    data_notifier->stop();
-    delete data_notifier;
-  }
   delete sync_tracer;
   
   delete lc;
@@ -1287,8 +1196,6 @@ int RGWRados::init_complete(const DoutPrefixProvider *dpp)
       sync_log_trimmer->start();
     }
   }
-  data_notifier = new RGWDataNotifier(this);
-  data_notifier->start();
 
   binfo_cache = new RGWChainedCacheImpl<bucket_info_entry>;
   binfo_cache->init(svc.cache);
