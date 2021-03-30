@@ -34,7 +34,6 @@ class RGWWatcher;
 class SafeTimer;
 class ACLOwner;
 class RGWGC;
-class RGWMetaNotifier;
 class RGWLC;
 class RGWObjectExpirer;
 class RGWMetaSyncProcessorThread;
@@ -371,7 +370,6 @@ class RGWIndexCompletionManager;
 class RGWRados
 {
   friend class RGWGC;
-  friend class RGWMetaNotifier;
   friend class RGWObjectExpirer;
   friend class RGWMetaSyncProcessorThread;
   friend class RGWDataSyncProcessorThread;
@@ -408,7 +406,6 @@ class RGWRados
   bool run_sync_thread;
   bool run_reshard_thread;
 
-  RGWMetaNotifier *meta_notifier;
   RGWMetaSyncProcessorThread *meta_sync_processor_thread;
   RGWSyncTraceManager *sync_tracer = nullptr;
   map<rgw_zone_id, RGWDataSyncProcessorThread *> data_sync_processor_threads;
@@ -482,7 +479,7 @@ protected:
 public:
   RGWRados(): timer(NULL),
                gc(NULL), lc(NULL), obj_expirer(NULL), use_gc_thread(false), use_lc_thread(false), quota_threads(false),
-               run_sync_thread(false), run_reshard_thread(false), meta_notifier(NULL),
+               run_sync_thread(false), run_reshard_thread(false),
                meta_sync_processor_thread(NULL),
                bucket_index_max_shards(0),
                max_bucket_id(0), cct(NULL),
@@ -1190,8 +1187,6 @@ public:
    * Returns 0 on success, -ERR# otherwise.
    */
   int delete_bucket(RGWBucketInfo& bucket_info, RGWObjVersionTracker& objv_tracker, optional_yield y, const DoutPrefixProvider *dpp, bool check_empty = true);
-
-  void wakeup_meta_sync_shards(set<int>& shard_ids);
 
   RGWMetaSyncStatusManager* get_meta_sync_manager();
   RGWDataSyncStatusManager* get_data_sync_manager(const rgw_zone_id& source_zone);

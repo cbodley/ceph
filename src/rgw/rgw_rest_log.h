@@ -166,21 +166,6 @@ public:
   }
 };
 
-class RGWOp_MDLog_Notify : public RGWRESTOp {
-public:
-  RGWOp_MDLog_Notify() {}
-  ~RGWOp_MDLog_Notify() override {}
-
-  int check_caps(const RGWUserCaps& caps) override {
-    return caps.check_cap("mdlog", RGW_CAP_WRITE);
-  }
-  void execute(optional_yield y) override;
-  const char* name() const override {
-    return "mdlog_notify";
-  }
-  RGWOpType get_type() override { return RGW_OP_SYNC_MDLOG_NOTIFY; }
-};
-
 class RGWOp_MDLog_Delete : public RGWRESTOp {
 public:
   RGWOp_MDLog_Delete() {}

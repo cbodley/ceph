@@ -195,7 +195,6 @@ class RGWStore {
 					RGWBucketSyncPolicyHandlerRef *phandler,
 					optional_yield y) = 0;
     virtual RGWDataSyncStatusManager* get_data_sync_manager(const rgw_zone_id& source_zone) = 0;
-    virtual void wakeup_meta_sync_shards(set<int>& shard_ids) = 0;
     virtual int clear_usage() = 0;
     virtual int read_all_usage(uint64_t start_epoch, uint64_t end_epoch,
 			       uint32_t max_entries, bool *is_truncated,

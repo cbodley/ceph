@@ -291,33 +291,6 @@ void RGWObjVersionTracker::generate_new_write_ver(CephContext *cct)
   append_rand_alpha(cct, write_version.tag, write_version.tag, TAG_LEN);
 }
 
-class RGWMetaNotifierManager : public RGWCoroutinesManager {
-  RGWRados *store;
-  RGWHTTPManager http_manager;
-
-public:
-  RGWMetaNotifierManager(RGWRados *_store) : RGWCoroutinesManager(_store->ctx(), _store->get_cr_registry()), store(_store),
-                                             http_manager(store->ctx(), completion_mgr) {
-    http_manager.start();
-  }
-
-  int notify_all(map<rgw_zone_id, RGWRESTConn *>& conn_map, set<int>& shards) {
-    rgw_http_param_pair pairs[] = { { "type", "metadata" },
-                                    { "notify", NULL },
-                                    { NULL, NULL } };
-
-    list<RGWCoroutinesStack *> stacks;
-    for (auto iter = conn_map.begin(); iter != conn_map.end(); ++iter) {
-      RGWRESTConn *conn = iter->second;
-      RGWCoroutinesStack *stack = new RGWCoroutinesStack(store->ctx(), this);
-      stack->call(new RGWPostRESTResourceCR<set<int>, int>(store->ctx(), conn, &http_manager, "/admin/log", pairs, shards, NULL));
-
-      stacks.push_back(stack);
-    }
-    return run(stacks);
-  }
-};
-
 /* class RGWRadosThread */
 
 void RGWRadosThread::start()
@@ -374,42 +347,6 @@ void *RGWRadosThread::Worker::entry() {
   return NULL;
 }
 
-class RGWMetaNotifier : public RGWRadosThread {
-  RGWMetaNotifierManager notify_mgr;
-  RGWMetadataLog *const log;
-
-  uint64_t interval_msec() override {
-    return cct->_conf->rgw_md_notify_interval_msec;
-  }
-  void stop_process() override {
-    notify_mgr.stop();
-  }
-public:
-  RGWMetaNotifier(RGWRados *_store, RGWMetadataLog* log)
-    : RGWRadosThread(_store, "meta-notifier"), notify_mgr(_store), log(log) {}
-
-  int process() override;
-};
-
-int RGWMetaNotifier::process()
-{
-  set<int> shards;
-
-  log->read_clear_modified(shards);
-
-  if (shards.empty()) {
-    return 0;
-  }
-
-  for (set<int>::iterator iter = shards.begin(); iter != shards.end(); ++iter) {
-    ldout(cct, 20) << __func__ << "(): notifying mdlog change, shard_id=" << *iter << dendl;
-  }
-
-  notify_mgr.notify_all(store->svc.zone->get_zone_conn_map(), shards);
-
-  return 0;
-}
-
 class RGWSyncProcessorThread : public RGWRadosThread {
 public:
   RGWSyncProcessorThread(RGWRados *_store, const string& thread_name = "radosgw") : RGWRadosThread(_store, thread_name) {}
@@ -433,11 +370,6 @@ public:
   RGWMetaSyncProcessorThread(rgw::sal::RGWRadosStore *_store, RGWAsyncRadosProcessor *async_rados)
     : RGWSyncProcessorThread(_store->getRados(), "meta-sync"), sync(_store, async_rados) {}
 
-  void wakeup_sync_shards(set<int>& shard_ids) {
-    for (set<int>::iterator iter = shard_ids.begin(); iter != shard_ids.end(); ++iter) {
-      sync.wakeup(*iter);
-    }
-  }
   RGWMetaSyncStatusManager* get_manager() { return &sync; }
 
   int init() override {
@@ -564,14 +496,6 @@ public:
   }
 
 };
-
-void RGWRados::wakeup_meta_sync_shards(set<int>& shard_ids)
-{
-  std::lock_guard l{meta_sync_thread_lock};
-  if (meta_sync_processor_thread) {
-    meta_sync_processor_thread->wakeup_sync_shards(shard_ids);
-  }
-}
 
 RGWMetaSyncStatusManager* RGWRados::get_meta_sync_manager()
 {
@@ -966,10 +890,6 @@ void RGWRados::finalize()
     sync_log_trimmer = nullptr;
     bucket_trim = boost::none;
   }
-  if (meta_notifier) {
-    meta_notifier->stop();
-    delete meta_notifier;
-  }
   delete sync_tracer;
   
   delete lc;
@@ -1127,12 +1047,6 @@ int RGWRados::init_complete(const DoutPrefixProvider *dpp)
     or there is no rest_master_conn */
   if (!svc.zone->need_to_sync()) {
     run_sync_thread = false;
-  }
-
-  if (svc.zone->is_meta_master()) {
-    auto md_log = svc.mdlog->get_log(current_period.get_id());
-    meta_notifier = new RGWMetaNotifier(this, md_log);
-    meta_notifier->start();
   }
 
   /* init it anyway, might run sync through radosgw-admin explicitly */

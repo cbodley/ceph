@@ -317,48 +317,6 @@ void RGWOp_MDLog_Unlock::execute(optional_yield y) {
   op_ret = meta_log.unlock(shard_id, zone_id, locker_id);
 }
 
-void RGWOp_MDLog_Notify::execute(optional_yield y) {
-#define LARGE_ENOUGH_BUF (128 * 1024)
-
-  int r = 0;
-  bufferlist data;
-  std::tie(r, data) = read_all_input(s, LARGE_ENOUGH_BUF);
-  if (r < 0) {
-    op_ret = r;
-    return;
-  }
-
-  char* buf = data.c_str();
-  ldout(s->cct, 20) << __func__ << "(): read data: " << buf << dendl;
-
-  JSONParser p;
-  r = p.parse(buf, data.length());
-  if (r < 0) {
-    ldout(s->cct, 0) << "ERROR: failed to parse JSON" << dendl;
-    op_ret = r;
-    return;
-  }
-
-  set<int> updated_shards;
-  try {
-    decode_json_obj(updated_shards, &p);
-  } catch (JSONDecoder::err& err) {
-    ldout(s->cct, 0) << "ERROR: failed to decode JSON" << dendl;
-    op_ret = -EINVAL;
-    return;
-  }
-
-  if (store->ctx()->_conf->subsys.should_gather<ceph_subsys_rgw, 20>()) {
-    for (set<int>::iterator iter = updated_shards.begin(); iter != updated_shards.end(); ++iter) {
-      ldout(s->cct, 20) << __func__ << "(): updated shard=" << *iter << dendl;
-    }
-  }
-
-  store->wakeup_meta_sync_shards(updated_shards);
-
-  op_ret = 0;
-}
-
 void RGWOp_BILog_List::execute(optional_yield y) {
   string tenant_name = s->info.args.get("tenant"),
          bucket_name = s->info.args.get("bucket"),
@@ -1014,8 +972,6 @@ RGWOp *RGWHandler_Log::op_post() {
       return new RGWOp_MDLog_Lock;
     else if (s->info.args.exists("unlock"))
       return new RGWOp_MDLog_Unlock;
-    else if (s->info.args.exists("notify"))
-      return new RGWOp_MDLog_Notify;	    
   }
   return NULL;
 }

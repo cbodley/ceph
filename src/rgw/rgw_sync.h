@@ -237,8 +237,6 @@ public:
   int init_sync_status();
   int run_sync(optional_yield y);
 
-  void wakeup(int shard_id);
-
   RGWMetaSyncEnv& get_sync_env() {
     return sync_env;
   }
@@ -298,7 +296,6 @@ public:
   unsigned get_subsys() const override;
   std::ostream& gen_prefix(std::ostream& out) const override;
 
-  void wakeup(int shard_id) { return master_log.wakeup(shard_id); }
   void stop() {
     master_log.finish();
   }

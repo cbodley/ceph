@@ -1905,16 +1905,6 @@ class RGWMetaSyncCR : public RGWCoroutine {
   RGWPeriodHistory::Cursor next; //< next period in history
   rgw_meta_sync_status sync_status;
   RGWSyncTraceNodeRef tn;
-
-  std::mutex mutex; //< protect access to shard_crs
-
-  // TODO: it should be enough to hold a reference on the stack only, as calling
-  // RGWCoroutinesStack::wakeup() doesn't refer to the RGWCoroutine if it has
-  // already completed
-  using ControlCRRef = boost::intrusive_ptr<RGWMetaSyncShardControlCR>;
-  using StackRef = boost::intrusive_ptr<RGWCoroutinesStack>;
-  using RefPair = std::pair<ControlCRRef, StackRef>;
-  map<int, RefPair> shard_crs;
   int ret{0};
 
 public:
@@ -1956,9 +1946,6 @@ public:
 
           tn->log(1, SSTR("realm epoch=" << realm_epoch << " period id=" << period_id));
 
-          // prevent wakeup() from accessing shard_crs while we're spawning them
-          std::lock_guard<std::mutex> lock(mutex);
-
           // sync this period on each shard
           for (const auto& m : sync_status.sync_markers) {
             uint32_t shard_id = m.first;
@@ -1977,11 +1964,9 @@ public:
             }
 
             using ShardCR = RGWMetaSyncShardControlCR;
-            auto cr = new ShardCR(sync_env, pool, period_id, realm_epoch,
-                                  mdlog, shard_id, marker,
-                                  std::move(period_marker), tn);
-            auto stack = spawn(cr, false);
-            shard_crs[shard_id] = RefPair{cr, stack};
+            spawn(new ShardCR(sync_env, pool, period_id, realm_epoch,
+                              mdlog, shard_id, marker,
+                              std::move(period_marker), tn), false);
           }
         }
         // wait for each shard to complete
@@ -1990,11 +1975,6 @@ public:
           collect(&ret, nullptr);
         }
         drain_all();
-        {
-          // drop shard cr refs under lock
-          std::lock_guard<std::mutex> lock(mutex);
-          shard_crs.clear();
-        }
         if (ret < 0) {
           return set_cr_error(ret);
         }
@@ -2012,15 +1992,6 @@ public:
       }
     }
     return 0;
-  }
-
-  void wakeup(int shard_id) {
-    std::lock_guard<std::mutex> lock(mutex);
-    auto iter = shard_crs.find(shard_id);
-    if (iter == shard_crs.end()) {
-      return;
-    }
-    iter->second.first->wakeup();
   }
 };
 
@@ -2271,14 +2242,6 @@ int RGWRemoteMetaLog::run_sync(optional_yield y)
   } while (!going_down);
 
   return 0;
-}
-
-void RGWRemoteMetaLog::wakeup(int shard_id)
-{
-  if (!meta_sync_cr) {
-    return;
-  }
-  meta_sync_cr->wakeup(shard_id);
 }
 
 int RGWCloneMetaLogCoroutine::operate()
