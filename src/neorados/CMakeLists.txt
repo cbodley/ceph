@@ -38,3 +38,7 @@ target_link_libraries(libneorados PRIVATE
 add_library(neorados_cls_fifo STATIC cls/fifo.cc)
 target_link_libraries(neorados_cls_fifo PRIVATE
 	libneorados ceph-common fmt::fmt)
+
+add_library(neorados_cls_lock STATIC cls/lock.cc)
+target_link_libraries(neorados_cls_lock PRIVATE
+	libneorados ceph-common)
