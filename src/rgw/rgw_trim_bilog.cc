@@ -457,8 +457,7 @@ class BucketTrimInstanceCR : public RGWCoroutine {
   std::shared_ptr<rgw_bucket_get_sync_policy_result> source_policy;
   rgw_bucket bucket;
   const std::string& zone_id; //< my zone id
-  RGWBucketInfo _bucket_info;
-  const RGWBucketInfo *pbucket_info; //< pointer to bucket instance info to locate bucket indices
+  RGWBucketInfo bucket_info;
   int child_ret = 0;
   const DoutPrefixProvider *dpp;
 public:
@@ -474,15 +473,14 @@ private:
   rgw::bucket_index_layout_generation totrim;
 
   /// Generation to be cleaned/New bucket info (if any)
-  std::optional<std::pair<RGWBucketInfo,
-			  rgw::bucket_index_layout_generation>> clean_info;
+  std::optional<rgw::bucket_index_layout_generation> toclean;
   /// Maximum number of times to attempt to put bucket info
   unsigned retries = 0;
 
   int take_min_generation() {
     // Initialize the min_generation to the bucket's current
     // generation, used in case we have no peers.
-    auto min_generation = pbucket_info->layout.logs.back().gen;
+    auto min_generation = bucket_info.layout.logs.back().gen;
 
     // Determine the minimum generation
     if (auto m = std::min_element(peer_status.begin(),
@@ -494,7 +492,7 @@ private:
       min_generation = m->generation;
     }
 
-    auto& logs = pbucket_info->layout.logs;
+    auto& logs = bucket_info.layout.logs;
     auto log = std::find_if(logs.begin(), logs.end(),
 			    rgw::matches_gen(min_generation));
     if (log == logs.end()) {
@@ -518,15 +516,14 @@ private:
 
   /// If there is a generation below the minimum, prepare to clean it up.
   int maybe_remove_generation() {
-    if (clean_info)
+    if (toclean)
       return 0;
 
-
-    auto log = pbucket_info->layout.logs.cbegin();
+    auto& logs = bucket_info.layout.logs;
+    auto log = logs.cbegin();
     if (log->gen < totrim.gen) {
-      clean_info = {*pbucket_info, {}};
       if (log->layout.type == rgw::BucketLogType::InIndex) {
-	clean_info->second = log->layout.in_index;
+        toclean = log->layout.in_index;
       } else {
 	ldpp_dout(dpp, 0) << "Unable to convert log of unknown type "
 			  << log->layout.type
@@ -534,7 +531,7 @@ private:
 	return -EINVAL;
       }
 
-      clean_info->first.layout.logs.erase(log);
+      logs.erase(log);
     }
     return 0;
   }
@@ -640,7 +637,7 @@ int BucketTrimInstanceCR::operate(const DoutPrefixProvider *dpp)
 
     if (auto& opt_bucket_info = source_policy->policy_handler->get_bucket_info();
         opt_bucket_info) {
-      pbucket_info = &(*opt_bucket_info);
+      bucket_info = *opt_bucket_info;
     } else {
       /* this shouldn't really happen */
       return set_cr_error(-ENOENT);
@@ -715,35 +712,35 @@ int BucketTrimInstanceCR::operate(const DoutPrefixProvider *dpp)
       return set_cr_error(retcode);
     }
 
-    if (clean_info) {
-      yield call(new BucketCleanIndexCollectCR(dpp, store, clean_info->first,
-					       clean_info->second));
+    if (toclean) {
+      yield call(new BucketCleanIndexCollectCR(dpp, store, bucket_info, *toclean));
       if (retcode < 0) {
 	ldpp_dout(dpp, 0) << "failed to remove previous generation: "
 			  << cpp_strerror(retcode) << dendl;
 	return set_cr_error(retcode);
       }
-      while (clean_info && retries < MAX_RETRIES) {
+      while (toclean && retries < MAX_RETRIES) {
 	yield call(new RGWPutBucketInstanceInfoCR(
 		     store->svc()->rados->get_async_processor(),
-		     store, clean_info->first, false, {},
+		     store, bucket_info, false, {},
 		     nullptr, dpp));
 
 	// Raced, try again.
 	if (retcode == -ECANCELED) {
 	  yield call(new RGWGetBucketInstanceInfoCR(
 		       store->svc()->rados->get_async_processor(),
-		       store, clean_info->first.bucket,
-		       &(clean_info->first), nullptr, dpp));
+		       store, bucket_info.bucket,
+		       &bucket_info, nullptr, dpp));
 	  if (retcode < 0) {
 	    ldpp_dout(dpp, 0) << "failed to get bucket info: "
 			      << cpp_strerror(retcode) << dendl;
 	    return set_cr_error(retcode);
 	  }
-	  if (clean_info->first.layout.logs.front().gen ==
-	      clean_info->second.gen) {
-	    clean_info->first.layout.logs.erase(
-	      clean_info->first.layout.logs.begin());
+          auto& logs = bucket_info.layout.logs;
+          auto log = logs.begin();
+	  if (logs.size() > 1 && // never drop the last log
+              log->gen == toclean->gen) {
+	    logs.erase(log);
 	    ++retries;
 	    continue;
 	  }
@@ -756,7 +753,7 @@ int BucketTrimInstanceCR::operate(const DoutPrefixProvider *dpp)
 			    << cpp_strerror(retcode) << dendl;
 	  return set_cr_error(retcode);
 	}
-	clean_info = std::nullopt;
+	toclean = std::nullopt;
       }
     } else {
       // To avoid hammering the OSD too hard, either trim old
@@ -778,10 +775,10 @@ int BucketTrimInstanceCR::operate(const DoutPrefixProvider *dpp)
       }
 
       // trim shards with a ShardCollectCR
-      ldpp_dout(dpp, 10) << "trimming bilogs for bucket=" << pbucket_info->bucket
+      ldpp_dout(dpp, 10) << "trimming bilogs for bucket=" << bucket_info.bucket
 			 << " markers=" << min_markers << ", shards=" << min_markers.size() << dendl;
       set_status("trimming bilog shards");
-      yield call(new BucketTrimShardCollectCR(dpp, store, *pbucket_info, totrim,
+      yield call(new BucketTrimShardCollectCR(dpp, store, bucket_info, totrim,
 					      min_markers));
       // ENODATA just means there were no keys to trim
       if (retcode == -ENODATA) {
