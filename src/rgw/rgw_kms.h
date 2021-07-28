@@ -47,6 +47,8 @@ int reconstitute_actual_key_from_sse_s3(const DoutPrefixProvider *dpp,
                             CephContext *cct,
                             std::map<std::string, bufferlist>& attrs,
                             std::string& actual_key);
+int generate_kek_sse_s3(const DoutPrefixProvider *dpp,
+                        CephContext *cct, std::string_view kek_id);
 
 /**
  * SecretEngine Interface

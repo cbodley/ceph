@@ -591,6 +591,16 @@ public:
       return decode_secret(dpp, plaintext_v.GetString(), actual_key);
     }
   }
+
+  int make_kek_s3(const DoutPrefixProvider* dpp, std::string_view key_id)
+  {
+    bufferlist secret_bl;
+    int res = send_request(dpp, "POST", "/keys/", key_id,
+	string{}, secret_bl);
+
+    ldout(cct, 20) << "Generate KEK Response: " << res << dendl;
+    return res;
+  }
 };
 
 class KvSecretEngine: public VaultSecretEngine {
@@ -856,7 +866,9 @@ static int get_actual_key_from_barbican(const DoutPrefixProvider *dpp,
 }
 
 
-std::string config_to_engine_and_parms(CephContext *cct,
+std::string config_to_engine_and_parms(
+    const DoutPrefixProvider* dpp,
+    CephContext *cct,
     const char* which,
     std::string& secret_engine_str,
     EngineParmMap& secret_engine_parms)
@@ -871,7 +883,7 @@ std::string config_to_engine_and_parms(CephContext *cct,
   auto meta_errors {oss.str()};
   if (meta_errors.length()) {
     meta_errors.erase(meta_errors.find_last_not_of("\n")+1);
-    lderr(cct) << "ERROR: while expanding " << which << ": "
+    ldpp_dout(dpp, -1) << "ERROR: while expanding " << which << ": "
 	<< meta_errors << dendl;
   }
   for (auto& e: secret_engine_v) {
@@ -901,7 +913,7 @@ static int get_actual_key_from_vault(const DoutPrefixProvider *dpp,
   std::string secret_engine_str = kctx.secret_engine();
   EngineParmMap secret_engine_parms;
   auto secret_engine { config_to_engine_and_parms(
-    cct, "rgw_crypt_vault_secret_engine",
+    dpp, cct, "rgw_crypt_vault_secret_engine",
     secret_engine_str, secret_engine_parms) };
   ldpp_dout(dpp, 20) << "Vault authentication method: " << kctx.auth() << dendl;
   ldpp_dout(dpp, 20) << "Vault Secrets Engine: " << secret_engine << dendl;
@@ -1008,37 +1020,37 @@ public:
   SseS3Context(CephContext*_cct) : cct{_cct} {};
   ~SseS3Context(){};
   std::string & backend() override {
-   return cct->_conf->rgw_crypt_s3_sse_backend;
+   return cct->_conf->rgw_crypt_sse_s3_backend;
   };
   std::string & addr() override {
-    return cct->_conf->rgw_crypt_s3_sse_vault_auth;
+    return cct->_conf->rgw_crypt_sse_s3_vault_addr;
   };
   std::string & auth() override {
-    return cct->_conf->rgw_crypt_s3_sse_vault_auth;
+    return cct->_conf->rgw_crypt_sse_s3_vault_auth;
   };
   std::string & k_namespace() override {
-    return cct->_conf->rgw_crypt_s3_sse_vault_auth;
+    return cct->_conf->rgw_crypt_sse_s3_vault_namespace;
   };
   std::string & prefix() override {
-    return cct->_conf->rgw_crypt_s3_sse_vault_prefix;
+    return cct->_conf->rgw_crypt_sse_s3_vault_prefix;
   };
   const std::string & secret_engine() override {
     return sse_s3_secret_engine;
   };
   std::string & ssl_cacert() override {
-    return cct->_conf->rgw_crypt_s3_sse_vault_ssl_cacert;
+    return cct->_conf->rgw_crypt_sse_s3_vault_ssl_cacert;
   };
   std::string & ssl_clientcert() override {
-    return cct->_conf->rgw_crypt_s3_sse_vault_ssl_clientcert;
+    return cct->_conf->rgw_crypt_sse_s3_vault_ssl_clientcert;
   };
   std::string & ssl_clientkey() override {
-    return cct->_conf->rgw_crypt_s3_sse_vault_ssl_clientkey;
+    return cct->_conf->rgw_crypt_sse_s3_vault_ssl_clientkey;
   };
   std::string & token_file() override {
-    return cct->_conf->rgw_crypt_s3_sse_vault_token_file;
+    return cct->_conf->rgw_crypt_sse_s3_vault_token_file;
   };
   bool verify_ssl() override {
-    return cct->_conf->rgw_crypt_s3_sse_vault_verify_ssl;
+    return cct->_conf->rgw_crypt_sse_s3_vault_verify_ssl;
   };
 };
 const std::string SseS3Context::sse_s3_secret_engine = "transit";
@@ -1095,8 +1107,8 @@ int reconstitute_actual_key_from_sse_s3(const DoutPrefixProvider *dpp,
   SseS3Context kctx { cct };
   std::string &kms_backend { kctx.backend() };
 
-  ldpp_dout(dpp, 20) << "Getting KMS encryption key for key " << key_id << dendl;
-  ldpp_dout(dpp, 20) << "SSE-KMS backend is " << kms_backend << dendl;
+  ldpp_dout(dpp, 20) << "Getting SSE-S3 encryption key for key " << key_id << dendl;
+  ldpp_dout(dpp, 20) << "SSE-S3 backend is " << kms_backend << dendl;
 
   if (RGW_SSE_KMS_BACKEND_VAULT == kms_backend) {
     return reconstitute_actual_key_from_vault(dpp, cct, kctx, attrs, actual_key);
@@ -1118,4 +1130,33 @@ int make_actual_key_from_sse_s3(const DoutPrefixProvider *dpp,
     return -EINVAL;
   }
   return make_actual_key_from_vault(dpp, cct, kctx, attrs, actual_key);
+}
+
+int generate_kek_sse_s3(const DoutPrefixProvider *dpp,
+                        CephContext *cct, std::string_view kek_id)
+{
+  SseS3Context kctx { cct };
+  std::string kms_backend { kctx.backend() };
+  if (RGW_SSE_KMS_BACKEND_VAULT != kms_backend) {
+    ldpp_dout(dpp, 0) << "ERROR: Unsupported rgw_crypt_s3_backend: " << kms_backend << dendl;
+    return -EINVAL;
+  }
+
+  std::string secret_engine_str = kctx.secret_engine();
+  EngineParmMap secret_engine_parms;
+  auto secret_engine { config_to_engine_and_parms(
+    dpp, cct, "rgw_crypt_vault_secret_engine",
+    secret_engine_str, secret_engine_parms) };
+  ldpp_dout(dpp, 20) << "Vault authentication method: " << kctx.auth() << dendl;
+  ldpp_dout(dpp, 20) << "Vault Secrets Engine: " << secret_engine << dendl;
+
+  if (RGW_SSE_KMS_VAULT_SE_TRANSIT == secret_engine){
+    TransitSecretEngine engine(cct, kctx, std::move(secret_engine_parms));
+    return engine.make_kek_s3(dpp, kek_id);
+  } else {
+    ldpp_dout(dpp, 0) << "Missing or invalid/unsupported secret engine" << dendl;
+    return -EINVAL;
+  }
+
+  return 0;
 }
