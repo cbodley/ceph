@@ -23,3 +23,6 @@ tasks:
           secret: a2V5MS5GcWVxKzhzTGNLaGtzQkg5NGVpb1FKcFpGb2c=
         - path: my-key-2
           secret: a2V5Mi5yNUNNMGFzMVdIUVZxcCt5NGVmVGlQQ1k4YWg=
+- exec:
+    client.0:
+      - restorecon /home/ubuntu/cephtest/vault-token || echo 'restorecon failed'

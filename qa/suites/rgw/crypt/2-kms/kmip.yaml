@@ -27,6 +27,7 @@ tasks:
 - exec:
     client.0:
       - chmod 644 /home/ubuntu/cephtest/ca/kmip-client.key
+      - restorecon /home/ubuntu/cephtest/ca/kmip-client.crt || echo 'restorecon failed'
 - pykmip:
     client.0:
       clientca: kmiproot

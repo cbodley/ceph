@@ -21,3 +21,6 @@ tasks:
       secrets:
         - path: my-key-1
         - path: my-key-2
+- exec:
+    client.0:
+      - restorecon /home/ubuntu/cephtest/vault-token || echo 'restorecon failed'
