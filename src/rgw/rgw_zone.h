@@ -270,16 +270,43 @@ public:
 };
 WRITE_CLASS_ENCODER(RGWZoneStorageClasses)
 
+// a special placement strategy that puts all head objects in a specific pool,
+// instead of the bucket's default storage class pool. this strategy can also
+// override how much data is stored in the head object
+struct RGWZoneHeadPlacement {
+  rgw_pool head_pool;
+  uint32_t max_head_size = 0;
+
+  void encode(bufferlist& bl) const {
+    ENCODE_START(1, 1, bl);
+    encode(head_pool, bl);
+    encode(max_head_size, bl);
+    ENCODE_FINISH(bl);
+  }
+  void decode(bufferlist::const_iterator& bl) {
+    DECODE_START(1, bl);
+    decode(head_pool, bl);
+    decode(max_head_size, bl);
+    DECODE_FINISH(bl);
+  }
+
+  void dump(Formatter *f) const;
+  void decode_json(JSONObj *obj);
+};
+WRITE_CLASS_ENCODER(RGWZoneHeadPlacement)
+
 struct RGWZonePlacementInfo {
   rgw_pool index_pool;
   rgw_pool data_extra_pool; /* if not set we should use data_pool */
   RGWZoneStorageClasses storage_classes;
   rgw::BucketIndexType index_type;
 
+  std::optional<RGWZoneHeadPlacement> override_head_placement;
+
   RGWZonePlacementInfo() : index_type(rgw::BucketIndexType::Normal) {}
 
   void encode(bufferlist& bl) const {
-    ENCODE_START(7, 1, bl);
+    ENCODE_START(8, 1, bl);
     encode(index_pool.to_str(), bl);
     rgw_pool standard_data_pool = get_data_pool(RGW_STORAGE_CLASS_STANDARD);
     encode(standard_data_pool.to_str(), bl);
@@ -288,11 +315,12 @@ struct RGWZonePlacementInfo {
     std::string standard_compression_type = get_compression_type(RGW_STORAGE_CLASS_STANDARD);
     encode(standard_compression_type, bl);
     encode(storage_classes, bl);
+    encode(override_head_placement, bl);
     ENCODE_FINISH(bl);
   }
 
   void decode(bufferlist::const_iterator& bl) {
-    DECODE_START(7, bl);
+    DECODE_START(8, bl);
     std::string index_pool_str;
     std::string data_pool_str;
     decode(index_pool_str, bl);
@@ -318,6 +346,9 @@ struct RGWZonePlacementInfo {
     } else {
       storage_classes.set_storage_class(RGW_STORAGE_CLASS_STANDARD, &standard_data_pool,
                                         (!standard_compression_type.empty() ? &standard_compression_type : nullptr));
+    }
+    if (struct_v >= 8) {
+      decode(override_head_placement, bl);
     }
     DECODE_FINISH(bl);
   }

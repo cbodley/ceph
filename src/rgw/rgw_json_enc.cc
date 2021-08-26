@@ -1308,12 +1308,25 @@ void RGWZoneStorageClasses::decode_json(JSONObj *obj)
   standard_class = &m[RGW_STORAGE_CLASS_STANDARD];
 }
 
+void RGWZoneHeadPlacement::dump(Formatter *f) const
+{
+  encode_json("head_pool", head_pool, f);
+  encode_json("max_head_size", max_head_size, f);
+}
+
+void RGWZoneHeadPlacement::decode_json(JSONObj *obj)
+{
+  JSONDecoder::decode_json("head_pool", head_pool, obj);
+  JSONDecoder::decode_json("max_head_size", max_head_size, obj);
+}
+
 void RGWZonePlacementInfo::dump(Formatter *f) const
 {
   encode_json("index_pool", index_pool, f);
   encode_json("storage_classes", storage_classes, f);
   encode_json("data_extra_pool", data_extra_pool, f);
   encode_json("index_type", (uint32_t)index_type, f);
+  encode_json("override_head_placement", override_head_placement, f);
 
   /* no real need for backward compatibility of compression_type and data_pool in here,
    * rather not clutter the output */
@@ -1327,6 +1340,7 @@ void RGWZonePlacementInfo::decode_json(JSONObj *obj)
   uint32_t it;
   JSONDecoder::decode_json("index_type", it, obj);
   index_type = (rgw::BucketIndexType)it;
+  JSONDecoder::decode_json("override_head_placement", override_head_placement, obj);
 
   /* backward compatibility, these are now defined in storage_classes */
   string standard_compression_type;
