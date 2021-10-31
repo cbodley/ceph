@@ -49,8 +49,7 @@ using executor_type = boost::asio::io_context::executor_type;
 using tcp_socket = boost::asio::basic_stream_socket<tcp, executor_type>;
 using tcp_stream = boost::beast::basic_stream<tcp, executor_type>;
 
-using timeout_timer = rgw::basic_timeout_timer<ceph::coarse_mono_clock,
-      executor_type>;
+using timeout_timer = rgw::basic_timeout_timer<ceph::coarse_mono_clock>;
 
 using parse_buffer = boost::beast::flat_static_buffer<65536>;
 
