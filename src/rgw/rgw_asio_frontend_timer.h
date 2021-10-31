@@ -9,6 +9,7 @@
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 
 #include "common/ceph_time.h"
+#include "common/dout.h"
 
 namespace rgw {
 
@@ -35,8 +36,12 @@ class circular_buffered_pool {
   // 'next' only serves as a hint, so is not itself atomic
   index_type next = 0;
 
+  const DoutPrefixProvider* dpp;
  public:
+  explicit circular_buffered_pool(const DoutPrefixProvider* dpp) noexcept
+      : dpp(dpp) {}
   ~circular_buffered_pool() {
+    ldpp_dout(dpp, 20) << this << " ~circular_buffered_pool" << dendl;
     for (const auto& b : blocks) {
       assert(!b.size); // destructed before deallocate
     }
@@ -44,6 +49,7 @@ class circular_buffered_pool {
 
   void* allocate(size_t n) {
     if (n == 0 || n > sizeof(block::data)) {
+      ldpp_dout(dpp, 1) << this << " size " << n << " out of range" << dendl;
       throw std::bad_alloc();
     }
     // search for a free block, starting from 'next'
@@ -54,13 +60,20 @@ class circular_buffered_pool {
       size_type zero = 0; // try to exchange 0 with n
       if (b->size.compare_exchange_strong(zero, n)) {
         next = (index + 1) % Count;
+        ldpp_dout(dpp, 20) << this << " allocate(" << n << ") at "
+            << b << '[' << index << ']' << dendl;
         return b;
       }
     }
+    ldpp_dout(dpp, 1) << this << " all blocks full" << dendl;
     throw std::bad_alloc();
   }
 
   void deallocate(void* p, uint32_t n) {
+    const size_t index = (reinterpret_cast<uintptr_t>(p) -
+           reinterpret_cast<uintptr_t>(blocks)) / sizeof(block);
+    ldpp_dout(dpp, 20) << this << " deallocate(" << n << ") at "
+        << p << '[' << index << ']' << dendl;
     auto b = static_cast<block*>(p);
     const bool deallocated = b->size.compare_exchange_strong(n, 0);
     assert(deallocated); // assert that the previous value was n
@@ -176,8 +189,8 @@ class basic_timeout_timer {
   // timer_pool is tuned to the allocation patterns of this specific executor
   using executor_type = boost::asio::io_context::executor_type;
 
-  explicit basic_timeout_timer(const executor_type& ex)
-      : timer(ex), pool(new timer_pool) {}
+  basic_timeout_timer(const executor_type& ex, const DoutPrefixProvider* dpp)
+      : timer(ex), pool(new timer_pool(dpp)) {}
 
   basic_timeout_timer(const basic_timeout_timer&) = delete;
   basic_timeout_timer& operator=(const basic_timeout_timer&) = delete;

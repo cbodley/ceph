@@ -51,6 +51,12 @@ using tcp_stream = boost::beast::basic_stream<tcp, executor_type>;
 
 using timeout_timer = rgw::basic_timeout_timer<ceph::coarse_mono_clock>;
 
+timeout_timer make_timeout(const executor_type& ex)
+{
+  static const DoutPrefix dpp{g_ceph_context, dout_subsys, "timeout "};
+  return timeout_timer{ex, &dpp};
+}
+
 using parse_buffer = boost::beast::flat_static_buffer<65536>;
 
 // use mmap/mprotect to allocate 512k coroutine stacks
@@ -970,7 +976,7 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
         auto c = connections.add(conn);
         // wrap the tcp stream in an ssl stream
         boost::asio::ssl::stream<tcp_socket&> stream{s, *ssl_context};
-        auto timeout = timeout_timer{context.get_executor()};
+        auto timeout = make_timeout(context.get_executor());
         auto buffer = std::make_unique<parse_buffer>();
         // do ssl handshake
         boost::system::error_code ec;
@@ -1000,7 +1006,7 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
       [this, s=std::move(stream)] (yield_context yield) mutable {
         Connection conn{s};
         auto c = connections.add(conn);
-        auto timeout = timeout_timer{context.get_executor()};
+        auto timeout = make_timeout(context.get_executor());
         auto buffer = std::make_unique<parse_buffer>();
         boost::system::error_code ec;
         handle_connection(context, env, s, timeout, *buffer, false, pause_mutex,
