@@ -1,7 +1,8 @@
 tasks:
 - s3tests:
     client.0:
-      force-branch: ceph-master
+      git_remote: https://github.com/cbodley/
+      force-branch: pr-407
       barbican:
         kms_key: my-key-1
         kms_key2: my-key-2
