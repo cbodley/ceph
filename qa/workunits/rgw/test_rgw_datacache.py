@@ -77,7 +77,7 @@ def exec_cmd(cmd):
     except Exception as e:
         log.error('command failed')
         log.error(e)
-        return False
+        raise
 
 def get_radosgw_endpoint():
     out = exec_cmd('sudo netstat -nltp | egrep "rados|valgr"')  # short for radosgw/valgrind
