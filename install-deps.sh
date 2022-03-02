@@ -315,6 +315,8 @@ else
         $SUDO apt-get install -y devscripts equivs
         $SUDO apt-get install -y dpkg-dev
         ensure_python3_sphinx_on_ubuntu
+        # undo any defaults set by install-deps.sh on other branches
+        $SUDO update-alternatives --remove-all gcc || true
         case "$VERSION" in
             *Bionic*)
                 ensure_decent_gcc_on_ubuntu 9 bionic
