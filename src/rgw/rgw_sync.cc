@@ -1841,8 +1841,8 @@ public:
         }
 	if (mdlog_marker == max_marker && can_adjust_marker) {
           tn->unset_flag(RGW_SNS_FLAG_ACTIVE);
-#define INCREMENTAL_INTERVAL 20
-	  yield wait(utime_t(INCREMENTAL_INTERVAL, 0));
+	  auto interval = cct->_conf->rgw_meta_sync_poll_interval;
+	  yield wait(utime_t(interval, 0));
 	}
       } while (can_adjust_marker);
 
