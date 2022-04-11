@@ -367,7 +367,7 @@ public:
     size_t value_size() override;
   };
 
-  Iterator get_iterator(const std::string& prefix, IteratorOpts opts = 0) override;
+  Iterator get_iterator(const std::string& prefix, IteratorOpts opts = 0, IteratorBounds = IteratorBounds()) override;
 private:
   /// this iterator spans single cf
   rocksdb::Iterator* new_shard_iterator(rocksdb::ColumnFamilyHandle* cf);

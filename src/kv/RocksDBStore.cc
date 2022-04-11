@@ -2737,16 +2737,25 @@ private:
   const RocksDBStore* db;
   KeyLess keyless;
   string prefix;
+  const KeyValueDB::IteratorBounds bounds;
   std::vector<rocksdb::Iterator*> iters;
 public:
   explicit ShardMergeIteratorImpl(const RocksDBStore* db,
 				  const std::string& prefix,
-				  const std::vector<rocksdb::ColumnFamilyHandle*>& shards)
-    : db(db), keyless(db->comparator), prefix(prefix)
+				  const std::vector<rocksdb::ColumnFamilyHandle*>& shards,
+                  const KeyValueDB::IteratorBounds bounds)
+    : db(db), keyless(db->comparator), prefix(prefix), bounds(bounds)
   {
     iters.reserve(shards.size());
     for (auto& s : shards) {
-      iters.push_back(db->db->NewIterator(rocksdb::ReadOptions(), s));
+      auto options = rocksdb::ReadOptions();
+      if (bounds.upper_bound) {
+        options.iterate_upper_bound = new rocksdb::Slice(*this->bounds.upper_bound);
+      }
+      if (bounds.lower_bound) {
+        options.iterate_lower_bound = new rocksdb::Slice(*this->bounds.lower_bound);
+      }
+      iters.push_back(db->db->NewIterator(options, s));
     }
   }
   ~ShardMergeIteratorImpl() {
@@ -2917,7 +2926,7 @@ public:
   }
 };
 
-KeyValueDB::Iterator RocksDBStore::get_iterator(const std::string& prefix, IteratorOpts opts)
+KeyValueDB::Iterator RocksDBStore::get_iterator(const std::string& prefix, IteratorOpts opts, IteratorBounds bounds)
 {
   auto cf_it = cf_handles.find(prefix);
   if (cf_it != cf_handles.end()) {
@@ -2929,7 +2938,8 @@ KeyValueDB::Iterator RocksDBStore::get_iterator(const std::string& prefix, Itera
       return std::make_shared<ShardMergeIteratorImpl>(
         this,
         prefix,
-        cf_it->second.handles);
+        cf_it->second.handles,
+        bounds);
     }
   } else {
     return KeyValueDB::get_iterator(prefix, opts);

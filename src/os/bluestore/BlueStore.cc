@@ -11063,7 +11063,16 @@ ObjectMap::ObjectMapIterator BlueStore::get_omap_iterator(
   }
   o->flush();
   dout(10) << __func__ << " has_omap = " << (int)o->onode.has_omap() <<dendl;
-  KeyValueDB::Iterator it = db->get_iterator(o->get_omap_prefix());
+  auto bounds = KeyValueDB::IteratorBounds();
+  if (o->onode.has_omap()) {
+    std::string lower_bound, upper_bound;
+    o->get_omap_key(string(), &lower_bound);
+    o->get_omap_tail(&upper_bound);
+    dout(0) << __func__ << " lower_bound = " << lower_bound << " upper_bound: " << upper_bound << dendl;
+    bounds.lower_bound = lower_bound;
+    bounds.upper_bound = upper_bound;
+  }
+  KeyValueDB::Iterator it = db->get_iterator(o->get_omap_prefix(), 0, bounds);
   return ObjectMap::ObjectMapIterator(new OmapIteratorImpl(c, o, it));
 }
 
