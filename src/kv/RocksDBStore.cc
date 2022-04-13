@@ -2738,22 +2738,27 @@ private:
   KeyLess keyless;
   string prefix;
   const KeyValueDB::IteratorBounds bounds;
+  const rocksdb::Slice iterate_lower_bound;
+  const rocksdb::Slice iterate_upper_bound;
   std::vector<rocksdb::Iterator*> iters;
 public:
   explicit ShardMergeIteratorImpl(const RocksDBStore* db,
 				  const std::string& prefix,
 				  const std::vector<rocksdb::ColumnFamilyHandle*>& shards,
-                  const KeyValueDB::IteratorBounds bounds)
-    : db(db), keyless(db->comparator), prefix(prefix), bounds(bounds)
+				  KeyValueDB::IteratorBounds bounds_)
+    : db(db), keyless(db->comparator), prefix(prefix),
+      bounds(std::move(bounds_)),
+      iterate_lower_bound(bounds.lower_bound.value_or("")),
+      iterate_upper_bound(bounds.upper_bound.value_or(""))
   {
     iters.reserve(shards.size());
     for (auto& s : shards) {
       auto options = rocksdb::ReadOptions();
       if (bounds.upper_bound) {
-        options.iterate_upper_bound = new rocksdb::Slice(*this->bounds.upper_bound);
+        options.iterate_upper_bound = &iterate_upper_bound;
       }
       if (bounds.lower_bound) {
-        options.iterate_lower_bound = new rocksdb::Slice(*this->bounds.lower_bound);
+        options.iterate_lower_bound = &iterate_lower_bound;
       }
       iters.push_back(db->db->NewIterator(options, s));
     }
