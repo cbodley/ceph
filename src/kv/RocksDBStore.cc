@@ -2752,14 +2752,14 @@ public:
       iterate_upper_bound(bounds.upper_bound.value_or(""))
   {
     iters.reserve(shards.size());
+    auto options = rocksdb::ReadOptions();
+    if (bounds.upper_bound) {
+      options.iterate_upper_bound = &iterate_upper_bound;
+    }
+    if (bounds.lower_bound) {
+      options.iterate_lower_bound = &iterate_lower_bound;
+    }
     for (auto& s : shards) {
-      auto options = rocksdb::ReadOptions();
-      if (bounds.upper_bound) {
-        options.iterate_upper_bound = &iterate_upper_bound;
-      }
-      if (bounds.lower_bound) {
-        options.iterate_lower_bound = &iterate_lower_bound;
-      }
       iters.push_back(db->db->NewIterator(options, s));
     }
   }
