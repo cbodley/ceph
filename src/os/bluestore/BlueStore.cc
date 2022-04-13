@@ -11069,10 +11069,10 @@ ObjectMap::ObjectMapIterator BlueStore::get_omap_iterator(
     o->get_omap_key(string(), &lower_bound);
     o->get_omap_tail(&upper_bound);
     dout(0) << __func__ << " lower_bound = " << lower_bound << " upper_bound: " << upper_bound << dendl;
-    bounds.lower_bound = lower_bound;
-    bounds.upper_bound = upper_bound;
+    bounds.lower_bound = std::move(lower_bound);
+    bounds.upper_bound = std::move(upper_bound);
   }
-  KeyValueDB::Iterator it = db->get_iterator(o->get_omap_prefix(), 0, bounds);
+  KeyValueDB::Iterator it = db->get_iterator(o->get_omap_prefix(), 0, std::move(bounds));
   return ObjectMap::ObjectMapIterator(new OmapIteratorImpl(c, o, it));
 }
 

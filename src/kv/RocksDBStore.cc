@@ -2944,7 +2944,7 @@ KeyValueDB::Iterator RocksDBStore::get_iterator(const std::string& prefix, Itera
         this,
         prefix,
         cf_it->second.handles,
-        bounds);
+        std::move(bounds));
     }
   } else {
     return KeyValueDB::get_iterator(prefix, opts);
