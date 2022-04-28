@@ -44,3 +44,5 @@ overrides:
       osd:
         osd class load list: "*"
         osd class default list: "*"
+      client:
+        debug rgw: 20
