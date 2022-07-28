@@ -118,19 +118,8 @@ public:
 
   virtual ~RGWSystemMetaObj() {}
 
-  virtual void encode(bufferlist& bl) const {
-    ENCODE_START(1, 1, bl);
-    encode(id, bl);
-    encode(name, bl);
-    ENCODE_FINISH(bl);
-  }
-
-  virtual void decode(bufferlist::const_iterator& bl) {
-    DECODE_START(1, bl);
-    decode(id, bl);
-    decode(name, bl);
-    DECODE_FINISH(bl);
-  }
+  virtual void encode(bufferlist& bl) const = 0;
+  virtual void decode(bufferlist::const_iterator& bl) = 0;
 
   void reinit_instance(CephContext *_cct, RGWSI_SysObj *_sysobj_svc);
   int init(const DoutPrefixProvider *dpp, CephContext *_cct, RGWSI_SysObj *_sysobj_svc,
@@ -154,9 +143,6 @@ public:
   virtual const std::string& get_info_oid_prefix(bool old_format = false) const = 0;
   virtual std::string get_predefined_id(CephContext *cct) const = 0;
   virtual const std::string& get_predefined_name(CephContext *cct) const = 0;
-
-  void dump(Formatter *f) const;
-  void decode_json(JSONObj *obj);
 };
 WRITE_CLASS_ENCODER(RGWSystemMetaObj)
 
@@ -428,7 +414,12 @@ struct RGWZoneParams : RGWSystemMetaObj {
     encode(user_email_pool, bl);
     encode(user_swift_pool, bl);
     encode(user_uid_pool, bl);
-    RGWSystemMetaObj::encode(bl);
+    {
+      ENCODE_START(1, 1, bl); // moved from RGWSystemMetaObj
+      encode(id, bl);
+      encode(name, bl);
+      ENCODE_FINISH(bl);
+    }
     encode(system_key, bl);
     encode(placement_pools, bl);
     rgw_pool unused_metadata_heap;
@@ -459,7 +450,10 @@ struct RGWZoneParams : RGWSystemMetaObj {
     decode(user_swift_pool, bl);
     decode(user_uid_pool, bl);
     if (struct_v >= 6) {
-      RGWSystemMetaObj::decode(bl);
+      DECODE_START(1, bl); // moved from RGWSystemMetaObj
+      decode(id, bl);
+      decode(name, bl);
+      DECODE_FINISH(bl);
     } else if (struct_v >= 2) {
       decode(name, bl);
       id = name;
@@ -942,7 +936,12 @@ struct RGWZoneGroup : public RGWSystemMetaObj {
     encode(default_placement, bl);
     encode(hostnames, bl);
     encode(hostnames_s3website, bl);
-    RGWSystemMetaObj::encode(bl);
+    {
+      ENCODE_START(1, 1, bl); // moved from RGWSystemMetaObj
+      encode(id, bl);
+      encode(name, bl);
+      ENCODE_FINISH(bl);
+    }
     encode(realm_id, bl);
     encode(sync_policy, bl);
     encode(enabled_features, bl);
@@ -966,7 +965,11 @@ struct RGWZoneGroup : public RGWSystemMetaObj {
       decode(hostnames_s3website, bl);
     }
     if (struct_v >= 4) {
-      RGWSystemMetaObj::decode(bl);
+      DECODE_START(1, bl); // moved from RGWSystemMetaObj
+      decode(id, bl);
+      decode(name, bl);
+      DECODE_FINISH(bl);
+
       decode(realm_id, bl);
     } else {
       id = name;
@@ -1146,7 +1149,12 @@ public:
 
   void encode(bufferlist& bl) const override {
     ENCODE_START(1, 1, bl);
-    RGWSystemMetaObj::encode(bl);
+    {
+      ENCODE_START(1, 1, bl); // moved from RGWSystemMetaObj
+      encode(id, bl);
+      encode(name, bl);
+      ENCODE_FINISH(bl);
+    }
     encode(current_period, bl);
     encode(epoch, bl);
     ENCODE_FINISH(bl);
@@ -1154,7 +1162,12 @@ public:
 
   void decode(bufferlist::const_iterator& bl) override {
     DECODE_START(1, bl);
-    RGWSystemMetaObj::decode(bl);
+    {
+      DECODE_START(1, bl); // moved from RGWSystemMetaObj
+      decode(id, bl);
+      decode(name, bl);
+      DECODE_FINISH(bl);
+    }
     decode(current_period, bl);
     decode(epoch, bl);
     DECODE_FINISH(bl);

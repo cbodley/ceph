@@ -1640,7 +1640,8 @@ int RGWZoneParams::create_default(const DoutPrefixProvider *dpp, optional_yield 
 
 void RGWZoneParams::dump(Formatter *f) const
 {
-  RGWSystemMetaObj::dump(f);
+  encode_json("id", id , f);
+  encode_json("name", name , f);
   encode_json("domain_root", domain_root, f);
   encode_json("control_pool", control_pool, f);
   encode_json("gc_pool", gc_pool, f);
@@ -2371,7 +2372,8 @@ void RGWZoneGroupPlacementTarget::decode_json(JSONObj *obj)
 
 void RGWZoneGroup::dump(Formatter *f) const
 {
-  RGWSystemMetaObj::dump(f);
+  encode_json("id", id , f);
+  encode_json("name", name , f);
   encode_json("api_name", api_name, f);
   encode_json("is_master", is_master, f);
   encode_json("endpoints", endpoints, f);
@@ -2409,10 +2411,10 @@ static void decode_zonegroups(map<string, RGWZoneGroup>& zonegroups, JSONObj *o)
 
 void RGWZoneGroup::decode_json(JSONObj *obj)
 {
-  RGWSystemMetaObj::decode_json(obj);
+  JSONDecoder::decode_json("id", id, obj);
+  JSONDecoder::decode_json("name", name, obj);
   if (id.empty()) {
     derr << "old format " << dendl;
-    JSONDecoder::decode_json("name", name, obj);
     id = name;
   }
   JSONDecoder::decode_json("api_name", api_name, obj);
@@ -2478,7 +2480,8 @@ void RGWRealm::generate_test_instances(list<RGWRealm*> &o)
 
 void RGWRealm::dump(Formatter *f) const
 {
-  RGWSystemMetaObj::dump(f);
+  encode_json("id", id , f);
+  encode_json("name", name , f);
   encode_json("current_period", current_period, f);
   encode_json("epoch", epoch, f);
 }
@@ -2486,7 +2489,8 @@ void RGWRealm::dump(Formatter *f) const
 
 void RGWRealm::decode_json(JSONObj *obj)
 {
-  RGWSystemMetaObj::decode_json(obj);
+  JSONDecoder::decode_json("id", id, obj);
+  JSONDecoder::decode_json("name", name, obj);
   JSONDecoder::decode_json("current_period", current_period, obj);
   JSONDecoder::decode_json("epoch", epoch, obj);
 }
@@ -2556,18 +2560,6 @@ void RGWNameToId::dump(Formatter *f) const {
 
 void RGWNameToId::decode_json(JSONObj *obj) {
   JSONDecoder::decode_json("obj_id", obj_id, obj);
-}
-
-void RGWSystemMetaObj::dump(Formatter *f) const
-{
-  encode_json("id", id , f);
-  encode_json("name", name , f);
-}
-
-void RGWSystemMetaObj::decode_json(JSONObj *obj)
-{
-  JSONDecoder::decode_json("id", id, obj);
-  JSONDecoder::decode_json("name", name, obj);
 }
 
 void RGWZoneStorageClass::dump(Formatter *f) const
@@ -2645,7 +2637,8 @@ void RGWZonePlacementInfo::decode_json(JSONObj *obj)
 
 void RGWZoneParams::decode_json(JSONObj *obj)
 {
-  RGWSystemMetaObj::decode_json(obj);
+  JSONDecoder::decode_json("id", id, obj);
+  JSONDecoder::decode_json("name", name, obj);
   JSONDecoder::decode_json("domain_root", domain_root, obj);
   JSONDecoder::decode_json("control_pool", control_pool, obj);
   JSONDecoder::decode_json("gc_pool", gc_pool, obj);
