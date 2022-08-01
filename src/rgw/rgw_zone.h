@@ -34,7 +34,6 @@ extern std::string default_storage_pool_suffix;
 class JSONObj;
 class RGWSyncModulesManager;
 
-
 struct RGWNameToId {
   std::string obj_id;
 
@@ -1433,5 +1432,28 @@ public:
   }
 };
 WRITE_CLASS_ENCODER(RGWPeriod)
+
+
+namespace rgw::sal { class ConfigStore; }
+
+// global state about the multisite configuration. initialized once during
+// startup and may be reinitialized by RGWRealmReloader, but is otherwise
+// immutable at runtime
+class RGWZoneConfig {
+  RGWRealm realm;
+  RGWPeriod period;
+  RGWZoneParams zone_params;
+  RGWZoneGroup* this_zonegroup = nullptr; // -> period.period_map.zonegroups
+  RGWZone* this_zone = nullptr; // -> this_zonegroup->zones
+ public:
+  int load(const DoutPrefixProvider* dpp, optional_yield y,
+           rgw::sal::ConfigStore* store);
+
+  const RGWRealm& get_realm() const { return realm; }
+  const RGWPeriod& get_period() const { return period; }
+  const RGWZoneGroup& get_this_zonegroup() const { return *this_zonegroup; }
+  const RGWZone& get_this_zone() const { return *this_zone; }
+  const RGWZoneParams& get_this_zone_params() const { return zone_params; }
+};
 
 #endif

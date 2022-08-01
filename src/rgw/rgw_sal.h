@@ -1530,6 +1530,200 @@ public:
   virtual int list_packages(const DoutPrefixProvider* dpp, optional_yield y, rgw::lua::packages_t& packages) = 0;
 };
 
+/// Abstraction for storing realm/zonegroup/zone configuration
+class ConfigStore {
+ public:
+  virtual ~ConfigStore() {}
+
+  /// write a realm. may return EEXIST
+  virtual int create_realm(const DoutPrefixProvider* dpp,
+                           optional_yield y,
+                           const RGWRealm& info,
+                           RGWObjVersionTracker& objv) = 0;
+  /// load a realm by id
+  virtual int read_realm_by_id(const DoutPrefixProvider* dpp,
+                               optional_yield y,
+                               std::string_view realm_id,
+                               RGWRealm& info,
+                               RGWObjVersionTracker& objv) = 0;
+  /// load a realm by name
+  virtual int read_realm_by_name(const DoutPrefixProvider* dpp,
+                                 optional_yield y,
+                                 std::string_view realm_name,
+                                 RGWRealm& info,
+                                 RGWObjVersionTracker& objv) = 0;
+  /// overwrite an existing realm. must not change id
+  virtual int update_realm(const DoutPrefixProvider* dpp,
+                           optional_yield y,
+                           const RGWRealm& info,
+                           const RGWRealm& old_info,
+                           RGWObjVersionTracker& objv) = 0;
+  /// delete an existing realm
+  virtual int delete_realm(const DoutPrefixProvider* dpp,
+                           optional_yield y,
+                           const RGWRealm& old_info,
+                           RGWObjVersionTracker& objv) = 0;
+  /// list all realm names
+  virtual int list_realm_names(const DoutPrefixProvider* dpp,
+                               optional_yield y,
+                               std::list<std::string>& names);
+
+  /// write a period. may return EEXIST
+  virtual int create_period(const DoutPrefixProvider* dpp,
+                            optional_yield y,
+                            const RGWPeriod& info,
+                            RGWObjVersionTracker& objv) = 0;
+  /// load a period by id and epoch. if no epoch is given, read the latest
+  virtual int read_period(const DoutPrefixProvider* dpp,
+                          optional_yield y,
+                          std::string_view period_id,
+                          std::optional<epoch_t> epoch,
+                          RGWPeriod& info,
+                          RGWObjVersionTracker& objv) = 0;
+  /// overwrite an existing period. must not change id
+  virtual int update_period(const DoutPrefixProvider* dpp,
+                            optional_yield y,
+                            const RGWPeriod& info,
+                            const RGWPeriod& old_info,
+                            RGWObjVersionTracker& objv) = 0;
+  /// delete an existing period
+  virtual int delete_period(const DoutPrefixProvider* dpp,
+                            optional_yield y,
+                            const RGWPeriod& old_info,
+                            RGWObjVersionTracker& objv) = 0;
+  /// list all period ids
+  virtual int list_period_ids(const DoutPrefixProvider* dpp,
+                              optional_yield y,
+                              std::list<std::string>& ids);
+
+  /// write a zonegroup. may return EEXIST
+  virtual int create_zonegroup(const DoutPrefixProvider* dpp,
+                               optional_yield y,
+                               const RGWZoneGroup& info,
+                               RGWObjVersionTracker& objv) = 0;
+  /// load a zonegroup by id
+  virtual int read_zonegroup_by_id(const DoutPrefixProvider* dpp,
+                                   optional_yield y,
+                                   std::string_view zonegroup_id,
+                                   RGWZoneGroup& info,
+                                   RGWObjVersionTracker& objv) = 0;
+  /// load a zonegroup by name
+  virtual int read_zonegroup_by_name(const DoutPrefixProvider* dpp,
+                                     optional_yield y,
+                                     std::string_view zonegroup_name,
+                                     RGWZoneGroup& info,
+                                     RGWObjVersionTracker& objv) = 0;
+  /// overwrite an existing zonegroup. must not change id
+  virtual int update_zonegroup(const DoutPrefixProvider* dpp,
+                               optional_yield y,
+                               const RGWZoneGroup& info,
+                               const RGWZoneGroup& old_info,
+                               RGWObjVersionTracker& objv) = 0;
+  /// delete an existing zonegroup
+  virtual int delete_zonegroup(const DoutPrefixProvider* dpp,
+                               optional_yield y,
+                               const RGWZoneGroup& old_info,
+                               RGWObjVersionTracker& objv) = 0;
+  /// list all zonegroup names
+  virtual int list_zonegroup_names(const DoutPrefixProvider* dpp,
+                                   optional_yield y,
+                                   std::list<std::string>& names);
+
+  /// write a zone. may return EEXIST
+  virtual int create_zone(const DoutPrefixProvider* dpp,
+                          optional_yield y,
+                          const RGWZone& info,
+                          RGWObjVersionTracker& objv) = 0;
+  /// load a zone by id
+  virtual int read_zone_by_id(const DoutPrefixProvider* dpp,
+                              optional_yield y,
+                              std::string_view zone_id,
+                              RGWZone& info,
+                              RGWObjVersionTracker& objv) = 0;
+  /// load a zone by name
+  virtual int read_zone_by_name(const DoutPrefixProvider* dpp,
+                                optional_yield y,
+                                std::string_view zone_name,
+                                RGWZone& info,
+                                RGWObjVersionTracker& objv) = 0;
+  /// overwrite an existing zone. must not change id
+  virtual int update_zone(const DoutPrefixProvider* dpp,
+                          optional_yield y,
+                          const RGWZone& info,
+                          const RGWZone& old_info,
+                          RGWObjVersionTracker& objv) = 0;
+  /// delete an existing zone
+  virtual int delete_zone(const DoutPrefixProvider* dpp,
+                          optional_yield y,
+                          const RGWZone& old_info,
+                          RGWObjVersionTracker& objv) = 0;
+  /// list all zone names
+  virtual int list_zone_names(const DoutPrefixProvider* dpp,
+                              optional_yield y,
+                              std::list<std::string>& names);
+
+  /// write zone params. may return EEXIST
+  virtual int create_zone_params(const DoutPrefixProvider* dpp,
+                                 optional_yield y,
+                                 const RGWZoneParams& info,
+                                 RGWObjVersionTracker& objv) = 0;
+  /// load zone params by id
+  virtual int read_zone_params_by_id(const DoutPrefixProvider* dpp,
+                                     optional_yield y,
+                                     std::string_view zone_id,
+                                     RGWZoneParams& info,
+                                     RGWObjVersionTracker& objv) = 0;
+  /// load zone params by name
+  virtual int read_zone_params_by_name(const DoutPrefixProvider* dpp,
+                                       optional_yield y,
+                                       std::string_view zone_name,
+                                       RGWZoneParams& info,
+                                       RGWObjVersionTracker& objv) = 0;
+  /// overwrite existing zone params. must not change id
+  virtual int update_zone_params(const DoutPrefixProvider* dpp,
+                                 optional_yield y,
+                                 const RGWZoneParams& info,
+                                 const RGWZoneParams& old_info,
+                                 RGWObjVersionTracker& objv) = 0;
+  /// delete existing zone params
+  virtual int delete_zone_params(const DoutPrefixProvider* dpp,
+                                 optional_yield y,
+                                 const RGWZoneParams& old_info,
+                                 RGWObjVersionTracker& objv) = 0;
+
+  /// read period config for zones that don't belong to a realm
+  virtual int read_realmless_config(const DoutPrefixProvider* dpp,
+                                    optional_yield y,
+                                    const RGWPeriodConfig& info,
+                                    RGWObjVersionTracker& objv);
+  /// write period config for zones that don't belong to a realm
+  virtual int write_realmless_config(const DoutPrefixProvider* dpp,
+                                     optional_yield y,
+                                     const RGWPeriodConfig& info,
+                                     RGWObjVersionTracker& objv);
+
+  /// read a store definition by name
+  virtual int read_store_definition(const DoutPrefixProvider* dpp,
+                                    optional_yield y,
+                                    std::string_view zone_id,
+                                    std::string_view name,
+                                    bufferlist& bl,
+                                    RGWObjVersionTracker& objv);
+  /// write a store definition by name
+  virtual int write_store_definition(const DoutPrefixProvider* dpp,
+                                     optional_yield y,
+                                     std::string_view zone_id,
+                                     std::string_view name,
+                                     const bufferlist& bl,
+                                     bool exclusive,
+                                     RGWObjVersionTracker& objv);
+  /// list all store definitions for a zone
+  virtual int list_store_definitions(const DoutPrefixProvider* dpp,
+                                     optional_yield y,
+                                     std::string_view zone_id,
+                                     std::list<std::string>& names);
+}; // ConfigStore
+
 /** @} namespace rgw::sal in group RGWSAL */
 } } // namespace rgw::sal
 
@@ -1596,6 +1790,11 @@ public:
 
   /** Get the config for stores/filters */
   static Config get_config(bool admin, CephContext* cct);
+
+  /// ConfigStore factory
+  static auto make_config_store(const DoutPrefixProvider* dpp, optional_yield y,
+                                std::string_view name, bool use_cache = true)
+    -> std::unique_ptr<rgw::sal::ConfigStore>;
 };
 
 /** @} */
