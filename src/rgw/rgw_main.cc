@@ -2,6 +2,7 @@
 // vim: ts=8 sw=2 smarttab ft=cpp
 
 #include <boost/intrusive/list.hpp>
+#include <optional>
 #include "common/ceph_argparse.h"
 #include "global/global_init.h"
 #include "global/signal_handler.h"
@@ -657,26 +658,26 @@ int main(int argc, const char **argv)
   }
 
 
-  std::unique_ptr<RGWRealmReloader> reloader;
-  std::unique_ptr<RGWPeriodPusher> pusher;
-  std::unique_ptr<RGWFrontendPauser> fe_pauser;
-  std::unique_ptr<RGWRealmWatcher> realm_watcher;
-  std::unique_ptr<RGWPauser> rgw_pauser;
+  std::optional<RGWRealmReloader> reloader;
+  std::optional<RGWPeriodPusher> pusher;
+  std::optional<RGWFrontendPauser> fe_pauser;
+  std::optional<RGWRealmWatcher> realm_watcher;
+  std::optional<RGWPauser> rgw_pauser;
   if (store->get_name() == "rados") {
     // add a watcher to respond to realm configuration changes
-    pusher = std::make_unique<RGWPeriodPusher>(&dp, store, null_yield);
-    fe_pauser = std::make_unique<RGWFrontendPauser>(fes, implicit_tenant_context, pusher.get());
-    rgw_pauser = std::make_unique<RGWPauser>();
-    rgw_pauser->add_pauser(fe_pauser.get());
+    pusher.emplace(&dp, store, null_yield);
+    fe_pauser.emplace(fes, implicit_tenant_context, &*pusher);
+    rgw_pauser.emplace();
+    rgw_pauser->add_pauser(&*fe_pauser);
     if (lua_background) {
-      rgw_pauser->add_pauser(lua_background.get());
+      rgw_pauser->add_pauser(&*lua_background);
     }
-    reloader = std::make_unique<RGWRealmReloader>(store, service_map_meta, rgw_pauser.get());
+    reloader.emplace(store, service_map_meta, &*rgw_pauser);
 
-    realm_watcher = std::make_unique<RGWRealmWatcher>(&dp, g_ceph_context,
-				  static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->get_realm());
+    realm_watcher.emplace(&dp, g_ceph_context,
+                          static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->get_realm());
     realm_watcher->add_watcher(RGWRealmNotify::Reload, *reloader);
-    realm_watcher->add_watcher(RGWRealmNotify::ZonesNeedPeriod, *pusher.get());
+    realm_watcher->add_watcher(RGWRealmNotify::ZonesNeedPeriod, *pusher);
   }
 
 #if defined(HAVE_SYS_PRCTL_H)
