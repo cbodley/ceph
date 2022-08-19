@@ -32,5 +32,6 @@ namespace rgw { namespace sal {
   class Zone;
   class LuaManager;
   struct RGWRoleInfo;
+  class ReloadPauser;
 
 } } // namespace rgw::sal

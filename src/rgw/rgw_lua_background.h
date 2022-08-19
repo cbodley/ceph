@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <variant>
 #include "rgw_lua_utils.h"
-#include "rgw_realm_reloader.h"
+#include "rgw_sal.h"
 
 namespace rgw::lua {
 
@@ -180,7 +180,7 @@ struct RGWTable : EmptyMetaTable {
   }
 };
 
-class Background : public RGWRealmReloader::Pauser {
+class Background : public rgw::sal::ReloadPauser {
 
 private:
   BackgroundMap rgw_map;

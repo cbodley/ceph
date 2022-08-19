@@ -10,7 +10,7 @@
 
 #include "common/async/yield_context.h"
 #include "rgw_realm_reloader.h"
-#include "rgw_sal_fwd.h"
+#include "rgw_sal.h"
 
 class RGWPeriod;
 
@@ -22,7 +22,7 @@ using RGWZonesNeedPeriod = RGWPeriod;
  * the responsibility for pushing period updates to other zones or zonegroups.
  */
 class RGWPeriodPusher final : public RGWRealmWatcher::Watcher,
-                              public RGWRealmReloader::Pauser {
+                              public rgw::sal::ReloadPauser {
  public:
   explicit RGWPeriodPusher(const DoutPrefixProvider *dpp, rgw::sal::Store* store, optional_yield y);
   ~RGWPeriodPusher() override;

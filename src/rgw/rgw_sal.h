@@ -1530,6 +1530,20 @@ public:
   virtual int list_packages(const DoutPrefixProvider* dpp, optional_yield y, rgw::lua::packages_t& packages) = 0;
 };
 
+/// When the realm's period configuration changes, all Stores are reloaded with
+/// that new configuration. Everything outside of sal that refers to these
+/// Stores must register for these callbacks to stop using the old store and
+/// start using the new one.
+class ReloadPauser {
+ public:
+  virtual ~ReloadPauser() = default;
+
+  /// suspend any futher activity that requires access to the existing Store
+  virtual void pause() = 0;
+  /// resume activity with the new Store
+  virtual void resume(rgw::sal::Store* store) = 0;
+};
+
 /** @} namespace rgw::sal in group RGWSAL */
 } } // namespace rgw::sal
 

@@ -187,21 +187,23 @@ static RGWRESTMgr *rest_filter(rgw::sal::Store* store, int dialect, RGWRESTMgr *
   }
 }
 
-class RGWPauser : public RGWRealmReloader::Pauser {
-  std::vector<Pauser*> pausers;
+class RGWPauser : public rgw::sal::ReloadPauser {
+  std::vector<rgw::sal::ReloadPauser*> pausers;
 
 public:
   ~RGWPauser() override = default;
   
-  void add_pauser(Pauser* pauser) {
+  void add_pauser(rgw::sal::ReloadPauser* pauser) {
     pausers.push_back(pauser);
   }
 
   void pause() override {
-    std::for_each(pausers.begin(), pausers.end(), [](Pauser* p){p->pause();});
+    std::for_each(pausers.begin(), pausers.end(),
+                  [](rgw::sal::ReloadPauser* p){p->pause();});
   }
   void resume(rgw::sal::Store* store) override {
-    std::for_each(pausers.begin(), pausers.end(), [store](Pauser* p){p->resume(store);});
+    std::for_each(pausers.begin(), pausers.end(),
+                  [store](rgw::sal::ReloadPauser* p){p->resume(store);});
   }
 
 };

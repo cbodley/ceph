@@ -27,10 +27,10 @@ static constexpr bool USE_SAFE_TIMER_CALLBACKS = false;
 
 
 RGWRealmReloader::RGWRealmReloader(rgw::sal::Store*& store, std::map<std::string, std::string>& service_map_meta,
-                                   Pauser* frontends)
+                                   rgw::sal::ReloadPauser* pauser)
   : store(store),
     service_map_meta(service_map_meta),
-    frontends(frontends),
+    pauser(pauser),
     timer(store->ctx(), mutex, USE_SAFE_TIMER_CALLBACKS),
     mutex(ceph::make_mutex("RGWRealmReloader")),
     reload_scheduled(nullptr)
@@ -83,7 +83,7 @@ void RGWRealmReloader::reload()
   const DoutPrefix dp(cct, dout_subsys, "rgw realm reloader: ");
   ldpp_dout(&dp, 1) << "Pausing frontends for realm update..." << dendl;
 
-  frontends->pause();
+  pauser->pause();
 
   ldpp_dout(&dp, 1) << "Frontends paused" << dendl;
 
@@ -173,5 +173,5 @@ void RGWRealmReloader::reload()
 
   ldpp_dout(&dp, 1) << "Resuming frontends with new realm configuration." << dendl;
 
-  frontends->resume(store);
+  pauser->resume(store);
 }

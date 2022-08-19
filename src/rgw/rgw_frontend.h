@@ -187,7 +187,7 @@ public:
 }; /* RGWLoadGenFrontend */
 
 // FrontendPauser implementation for RGWRealmReloader
-class RGWFrontendPauser : public RGWRealmReloader::Pauser {
+class RGWFrontendPauser : public rgw::sal::ReloadPauser {
   std::list<RGWFrontend*> &frontends;
   rgw::auth::ImplicitTenants& implicit_tenants;
 
