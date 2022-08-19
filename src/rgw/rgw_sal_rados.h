@@ -934,6 +934,52 @@ public:
   virtual int create(const DoutPrefixProvider *dpp, bool exclusive, const std::string& role_id, optional_yield y) override;
   virtual int delete_obj(const DoutPrefixProvider *dpp, optional_yield y) override;
 };
+
+class RadosConfigStore : public ConfigStore {
+  librados::Rados rados;
+  librados::IoCtx pool_ctx;
+ public:
+  virtual ~RadosConfigStore() {}
+
+  // Realm
+  virtual int create_realm(const DoutPrefixProvider* dpp,
+                           optional_yield y,
+                           const RGWRealm& info,
+                           RGWObjVersionTracker& objv) override;
+  virtual int set_default_realm_id(const DoutPrefixProvider* dpp,
+                                   optional_yield y,
+                                   std::string_view realm_id,
+                                   RGWObjVersionTracker& objv) override;
+  virtual int read_default_realm_id(const DoutPrefixProvider* dpp,
+                                    optional_yield y,
+                                    std::string& realm_id,
+                                    RGWObjVersionTracker& objv) override;
+  virtual int delete_default_realm_id(const DoutPrefixProvider* dpp,
+                                      optional_yield y,
+                                      RGWObjVersionTracker& objv) override;
+  virtual int read_realm(const DoutPrefixProvider* dpp,
+                         optional_yield y,
+                         std::string_view realm_id,
+                         std::string_view realm_name,
+                         RGWRealm& info,
+                         RGWObjVersionTracker& objv) override;
+  virtual int update_realm(const DoutPrefixProvider* dpp,
+                           optional_yield y,
+                           const RGWRealm& info,
+                           const RGWRealm& old_info,
+                           RGWObjVersionTracker& objv) override;
+  virtual int delete_realm(const DoutPrefixProvider* dpp,
+                           optional_yield y,
+                           const RGWRealm& old_info,
+                           RGWObjVersionTracker& objv) override;
+  virtual int list_realm_names(const DoutPrefixProvider* dpp,
+                               optional_yield y,
+                               std::list<std::string>& names);
+}; // RadosConfigStore
+
+auto make_rados_config_store(ReloadPauser* pauser)
+  -> std::unique_ptr<RadosConfigStore>;
+
 }} // namespace rgw::sal
 
 WRITE_CLASS_ENCODER(rgw::sal::RadosOIDCProvider)
