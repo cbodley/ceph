@@ -22,7 +22,7 @@ class RGWRealmReloader : public RGWRealmWatcher::Watcher {
   void handle_notify(RGWRealmNotify type, bufferlist::const_iterator& p) override;
 
  private:
-  /// pause frontends and replace the RGWRados instance
+  /// pause and replace the Store instance
   void reload();
 
   class C_Reload; //< Context that calls reload()

@@ -17,6 +17,7 @@
 #include "include/str_list.h"
 #include "include/stringify.h"
 #include "rgw_common.h"
+#include "rgw_sal_config.h"
 #include "rgw_sal_rados.h"
 #include "rgw_period_pusher.h"
 #include "rgw_realm_reloader.h"

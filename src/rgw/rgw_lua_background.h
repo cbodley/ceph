@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <variant>
 #include "rgw_lua_utils.h"
-#include "rgw_sal.h"
+#include "rgw_sal_config.h"
 
 namespace rgw::lua {
 
