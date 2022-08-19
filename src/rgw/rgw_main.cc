@@ -666,8 +666,9 @@ int main(int argc, const char **argv)
   if (store->get_name() == "rados") {
     // add a watcher to respond to realm configuration changes
     pusher.emplace(&dp, store, null_yield);
-    fe_pauser.emplace(fes, implicit_tenant_context, &*pusher);
+    fe_pauser.emplace(fes, implicit_tenant_context);
     rgw_pauser.emplace();
+    rgw_pauser->add_pauser(&*pusher);
     rgw_pauser->add_pauser(&*fe_pauser);
     if (lua_background) {
       rgw_pauser->add_pauser(&*lua_background);

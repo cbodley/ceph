@@ -189,23 +189,18 @@ public:
 // FrontendPauser implementation for RGWRealmReloader
 class RGWFrontendPauser : public RGWRealmReloader::Pauser {
   std::list<RGWFrontend*> &frontends;
-  RGWRealmReloader::Pauser* pauser;
   rgw::auth::ImplicitTenants& implicit_tenants;
 
  public:
   RGWFrontendPauser(std::list<RGWFrontend*> &frontends,
-                    rgw::auth::ImplicitTenants& implicit_tenants,
-                    RGWRealmReloader::Pauser* pauser = nullptr)
+                    rgw::auth::ImplicitTenants& implicit_tenants)
     : frontends(frontends),
-      pauser(pauser),
       implicit_tenants(implicit_tenants) {
   }
 
   void pause() override {
     for (auto frontend : frontends)
       frontend->pause_for_new_config();
-    if (pauser)
-      pauser->pause();
   }
   void resume(rgw::sal::Store* store) override {
     /* Initialize the registry of auth strategies which will coordinate
@@ -215,8 +210,6 @@ class RGWFrontendPauser : public RGWRealmReloader::Pauser {
 
     for (auto frontend : frontends)
       frontend->unpause_with_new_config(store, auth_registry);
-    if (pauser)
-      pauser->resume(store);
   }
 };
 
