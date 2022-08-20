@@ -23,6 +23,7 @@
 
 #include "rgw_sal.h"
 #include "rgw_sal_rados.h"
+#include "rgw_sal_rados_config.h"
 #include "rgw_d3n_datacache.h"
 
 #ifdef WITH_RADOSGW_DBSTORE
@@ -333,6 +334,16 @@ StoreManager::Config StoreManager::get_config(bool admin, CephContext* cct)
   }
 
   return cfg;
+}
+
+auto StoreManager::make_config_store(const DoutPrefixProvider* dpp,
+                                     optional_yield y, std::string_view name)
+  -> std::unique_ptr<rgw::sal::ConfigStore>
+{
+  if (name == "rados") {
+    return rgw::sal::RadosConfigStore::create(dpp);
+  }
+  return nullptr;
 }
 
 namespace rgw::sal {

@@ -1599,7 +1599,7 @@ public:
 
   /// ConfigStore factory
   static auto make_config_store(const DoutPrefixProvider* dpp, optional_yield y,
-                                std::string_view name, bool use_cache = true)
+                                std::string_view name)
     -> std::unique_ptr<rgw::sal::ConfigStore>;
 };
 

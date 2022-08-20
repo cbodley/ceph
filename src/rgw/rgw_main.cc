@@ -363,6 +363,8 @@ int main(int argc, const char **argv)
   rgw_kmip_client_init(*new RGWKMIPManagerImpl(g_ceph_context));
   
   StoreManager::Config cfg = StoreManager::get_config(false, g_ceph_context);
+  auto config_store = StoreManager::make_config_store(&dp, null_yield,
+                                                      cfg.store_name);
 
   rgw::sal::Store* store =
     StoreManager::get_storage(&dp, g_ceph_context,
@@ -373,7 +375,7 @@ int main(int argc, const char **argv)
 				 g_conf()->rgw_run_sync_thread,
 				 g_conf().get_val<bool>("rgw_dynamic_resharding"),
 				 g_conf()->rgw_cache_enabled);
-  if (!store) {
+  if (!config_store || !store) {
     mutex.lock();
     init_timer.cancel_all_events();
     init_timer.shutdown();
