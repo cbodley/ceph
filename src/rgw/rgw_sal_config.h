@@ -48,23 +48,23 @@ class ConfigStore {
 
   /// Create a realm. May return EEXIST
   virtual int create_realm(const DoutPrefixProvider* dpp,
-                           optional_yield y,
+                           optional_yield y, bool exclusive,
                            const RGWRealm& info,
-                           RGWObjVersionTracker& objv) = 0;
+                           RGWObjVersionTracker* objv) = 0;
   /// Set the cluster-wide default realm id
   virtual int set_default_realm_id(const DoutPrefixProvider* dpp,
                                    optional_yield y,
                                    std::string_view realm_id,
-                                   RGWObjVersionTracker& objv) = 0;
+                                   RGWObjVersionTracker* objv) = 0;
   /// Read the cluster's default realm id
   virtual int read_default_realm_id(const DoutPrefixProvider* dpp,
                                     optional_yield y,
                                     std::string& realm_id,
-                                    RGWObjVersionTracker& objv) = 0;
+                                    RGWObjVersionTracker* objv) = 0;
   /// Delete the cluster's default realm id
   virtual int delete_default_realm_id(const DoutPrefixProvider* dpp,
                                       optional_yield y,
-                                      RGWObjVersionTracker& objv) = 0;
+                                      RGWObjVersionTracker* objv) = 0;
   /// Load a realm by id or name. If both are empty, try to load the cluster's
   /// default realm
   virtual int read_realm(const DoutPrefixProvider* dpp,
@@ -72,21 +72,25 @@ class ConfigStore {
                          std::string_view realm_id,
                          std::string_view realm_name,
                          RGWRealm& info,
-                         RGWObjVersionTracker& objv) = 0;
+                         RGWObjVersionTracker* objv) = 0;
+  /// Look up a realm id by its name
+  virtual int read_realm_id(const DoutPrefixProvider* dpp,
+                            optional_yield y, std::string_view realm_name,
+                            std::string& realm_id) = 0;
   /// Overwrite an existing realm. Must not change id or name
   virtual int update_realm(const DoutPrefixProvider* dpp,
                            optional_yield y, const RGWRealm& info,
-                           RGWObjVersionTracker& objv) = 0;
+                           RGWObjVersionTracker* objv) = 0;
   /// Rename an existing realm
   virtual int rename_realm(const DoutPrefixProvider* dpp,
                            optional_yield y, RGWRealm& info,
                            std::string_view new_name,
-                           RGWObjVersionTracker& objv) = 0;
+                           RGWObjVersionTracker* objv) = 0;
   /// Delete an existing realm
   virtual int delete_realm(const DoutPrefixProvider* dpp,
                            optional_yield y,
                            const RGWRealm& old_info,
-                           RGWObjVersionTracker& objv) = 0;
+                           RGWObjVersionTracker* objv) = 0;
   /// List all realm names
   virtual int list_realm_names(const DoutPrefixProvider* dpp,
                                optional_yield y,

@@ -58,7 +58,7 @@ struct RadosConfigStore::Impl {
 
   int read(const DoutPrefixProvider* dpp, optional_yield y,
            const rgw_pool& pool, const std::string& oid,
-           bufferlist& bl, RGWObjVersionTracker& objv)
+           bufferlist& bl, RGWObjVersionTracker* objv)
   {
     librados::IoCtx ioctx;
     int r = rgw_init_ioctx(dpp, &rados, pool, ioctx, true, false);
@@ -66,11 +66,13 @@ struct RadosConfigStore::Impl {
       return r;
     }
     librados::ObjectReadOperation op;
-    objv.prepare_op_for_read(&op);
+    if (objv) {
+      objv->prepare_op_for_read(&op);
+    }
     op.read(0, 0, &bl, nullptr);
     r = rgw_rados_operate(dpp, ioctx, oid, &op, nullptr, y);
-    if (r >= 0) {
-      objv.apply_write();
+    if (r >= 0 && objv) {
+      objv->apply_write();
     }
     return r;
   }
@@ -78,7 +80,7 @@ struct RadosConfigStore::Impl {
   template <typename T>
   int read(const DoutPrefixProvider* dpp, optional_yield y,
            const rgw_pool& pool, const std::string& oid,
-           T& data, RGWObjVersionTracker& objv)
+           T& data, RGWObjVersionTracker* objv)
   {
     bufferlist bl;
     int r = read(dpp, y, pool, oid, bl, objv);
@@ -96,9 +98,9 @@ struct RadosConfigStore::Impl {
     return 0;
   }
 
-  int write(const DoutPrefixProvider* dpp, optional_yield y,
-            const rgw_pool& pool, const std::string& oid, bool exclusive,
-            const bufferlist& bl, RGWObjVersionTracker& objv)
+  int create(const DoutPrefixProvider* dpp, optional_yield y,
+             const rgw_pool& pool, const std::string& oid,
+             bool exclusive, RGWObjVersionTracker* objv)
   {
     librados::IoCtx ioctx;
     int r = rgw_init_ioctx(dpp, &rados, pool, ioctx, true, false);
@@ -108,12 +110,37 @@ struct RadosConfigStore::Impl {
 
     librados::ObjectWriteOperation op;
     op.create(exclusive);
-    objv.prepare_op_for_write(&op);
+    if (objv) {
+      objv->prepare_op_for_write(&op);
+    }
+
+    r = rgw_rados_operate(dpp, ioctx, oid, &op, y);
+    if (r >= 0 && objv) {
+      objv->apply_write();
+    }
+    return r;
+  }
+
+  int write(const DoutPrefixProvider* dpp, optional_yield y,
+            const rgw_pool& pool, const std::string& oid, bool exclusive,
+            const bufferlist& bl, RGWObjVersionTracker* objv)
+  {
+    librados::IoCtx ioctx;
+    int r = rgw_init_ioctx(dpp, &rados, pool, ioctx, true, false);
+    if (r < 0) {
+      return r;
+    }
+
+    librados::ObjectWriteOperation op;
+    op.create(exclusive);
+    if (objv) {
+      objv->prepare_op_for_write(&op);
+    }
     op.write_full(bl);
 
     r = rgw_rados_operate(dpp, ioctx, oid, &op, y);
-    if (r >= 0) {
-      objv.apply_write();
+    if (r >= 0 && objv) {
+      objv->apply_write();
     }
     return r;
   }
@@ -121,7 +148,7 @@ struct RadosConfigStore::Impl {
   template <typename T>
   int write(const DoutPrefixProvider* dpp, optional_yield y,
             const rgw_pool& pool, const std::string& oid, bool exclusive,
-            const T& data, RGWObjVersionTracker& objv)
+            const T& data, RGWObjVersionTracker* objv)
   {
     bufferlist bl;
     encode(data, bl);
@@ -131,7 +158,7 @@ struct RadosConfigStore::Impl {
 
   int remove(const DoutPrefixProvider* dpp, optional_yield y,
              const rgw_pool& pool, const std::string& oid,
-             RGWObjVersionTracker& objv)
+             RGWObjVersionTracker* objv)
   {
     librados::IoCtx ioctx;
     int r = rgw_init_ioctx(dpp, &rados, pool, ioctx, true, false);
@@ -140,12 +167,14 @@ struct RadosConfigStore::Impl {
     }
 
     librados::ObjectWriteOperation op;
-    objv.prepare_op_for_write(&op);
+    if (objv) {
+      objv->prepare_op_for_write(&op);
+    }
     op.remove();
 
     r = rgw_rados_operate(dpp, ioctx, oid, &op, y);
-    if (r >= 0) {
-      objv.apply_write();
+    if (r >= 0 && objv) {
+      objv->apply_write();
     }
     return r;
   }
@@ -160,9 +189,9 @@ RadosConfigStore::RadosConfigStore(std::unique_ptr<Impl> impl)
 RadosConfigStore::~RadosConfigStore() = default;
 
 int RadosConfigStore::create_realm(const DoutPrefixProvider* dpp,
-                                   optional_yield y,
+                                   optional_yield y, bool exclusive,
                                    const RGWRealm& info,
-                                   RGWObjVersionTracker& objv)
+                                   RGWObjVersionTracker* objv)
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
@@ -179,28 +208,40 @@ int RadosConfigStore::create_realm(const DoutPrefixProvider* dpp,
   const auto& pool = impl->realm_pool;
   const auto info_oid = string_cat_reserve(realm_info_oid_prefix, info.get_id());
   const auto name_oid = string_cat_reserve(realm_names_oid_prefix, info.get_name());
-  constexpr bool exclusive = true;
 
+  // write the realm info
   int r = impl->write(dpp, y, pool, info_oid, exclusive, info, objv);
   if (r < 0) {
     return r;
   }
 
+  // write the realm name
   const auto name = RGWNameToId{info.get_id()};
   RGWObjVersionTracker name_objv;
   name_objv.generate_new_write_ver(dpp->get_cct());
 
-  r = impl->write(dpp, y, pool, name_oid, exclusive, name, name_objv);
+  r = impl->write(dpp, y, pool, name_oid, exclusive, name, &name_objv);
   if (r < 0) {
     (void) impl->remove(dpp, y, pool, info_oid, objv);
+    return r;
   }
+
+  // create control object for watch/notify
+  const auto control_oid = string_cat_reserve(info_oid, ".control");
+  r = impl->create(dpp, y, pool, control_oid, true, nullptr);
+  if (r < 0) {
+    return r;
+  }
+  // TODO: create a new period
+  // TODO: set current period
+
   return r;
 }
 
 int RadosConfigStore::set_default_realm_id(const DoutPrefixProvider* dpp,
                                            optional_yield y,
                                            std::string_view realm_id,
-                                           RGWObjVersionTracker& objv)
+                                           RGWObjVersionTracker* objv)
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
@@ -219,7 +260,7 @@ int RadosConfigStore::set_default_realm_id(const DoutPrefixProvider* dpp,
 int RadosConfigStore::read_default_realm_id(const DoutPrefixProvider* dpp,
                                             optional_yield y,
                                             std::string& realm_id,
-                                            RGWObjVersionTracker& objv)
+                                            RGWObjVersionTracker* objv)
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
@@ -239,7 +280,7 @@ int RadosConfigStore::read_default_realm_id(const DoutPrefixProvider* dpp,
 
 int RadosConfigStore::delete_default_realm_id(const DoutPrefixProvider* dpp,
                                               optional_yield y,
-                                              RGWObjVersionTracker& objv)
+                                              RGWObjVersionTracker* objv)
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
@@ -257,7 +298,7 @@ int RadosConfigStore::read_realm(const DoutPrefixProvider* dpp,
                                  std::string_view realm_id,
                                  std::string_view realm_name,
                                  RGWRealm& info,
-                                 RGWObjVersionTracker& objv)
+                                 RGWObjVersionTracker* objv)
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
@@ -273,9 +314,7 @@ int RadosConfigStore::read_realm(const DoutPrefixProvider* dpp,
       const auto default_oid = name_or_default(
           dpp->get_cct()->_conf->rgw_default_realm_info_oid,
           default_realm_info_oid);
-      RGWObjVersionTracker objv_ignored;
-      r = impl->read(dpp, y, pool, default_oid,
-                     default_info, objv_ignored);
+      r = impl->read(dpp, y, pool, default_oid, default_info, nullptr);
       if (r < 0) {
         return r;
       }
@@ -284,8 +323,7 @@ int RadosConfigStore::read_realm(const DoutPrefixProvider* dpp,
       // look up realm id by name
       const auto name_oid = string_cat_reserve(realm_names_oid_prefix,
                                                realm_name);
-      RGWObjVersionTracker objv_ignored;
-      r = impl->read(dpp, y, pool, name_oid, name, objv_ignored);
+      r = impl->read(dpp, y, pool, name_oid, name, nullptr);
       if (r < 0) {
         return r;
       }
@@ -297,9 +335,31 @@ int RadosConfigStore::read_realm(const DoutPrefixProvider* dpp,
   return impl->read(dpp, y, pool, info_oid, info, objv);
 }
 
+int RadosConfigStore::read_realm_id(const DoutPrefixProvider* dpp,
+                                    optional_yield y,
+                                    std::string_view realm_name,
+                                    std::string& realm_id)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+
+  const auto& pool = impl->realm_pool;
+  RGWNameToId name;
+
+  // look up realm id by name
+  const auto name_oid = string_cat_reserve(realm_names_oid_prefix,
+                                           realm_name);
+  int r = impl->read(dpp, y, pool, name_oid, name, nullptr);
+  if (r < 0) {
+    return r;
+  }
+  realm_id = std::move(name.obj_id);
+  return 0;
+}
+
 int RadosConfigStore::update_realm(const DoutPrefixProvider* dpp,
                                    optional_yield y, const RGWRealm& info,
-                                   RGWObjVersionTracker& objv)
+                                   RGWObjVersionTracker* objv)
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
@@ -321,7 +381,7 @@ int RadosConfigStore::update_realm(const DoutPrefixProvider* dpp,
 int RadosConfigStore::rename_realm(const DoutPrefixProvider* dpp,
                                    optional_yield y, RGWRealm& info,
                                    std::string_view new_name,
-                                   RGWObjVersionTracker& objv)
+                                   RGWObjVersionTracker* objv)
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
@@ -347,7 +407,8 @@ int RadosConfigStore::rename_realm(const DoutPrefixProvider* dpp,
 
   // link the new name
   RGWObjVersionTracker new_objv;
-  int r = impl->write(dpp, y, pool, new_oid, true, name, new_objv);
+  new_objv.generate_new_write_ver(dpp->get_cct());
+  int r = impl->write(dpp, y, pool, new_oid, true, name, &new_objv);
   if (r < 0) {
     return r;
   }
@@ -357,20 +418,19 @@ int RadosConfigStore::rename_realm(const DoutPrefixProvider* dpp,
   r = impl->write(dpp, y, pool, info_oid, false, info, objv);
   if (r < 0) {
     // on failure, unlink the new name
-    (void) impl->remove(dpp, y, pool, new_oid, new_objv);
+    (void) impl->remove(dpp, y, pool, new_oid, &new_objv);
     return r;
   }
 
   // unlink the old name
-  RGWObjVersionTracker old_objv;
-  (void) impl->remove(dpp, y, pool, old_oid, old_objv);
+  (void) impl->remove(dpp, y, pool, old_oid, nullptr);
   return 0;
 }
 
 int RadosConfigStore::delete_realm(const DoutPrefixProvider* dpp,
                                    optional_yield y,
                                    const RGWRealm& info,
-                                   RGWObjVersionTracker& objv)
+                                   RGWObjVersionTracker* objv)
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
@@ -382,8 +442,10 @@ int RadosConfigStore::delete_realm(const DoutPrefixProvider* dpp,
     return r;
   }
   const auto name_oid = string_cat_reserve(realm_names_oid_prefix, info.get_name());
-  RGWObjVersionTracker name_objv;
-  return impl->remove(dpp, y, pool, name_oid, name_objv);
+  r = impl->remove(dpp, y, pool, name_oid, nullptr);
+  const auto control_oid = string_cat_reserve(info_oid, ".control");
+  r = impl->remove(dpp, y, pool, control_oid, nullptr);
+  return r;
 }
 
 int RadosConfigStore::list_realm_names(const DoutPrefixProvider* dpp,

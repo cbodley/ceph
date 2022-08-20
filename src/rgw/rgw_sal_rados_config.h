@@ -35,37 +35,40 @@ class RadosConfigStore : public ConfigStore {
 
   // Realm
   virtual int create_realm(const DoutPrefixProvider* dpp,
-                           optional_yield y,
+                           optional_yield y, bool exclusive,
                            const RGWRealm& info,
-                           RGWObjVersionTracker& objv) override;
+                           RGWObjVersionTracker* objv) override;
   virtual int set_default_realm_id(const DoutPrefixProvider* dpp,
                                    optional_yield y,
                                    std::string_view realm_id,
-                                   RGWObjVersionTracker& objv) override;
+                                   RGWObjVersionTracker* objv) override;
   virtual int read_default_realm_id(const DoutPrefixProvider* dpp,
                                     optional_yield y,
                                     std::string& realm_id,
-                                    RGWObjVersionTracker& objv) override;
+                                    RGWObjVersionTracker* objv) override;
   virtual int delete_default_realm_id(const DoutPrefixProvider* dpp,
                                       optional_yield y,
-                                      RGWObjVersionTracker& objv) override;
+                                      RGWObjVersionTracker* objv) override;
   virtual int read_realm(const DoutPrefixProvider* dpp,
                          optional_yield y,
                          std::string_view realm_id,
                          std::string_view realm_name,
                          RGWRealm& info,
-                         RGWObjVersionTracker& objv) override;
+                         RGWObjVersionTracker* objv) override;
+  virtual int read_realm_id(const DoutPrefixProvider* dpp,
+                            optional_yield y, std::string_view realm_name,
+                            std::string& realm_id) override;
   virtual int update_realm(const DoutPrefixProvider* dpp,
                            optional_yield y, const RGWRealm& info,
-                           RGWObjVersionTracker& objv) override;
+                           RGWObjVersionTracker* objv) override;
   virtual int rename_realm(const DoutPrefixProvider* dpp,
                            optional_yield y, RGWRealm& info,
                            std::string_view new_name,
-                           RGWObjVersionTracker& objv) override;
+                           RGWObjVersionTracker* objv) override;
   virtual int delete_realm(const DoutPrefixProvider* dpp,
                            optional_yield y,
                            const RGWRealm& old_info,
-                           RGWObjVersionTracker& objv) override;
+                           RGWObjVersionTracker* objv) override;
   virtual int list_realm_names(const DoutPrefixProvider* dpp,
                                optional_yield y,
                                std::list<std::string>& names) override;
