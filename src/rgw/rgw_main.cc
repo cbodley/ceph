@@ -365,6 +365,15 @@ int main(int argc, const char **argv)
   StoreManager::Config cfg = StoreManager::get_config(false, g_ceph_context);
   auto config_store = StoreManager::make_config_store(&dp, null_yield,
                                                       cfg.store_name);
+  if (!config_store) {
+    mutex.lock();
+    init_timer.cancel_all_events();
+    init_timer.shutdown();
+    mutex.unlock();
+
+    derr << "Couldn't init config storage provider" << dendl;
+    return EIO;
+  }
 
   rgw::sal::Store* store =
     StoreManager::get_storage(&dp, g_ceph_context,
@@ -375,13 +384,13 @@ int main(int argc, const char **argv)
 				 g_conf()->rgw_run_sync_thread,
 				 g_conf().get_val<bool>("rgw_dynamic_resharding"),
 				 g_conf()->rgw_cache_enabled);
-  if (!config_store || !store) {
+  if (!store) {
     mutex.lock();
     init_timer.cancel_all_events();
     init_timer.shutdown();
     mutex.unlock();
 
-    derr << "Couldn't init storage provider (RADOS)" << dendl;
+    derr << "Couldn't init storage provider" << dendl;
     return EIO;
   }
   r = rgw_perf_start(g_ceph_context);

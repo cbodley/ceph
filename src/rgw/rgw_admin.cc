@@ -4148,6 +4148,8 @@ int main(int argc, const char **argv)
   /* common_init_finish needs to be called after g_conf().set_val() */
   common_init_finish(g_ceph_context);
 
+  std::unique_ptr<rgw::sal::ConfigStore> config_store;
+
   if (args.empty()) {
     usage();
     exit(1);
@@ -4318,6 +4320,13 @@ int main(int argc, const char **argv)
     bool need_gc = (gc_ops_list.find(opt_cmd) != gc_ops_list.end()) && !bypass_gc;
 
     StoreManager::Config cfg = StoreManager::get_config(true, g_ceph_context);
+
+    config_store = StoreManager::make_config_store(dpp(), null_yield,
+                                                   cfg.store_name);
+    if (!config_store) {
+      cerr << "couldn't init config storage provider" << std::endl;
+      return 5; //EIO
+    }
 
     if (raw_storage_op) {
       store = StoreManager::get_raw_storage(dpp(),
