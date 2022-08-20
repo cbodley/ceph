@@ -1,3 +1,4 @@
+#include <system_error>
 #include "include/rados/librados.hpp"
 #include "common/async/yield_context.h"
 #include "common/dout.h"
@@ -40,10 +41,10 @@ static std::string name_or_default(std::string_view name,
 struct RadosConfigStore::Impl {
   librados::Rados rados;
 
-  rgw_pool realm_pool;
-  rgw_pool period_pool;
-  rgw_pool zonegroup_pool;
-  rgw_pool zone_pool;
+  const rgw_pool realm_pool;
+  const rgw_pool period_pool;
+  const rgw_pool zonegroup_pool;
+  const rgw_pool zone_pool;
 
   Impl(CephContext* cct)
     : realm_pool(name_or_default(cct->_conf->rgw_realm_root_pool,
@@ -178,6 +179,39 @@ struct RadosConfigStore::Impl {
     }
     return r;
   }
+
+  int list(const DoutPrefixProvider* dpp, optional_yield y,
+           const rgw_pool& pool, const std::string& marker,
+           std::string_view prefix, std::span<std::string> entries,
+           ListResult& result)
+  {
+    librados::IoCtx ioctx;
+    int r = rgw_init_ioctx(dpp, &rados, pool, ioctx, true, false);
+    if (r < 0) {
+      return r;
+    }
+    librados::ObjectCursor oc;
+    if (!oc.from_str(marker)) {
+      ldpp_dout(dpp, 10) << "failed to parse cursor: " << marker << dendl;
+      return -EINVAL;
+    }
+    std::size_t count = 0;
+    try {
+      auto iter = ioctx.nobjects_begin(oc);
+      for (; count < entries.size() && iter != ioctx.nobjects_end(); ++iter) {
+        std::string oid = iter->get_oid();
+        if (oid.starts_with(prefix)) {
+          entries[count++] = std::move(oid);
+        }
+      }
+      result.next = iter.get_cursor().to_str();
+    } catch (const std::exception& e) {
+      ldpp_dout(dpp, 10) << "NObjectIterator exception " << e.what() << dendl;
+      return -EIO;
+    }
+    result.entries = entries.first(count);
+    return 0;
+  }
 };
 
 
@@ -188,6 +222,8 @@ RadosConfigStore::RadosConfigStore(std::unique_ptr<Impl> impl)
 
 RadosConfigStore::~RadosConfigStore() = default;
 
+
+// Realm
 int RadosConfigStore::create_realm(const DoutPrefixProvider* dpp,
                                    optional_yield y, bool exclusive,
                                    const RGWRealm& info,
@@ -238,10 +274,10 @@ int RadosConfigStore::create_realm(const DoutPrefixProvider* dpp,
   return r;
 }
 
-int RadosConfigStore::set_default_realm_id(const DoutPrefixProvider* dpp,
-                                           optional_yield y,
-                                           std::string_view realm_id,
-                                           RGWObjVersionTracker* objv)
+int RadosConfigStore::write_default_realm_id(const DoutPrefixProvider* dpp,
+                                             optional_yield y,
+                                             std::string_view realm_id,
+                                             RGWObjVersionTracker* objv)
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
@@ -450,12 +486,97 @@ int RadosConfigStore::delete_realm(const DoutPrefixProvider* dpp,
 
 int RadosConfigStore::list_realm_names(const DoutPrefixProvider* dpp,
                                        optional_yield y,
-                                       std::list<std::string>& names)
+                                       const std::string& marker,
+                                       std::span<std::string> entries,
+                                       ListResult& result)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+
+  const auto& pool = impl->realm_pool;
+  constexpr auto prefix = realm_names_oid_prefix;
+
+  return impl->list(dpp, y, pool, marker, prefix, entries, result);
+}
+
+
+// Period
+int RadosConfigStore::create_period(const DoutPrefixProvider* dpp,
+                                    optional_yield y,
+                                    const RGWPeriod& info,
+                                    RGWObjVersionTracker* objv)
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
   return -ENOTSUP;
 }
+
+int RadosConfigStore::write_period_latest_epoch(const DoutPrefixProvider* dpp,
+                                                optional_yield y,
+                                                bool exclusive,
+                                                std::string_view period_id,
+                                                epoch_t epoch,
+                                                RGWObjVersionTracker* objv)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+  return -ENOTSUP;
+}
+
+int RadosConfigStore::read_period_latest_epoch(const DoutPrefixProvider* dpp,
+                                               optional_yield y,
+                                               std::string_view period_id,
+                                               epoch_t& epoch,
+                                               RGWObjVersionTracker* objv)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+  return -ENOTSUP;
+}
+
+int RadosConfigStore::read_period(const DoutPrefixProvider* dpp,
+                                  optional_yield y,
+                                  std::string_view period_id,
+                                  std::optional<epoch_t> epoch,
+                                  RGWPeriod& info,
+                                  RGWObjVersionTracker* objv)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+  return -ENOTSUP;
+}
+
+int RadosConfigStore::update_period(const DoutPrefixProvider* dpp,
+                                    optional_yield y,
+                                    const RGWPeriod& info,
+                                    RGWObjVersionTracker* objv)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+  return -ENOTSUP;
+}
+
+int RadosConfigStore::delete_period(const DoutPrefixProvider* dpp,
+                                    optional_yield y,
+                                    const RGWPeriod& old_info,
+                                    RGWObjVersionTracker* objv)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+  return -ENOTSUP;
+}
+
+int RadosConfigStore::list_period_ids(const DoutPrefixProvider* dpp,
+                                      optional_yield y,
+                                      const std::string& marker,
+                                      std::span<std::string> entries,
+                                      ListResult& result)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+  return -ENOTSUP;
+}
+
 
 auto RadosConfigStore::create(const DoutPrefixProvider* dpp)
   -> std::unique_ptr<RadosConfigStore>

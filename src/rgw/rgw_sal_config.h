@@ -15,11 +15,14 @@
 
 #pragma once
 
+#include <span>
+#include <string>
 #include "rgw_sal_fwd.h"
 
 class DoutPrefixProvider;
 class optional_yield;
 struct RGWRealm;
+struct RGWPeriod;
 class RGWObjVersionTracker;
 
 namespace rgw::sal {
@@ -43,6 +46,14 @@ class ConfigStore {
  public:
   virtual ~ConfigStore() {}
 
+  /// Results of a listing operation
+  struct ListResult {
+    /// The initialized subspan of the input entries
+    std::span<std::string> entries;
+    /// The next marker to resume listing, or empty
+    std::string next;
+  };
+
   /// @group Realm
   ///@{
 
@@ -52,10 +63,10 @@ class ConfigStore {
                            const RGWRealm& info,
                            RGWObjVersionTracker* objv) = 0;
   /// Set the cluster-wide default realm id
-  virtual int set_default_realm_id(const DoutPrefixProvider* dpp,
-                                   optional_yield y,
-                                   std::string_view realm_id,
-                                   RGWObjVersionTracker* objv) = 0;
+  virtual int write_default_realm_id(const DoutPrefixProvider* dpp,
+                                     optional_yield y,
+                                     std::string_view realm_id,
+                                     RGWObjVersionTracker* objv) = 0;
   /// Read the cluster's default realm id
   virtual int read_default_realm_id(const DoutPrefixProvider* dpp,
                                     optional_yield y,
@@ -91,40 +102,54 @@ class ConfigStore {
                            optional_yield y,
                            const RGWRealm& old_info,
                            RGWObjVersionTracker* objv) = 0;
-  /// List all realm names
+  /// List up to 'entries.size()' realm names starting from the given marker
   virtual int list_realm_names(const DoutPrefixProvider* dpp,
-                               optional_yield y,
-                               std::list<std::string>& names) = 0;
+                               optional_yield y, const std::string& marker,
+                               std::span<std::string> entries,
+                               ListResult& result) = 0;
   ///@}
-#if 0
+
+  /// @group Period
+  ///@{
   /// write a period. may return EEXIST
   virtual int create_period(const DoutPrefixProvider* dpp,
                             optional_yield y,
                             const RGWPeriod& info,
-                            RGWObjVersionTracker& objv) = 0;
+                            RGWObjVersionTracker* objv) = 0;
+  /// set the latest epoch for a given period id
+  virtual int write_period_latest_epoch(const DoutPrefixProvider* dpp,
+                                        optional_yield y, bool exclusive,
+                                        std::string_view period_id,
+                                        epoch_t epoch,
+                                        RGWObjVersionTracker* objv) = 0;
+  /// read the latest epoch for a given period id
+  virtual int read_period_latest_epoch(const DoutPrefixProvider* dpp,
+                                        optional_yield y,
+                                        std::string_view period_id,
+                                        epoch_t& epoch,
+                                        RGWObjVersionTracker* objv) = 0;
   /// load a period by id and epoch. if no epoch is given, read the latest
   virtual int read_period(const DoutPrefixProvider* dpp,
-                          optional_yield y,
-                          std::string_view period_id,
-                          std::optional<epoch_t> epoch,
-                          RGWPeriod& info,
-                          RGWObjVersionTracker& objv) = 0;
+                          optional_yield y, std::string_view period_id,
+                          std::optional<epoch_t> epoch, RGWPeriod& info,
+                          RGWObjVersionTracker* objv) = 0;
   /// overwrite an existing period. must not change id
   virtual int update_period(const DoutPrefixProvider* dpp,
                             optional_yield y,
                             const RGWPeriod& info,
-                            const RGWPeriod& old_info,
-                            RGWObjVersionTracker& objv) = 0;
+                            RGWObjVersionTracker* objv) = 0;
   /// delete an existing period
   virtual int delete_period(const DoutPrefixProvider* dpp,
                             optional_yield y,
                             const RGWPeriod& old_info,
-                            RGWObjVersionTracker& objv) = 0;
+                            RGWObjVersionTracker* objv) = 0;
   /// list all period ids
   virtual int list_period_ids(const DoutPrefixProvider* dpp,
-                              optional_yield y,
-                              std::list<std::string>& ids) = 0;
-
+                              optional_yield y, const std::string& marker,
+                              std::span<std::string> entries,
+                              ListResult& result) = 0;
+  ///@}
+#if 0
   /// write a zonegroup. may return EEXIST
   virtual int create_zonegroup(const DoutPrefixProvider* dpp,
                                optional_yield y,
