@@ -2100,12 +2100,14 @@ static int do_period_pull(RGWRESTConn *remote_conn, const string& url,
   return 0;
 }
 
-static int read_current_period_id(rgw::sal::RadosStore* store, const std::string& realm_id,
+static int read_current_period_id(rgw::sal::ConfigStore* store,
+                                  const std::string& realm_id,
                                   const std::string& realm_name,
                                   std::string* period_id)
 {
   RGWRealm realm(realm_id, realm_name);
-  int ret = realm.init(dpp(), g_ceph_context, store->svc()->sysobj, null_yield);
+  int ret = store->read_realm(dpp(), null_yield, realm_id,
+                              realm_name, realm, nullptr);
   if (ret < 0) {
     std::cerr << "failed to read realm: " << cpp_strerror(-ret) << std::endl;
     return ret;
@@ -4521,7 +4523,8 @@ int main(int argc, const char **argv)
       break;
     case OPT::PERIOD_GET_CURRENT:
       {
-        int ret = read_current_period_id(static_cast<rgw::sal::RadosStore*>(store), realm_id, realm_name, &period_id);
+        int ret = read_current_period_id(config_store.get(), realm_id,
+                                         realm_name, &period_id);
 	if (ret < 0) {
 	  return -ret;
 	}
@@ -4778,16 +4781,22 @@ int main(int argc, const char **argv)
 	  cerr << "missing realm name" << std::endl;
 	  return EINVAL;
 	}
-
-	RGWRealm realm(realm_name, g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj);
-	int ret = realm.create(dpp(), null_yield);
+        if (realm_id.empty()) {
+          uuid_d new_uuid;
+          new_uuid.generate_random();
+          realm_id = new_uuid.to_string();
+        }
+        RGWRealm realm{realm_id, realm_name};
+        int ret = config_store->create_realm(dpp(), null_yield, true,
+                                             realm, nullptr);
 	if (ret < 0) {
 	  cerr << "ERROR: couldn't create realm " << realm_name << ": " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
 	}
 
         if (set_default) {
-          ret = realm.set_as_default(dpp(), null_yield);
+          ret = config_store->write_default_realm_id(dpp(), null_yield,
+                                                     realm.get_id(), nullptr);
           if (ret < 0) {
             cerr << "failed to set realm " << realm_name << " as default: " << cpp_strerror(-ret) << std::endl;
           }
@@ -4803,24 +4812,26 @@ int main(int argc, const char **argv)
 	  cerr << "missing realm name or id" << std::endl;
 	  return EINVAL;
 	}
-	RGWRealm realm(safe_opt(opt_realm_id), safe_opt(opt_realm_name));
-	int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	RGWRealm realm;
+        RGWObjVersionTracker objv;
+        int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                           realm_name, realm, &objv);
 	if (ret < 0) {
 	  cerr << "realm.init failed: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
 	}
-	ret = realm.delete_obj(dpp(), null_yield);
+        ret = config_store->delete_realm(dpp(), null_yield, realm, &objv);
 	if (ret < 0) {
 	  cerr << "ERROR: couldn't : " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
 	}
-
       }
       break;
     case OPT::REALM_GET:
       {
-	RGWRealm realm(realm_id, realm_name);
-	int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	RGWRealm realm;
+        int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                           realm_name, realm, nullptr);
 	if (ret < 0) {
 	  if (ret == -ENOENT && realm_name.empty() && realm_id.empty()) {
 	    cerr << "missing realm name or id, or default realm not found" << std::endl;
@@ -4835,9 +4846,9 @@ int main(int argc, const char **argv)
       break;
     case OPT::REALM_GET_DEFAULT:
       {
-	RGWRealm realm(g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj);
 	string default_id;
-	int ret = realm.read_default_id(dpp(), default_id, null_yield);
+        int ret = config_store->read_default_realm_id(dpp(), null_yield,
+                                                      default_id, nullptr);
 	if (ret == -ENOENT) {
 	  cout << "No default realm is set" << std::endl;
 	  return -ret;
@@ -4871,7 +4882,8 @@ int main(int argc, const char **argv)
       break;
     case OPT::REALM_LIST_PERIODS:
       {
-        int ret = read_current_period_id(static_cast<rgw::sal::RadosStore*>(store), realm_id, realm_name, &period_id);
+        int ret = read_current_period_id(config_store.get(), realm_id,
+                                         realm_name, &period_id);
 	if (ret < 0) {
 	  return -ret;
 	}
@@ -4891,7 +4903,6 @@ int main(int argc, const char **argv)
 
     case OPT::REALM_RENAME:
       {
-	RGWRealm realm(realm_id, realm_name);
 	if (realm_new_name.empty()) {
 	  cerr << "missing realm new name" << std::endl;
 	  return EINVAL;
@@ -4900,12 +4911,16 @@ int main(int argc, const char **argv)
 	  cerr << "missing realm name or id" << std::endl;
 	  return EINVAL;
 	}
-	int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	RGWRealm realm(realm_id, realm_name);
+        RGWObjVersionTracker objv;
+        int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                           realm_name, realm, &objv);
 	if (ret < 0) {
 	  cerr << "realm.init failed: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
 	}
-	ret = realm.rename(dpp(), realm_new_name, null_yield);
+        ret = config_store->rename_realm(dpp(), null_yield, realm,
+                                         realm_new_name, &objv);
 	if (ret < 0) {
 	  cerr << "realm.rename failed: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -4922,8 +4937,10 @@ int main(int argc, const char **argv)
 	  return EINVAL;
 	}
 	RGWRealm realm(realm_id, realm_name);
+        RGWObjVersionTracker objv;
 	bool new_realm = false;
-	int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+        int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                           realm_name, realm, &objv);
 	if (ret < 0 && ret != -ENOENT) {
 	  cerr << "failed to init realm: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -4934,30 +4951,40 @@ int main(int argc, const char **argv)
 	if (ret < 0) {
 	  return 1;
 	}
-	if (!realm_name.empty() && realm.get_name() != realm_name) {
-	  cerr << "mismatch between --rgw-realm " << realm_name << " and json input file name " <<
-	    realm.get_name() << std::endl;
+        if (realm.get_id().empty()) {
+          cerr << "realm cannot have an empty id" << std::endl;
+          return EINVAL;
+        }
+        if (realm.get_name().empty()) {
+          cerr << "realm cannot have an empty name" << std::endl;
+          return EINVAL;
+        }
+	if (!realm_id.empty() && realm.get_id() != realm_id) {
+	  cerr << "mismatch between --realm-id " << realm_id
+              << " and json input file name " << realm.get_id() << std::endl;
 	  return EINVAL;
 	}
+	if (!realm_name.empty() && realm.get_name() != realm_name) {
+	  cerr << "mismatch between --rgw-realm " << realm_name
+              << " and json input file name " << realm.get_name() << std::endl;
+	  return EINVAL;
+        }
 	/* new realm */
 	if (new_realm) {
 	  cout << "clearing period and epoch for new realm" << std::endl;
-	  realm.clear_current_period_and_epoch();
-	  ret = realm.create(dpp(), null_yield);
-	  if (ret < 0) {
-	    cerr << "ERROR: couldn't create new realm: " << cpp_strerror(-ret) << std::endl;
-	    return 1;
-	  }
-	} else {
-	  ret = realm.update(dpp(), null_yield);
-	  if (ret < 0) {
-	    cerr << "ERROR: couldn't store realm info: " << cpp_strerror(-ret) << std::endl;
-	    return 1;
-	  }
-	}
+          realm.clear_current_period_and_epoch();
+          objv.generate_new_write_ver(cct.get());
+        }
+        ret = config_store->create_realm(dpp(), null_yield, new_realm,
+                                         realm, &objv);
+        if (ret < 0) {
+          cerr << "ERROR: couldn't create new realm: " << cpp_strerror(-ret) << std::endl;
+          return 1;
+        }
 
         if (set_default) {
-          ret = realm.set_as_default(dpp(), null_yield);
+          ret = config_store->write_default_realm_id(dpp(), null_yield,
+                                                     realm.get_id(), nullptr);
           if (ret < 0) {
             cerr << "failed to set realm " << realm_name << " as default: " << cpp_strerror(-ret) << std::endl;
           }
@@ -4970,12 +4997,14 @@ int main(int argc, const char **argv)
     case OPT::REALM_DEFAULT:
       {
 	RGWRealm realm(realm_id, realm_name);
-	int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+        int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                           realm_name, realm, nullptr);
 	if (ret < 0) {
 	  cerr << "failed to init realm: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
 	}
-	ret = realm.set_as_default(dpp(), null_yield);
+        ret = config_store->write_default_realm_id(dpp(), null_yield,
+                                                   realm.get_id(), nullptr);
 	if (ret < 0) {
 	  cerr << "failed to set realm as default: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -5012,41 +5041,46 @@ int main(int argc, const char **argv)
           return -ret;
         }
         RGWRealm realm;
-        realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield, false);
         try {
           decode_json_obj(realm, &p);
         } catch (const JSONDecoder::err& e) {
           cerr << "failed to decode JSON response: " << e.what() << std::endl;
           return EINVAL;
         }
+        if (!realm_id.empty() && realm_id != realm.get_id()) {
+	  cerr << "mismatch between --realm-id " << realm_id
+              << " and pulled id " << realm.get_id() << std::endl;
+          return EINVAL;
+        }
+        if (!realm_name.empty() && realm_name != realm.get_name()) {
+	  cerr << "mismatch between --rgw-realm " << realm_name
+              << " and pulled name " << realm.get_name() << std::endl;
+          return EINVAL;
+        }
         RGWPeriod period;
         auto& current_period = realm.get_current_period();
         if (!current_period.empty()) {
           // pull the latest epoch of the realm's current period
-          ret = do_period_pull(nullptr, url, opt_region,
-                               access_key, secret_key,
-                               realm_id, realm_name, current_period, "",
+          ret = do_period_pull(nullptr, url, opt_region, access_key, secret_key,
+                               realm.get_id(), realm.get_name(), current_period, "",
                                &period);
           if (ret < 0) {
             cerr << "could not fetch period " << current_period << std::endl;
             return -ret;
           }
         }
-        ret = realm.create(dpp(), null_yield, false);
-        if (ret < 0 && ret != -EEXIST) {
+        RGWObjVersionTracker objv;
+        objv.generate_new_write_ver(cct.get());
+        ret = config_store->create_realm(dpp(), null_yield, false, realm, &objv);
+        if (ret < 0) {
           cerr << "Error storing realm " << realm.get_id() << ": "
             << cpp_strerror(ret) << std::endl;
           return -ret;
-        } else if (ret ==-EEXIST) {
-	  ret = realm.update(dpp(), null_yield);
-	  if (ret < 0) {
-	    cerr << "Error storing realm " << realm.get_id() << ": "
-		 << cpp_strerror(ret) << std::endl;
-	  }
 	}
 
         if (set_default) {
-          ret = realm.set_as_default(dpp(), null_yield);
+          ret = config_store->write_default_realm_id(dpp(), null_yield,
+                                                     realm.get_id(), nullptr);
           if (ret < 0) {
             cerr << "failed to set realm " << realm_name << " as default: " << cpp_strerror(-ret) << std::endl;
           }
@@ -5127,8 +5161,9 @@ int main(int argc, const char **argv)
 	  cerr << "Missing zonegroup name" << std::endl;
 	  return EINVAL;
 	}
-	RGWRealm realm(realm_id, realm_name);
-	int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	RGWRealm realm;
+        int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                           realm_name, realm, nullptr);
 	if (ret < 0) {
 	  cerr << "failed to init realm: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -5287,8 +5322,8 @@ int main(int argc, const char **argv)
           need_update = true;
         } else if (!realm_name.empty()) {
           // get realm id from name
-          RGWRealm realm{g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj};
-          ret = realm.read_id(dpp(), realm_name, zonegroup.realm_id, null_yield);
+          ret = config_store->read_realm_id(dpp(), null_yield, realm_name,
+                                            zonegroup.realm_id);
           if (ret < 0) {
             cerr << "failed to find realm by name " << realm_name << std::endl;
             return -ret;
@@ -8552,7 +8587,8 @@ next:
     int i = (specified_shard_id ? shard_id : 0);
 
     if (period_id.empty()) {
-      int ret = read_current_period_id(static_cast<rgw::sal::RadosStore*>(store), realm_id, realm_name, &period_id);
+      int ret = read_current_period_id(config_store.get(), realm_id,
+                                       realm_name, &period_id);
       if (ret < 0) {
         return -ret;
       }
@@ -8597,7 +8633,8 @@ next:
     int i = (specified_shard_id ? shard_id : 0);
 
     if (period_id.empty()) {
-      int ret = read_current_period_id(static_cast<rgw::sal::RadosStore*>(store), realm_id, realm_name, &period_id);
+      int ret = read_current_period_id(config_store.get(), realm_id,
+                                       realm_name, &period_id);
       if (ret < 0) {
         return -ret;
       }
