@@ -1989,15 +1989,17 @@ static int commit_period(RGWRealm& realm, RGWPeriod& period,
   return ret;
 }
 
-static int update_period(const string& realm_id, const string& realm_name,
+static int update_period(rgw::sal::ConfigStore* config_store,
+                         const string& realm_id, const string& realm_name,
                          const string& period_id, const string& period_epoch,
                          bool commit, const string& remote, const string& url,
                          std::optional<string> opt_region,
                          const string& access, const string& secret,
                          Formatter *formatter, bool force)
 {
-  RGWRealm realm(realm_id, realm_name);
-  int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+  RGWRealm realm;
+  int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                     realm_name, realm, nullptr);
   if (ret < 0 ) {
     cerr << "Error initializing realm " << cpp_strerror(-ret) << std::endl;
     return ret;
@@ -3308,7 +3310,8 @@ static void check_set_consistent(const string& resolved_param,
 }
 
 
-static int try_to_resolve_local_entities(string& realm_id, string& realm_name,
+static int try_to_resolve_local_entities(rgw::sal::ConfigStore* config_store,
+                                         string& realm_id, string& realm_name,
                                          string& zonegroup_id, string& zonegroup_name,
                                          string& zone_id, string& zone_name)
 {
@@ -3347,16 +3350,17 @@ static int try_to_resolve_local_entities(string& realm_id, string& realm_name,
   }
 
   // load the zone's realm_id and its current period
-  RGWRealm realm(zone.realm_id);
-  r = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+  RGWRealm realm;
+  r = config_store->read_realm(dpp(), null_yield, zone.realm_id,
+                               {}, realm, nullptr);
   if (r < 0) {
     cerr << "WARNING: can't open zone's realm " << zone.realm_id
         << ": " << cpp_strerror(-r) << std::endl;
     return 0;
   }
-  RGWPeriod period(realm.get_current_period());
-  r = period.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj,
-                  realm.get_id(), null_yield, realm.get_name());
+  RGWPeriod period;
+  r = config_store->read_period(dpp(), null_yield, realm.get_current_period(),
+                                std::nullopt, period, nullptr);
   if (r < 0) {
     cerr << "WARNING: can't open period " << realm.get_current_period()
         << ": " << cpp_strerror(-r) << std::endl;
@@ -4466,7 +4470,7 @@ int main(int argc, const char **argv)
   StoreDestructor store_destructor(static_cast<rgw::sal::RadosStore*>(store));
 
   if (raw_storage_op) {
-    try_to_resolve_local_entities(realm_id, realm_name,
+    try_to_resolve_local_entities(config_store.get(), realm_id, realm_name,
                                   zonegroup_id, zonegroup_name,
                                   zone_id, zone_name);
 
@@ -4499,9 +4503,10 @@ int main(int argc, const char **argv)
 	  epoch = atoi(period_epoch.c_str());
 	}
         if (staging) {
-          RGWRealm realm(realm_id, realm_name);
-          int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
-          if (ret < 0 ) {
+          RGWRealm realm;
+          int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                             realm_name, realm, nullptr);
+          if (ret < 0) {
             cerr << "Error initializing realm " << cpp_strerror(-ret) << std::endl;
             return -ret;
           }
@@ -4550,9 +4555,9 @@ int main(int argc, const char **argv)
       break;
     case OPT::PERIOD_UPDATE:
       {
-        int ret = update_period(realm_id, realm_name, period_id, period_epoch,
-                                commit, remote, url, opt_region,
-                                access_key, secret_key,
+        int ret = update_period(config_store.get(), realm_id, realm_name,
+                                period_id, period_epoch, commit, remote,
+                                url, opt_region, access_key, secret_key,
                                 formatter.get(), yes_i_really_mean_it);
 	if (ret < 0) {
 	  return -ret;
@@ -4565,8 +4570,9 @@ int main(int argc, const char **argv)
         RGWRESTConn *remote_conn = nullptr;
         if (url.empty()) {
           // load current period for endpoints
-          RGWRealm realm(realm_id, realm_name);
-          int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+          RGWRealm realm;
+          int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                             realm_name, realm, nullptr);
           if (ret < 0) {
             cerr << "failed to init realm: " << cpp_strerror(-ret) << std::endl;
             return -ret;
@@ -4610,10 +4616,10 @@ int main(int argc, const char **argv)
     case OPT::GLOBAL_RATELIMIT_DISABLE:
       {
         if (realm_id.empty()) {
-          RGWRealm realm(g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj);
           if (!realm_name.empty()) {
             // look up realm_id for the given realm_name
-            int ret = realm.read_id(dpp(), realm_name, realm_id, null_yield);
+            int ret = config_store->read_realm_id(dpp(), null_yield,
+                                                  realm_name, realm_id);
             if (ret < 0) {
               cerr << "ERROR: failed to read realm for " << realm_name
                   << ": " << cpp_strerror(-ret) << std::endl;
@@ -4621,7 +4627,8 @@ int main(int argc, const char **argv)
             }
           } else {
             // use default realm_id when none is given
-            int ret = realm.read_default_id(dpp(), realm_id, null_yield);
+            int ret = config_store->read_default_realm_id(dpp(), null_yield,
+                                                          realm_id, nullptr);
             if (ret < 0 && ret != -ENOENT) { // on ENOENT, use empty realm_id
               cerr << "ERROR: failed to read default realm: "
                   << cpp_strerror(-ret) << std::endl;
@@ -4707,7 +4714,8 @@ int main(int argc, const char **argv)
           RGWRealm realm(g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj);
           if (!realm_name.empty()) {
             // look up realm_id for the given realm_name
-            int ret = realm.read_id(dpp(), realm_name, realm_id, null_yield);
+            int ret = config_store->read_realm_id(dpp(), null_yield,
+                                                  realm_name, realm_id);
             if (ret < 0) {
               cerr << "ERROR: failed to read realm for " << realm_name
                   << ": " << cpp_strerror(-ret) << std::endl;
@@ -4715,7 +4723,8 @@ int main(int argc, const char **argv)
             }
           } else {
             // use default realm_id when none is given
-            int ret = realm.read_default_id(dpp(), realm_id, null_yield);
+            int ret = config_store->read_default_realm_id(dpp(), null_yield,
+                                                          realm_id, nullptr);
             if (ret < 0 && ret != -ENOENT) { // on ENOENT, use empty realm_id
               cerr << "ERROR: failed to read default realm: "
                   << cpp_strerror(-ret) << std::endl;
@@ -4861,24 +4870,32 @@ int main(int argc, const char **argv)
       break;
     case OPT::REALM_LIST:
       {
-	RGWRealm realm(g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj);
-	string default_id;
-	int ret = realm.read_default_id(dpp(), default_id, null_yield);
-	if (ret < 0 && ret != -ENOENT) {
-	  cerr << "could not determine default realm: " << cpp_strerror(-ret) << std::endl;
-	}
-	list<string> realms;
-	ret = static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->list_realms(dpp(), realms);
-	if (ret < 0) {
-	  cerr << "failed to list realms: " << cpp_strerror(-ret) << std::endl;
-	  return -ret;
-	}
-	formatter->open_object_section("realms_list");
-	encode_json("default_info", default_id, formatter.get());
-	encode_json("realms", realms, formatter.get());
-	formatter->close_section();
-	formatter->flush(cout);
+        std::string default_id;
+        int ret = config_store->read_default_realm_id(dpp(), null_yield,
+                                                      default_id, nullptr);
+        if (ret < 0 && ret != -ENOENT) {
+          std::cerr << "could not determine default realm: " << cpp_strerror(-ret) << std::endl;
+        }
+
+        Formatter::ObjectSection realms_list{*formatter, "realms_list"};
+        encode_json("default_info", default_id, formatter.get());
+
+        Formatter::ArraySection realms{*formatter, "realms"};
+        rgw::sal::ConfigStore::ListResult listing;
+        std::array<std::string, 1000> names; // list in pages of 1000
+        do {
+          ret = config_store->list_realm_names(dpp(), null_yield, listing.next,
+                                               names, listing);
+          if (ret < 0) {
+            std::cerr << "failed to list realms: " << cpp_strerror(-ret) << std::endl;
+            return -ret;
+          }
+          for (const auto& name : listing.entries) {
+            encode_json("name", name, formatter.get());
+          }
+        } while (!listing.next.empty());
       }
+      formatter->flush(cout);
       break;
     case OPT::REALM_LIST_PERIODS:
       {
@@ -4969,7 +4986,6 @@ int main(int argc, const char **argv)
               << " and json input file name " << realm.get_name() << std::endl;
 	  return EINVAL;
         }
-	/* new realm */
 	if (new_realm) {
 	  cout << "clearing period and epoch for new realm" << std::endl;
           realm.clear_current_period_and_epoch();
@@ -5375,8 +5391,9 @@ int main(int argc, const char **argv)
       break;
     case OPT::ZONEGROUP_SET:
       {
-	RGWRealm realm(realm_id, realm_name);
-	int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	RGWRealm realm;
+        int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                           realm_name, realm, nullptr);
 	bool default_realm_not_exist = (ret == -ENOENT && realm_id.empty() && realm_name.empty());
 
 	if (ret < 0 && !default_realm_not_exist ) {
@@ -5858,9 +5875,10 @@ int main(int argc, const char **argv)
 	  return 1;
 	}
 
-	if(zone.realm_id.empty()) {
-	  RGWRealm realm(realm_id, realm_name);
-	  int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	if (zone.realm_id.empty()) {
+	  RGWRealm realm;
+          int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                             realm_name, realm, nullptr);
 	  if (ret < 0 && ret != -ENOENT) {
 	    cerr << "failed to init realm: " << cpp_strerror(-ret) << std::endl;
 	    return -ret;
@@ -5868,7 +5886,7 @@ int main(int argc, const char **argv)
 	  zone.realm_id = realm.get_id();
 	}
 
-	if( !zone_name.empty() && !zone.get_name().empty() && zone.get_name() != zone_name) {
+	if (!zone_name.empty() && !zone.get_name().empty() && zone.get_name() != zone_name) {
 	  cerr << "Error: zone name " << zone_name << " is different than the zone name " << zone.get_name() << " in the provided json " << std::endl;
 	  return EINVAL;
 	}
@@ -5972,8 +5990,8 @@ int main(int argc, const char **argv)
           need_zone_update = true;
         } else if (!realm_name.empty()) {
           // get realm id from name
-          RGWRealm realm{g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj};
-          ret = realm.read_id(dpp(), realm_name, zone.realm_id, null_yield);
+          ret = config_store->read_realm_id(dpp(), null_yield, realm_name,
+                                            zone.realm_id);
           if (ret < 0) {
             cerr << "failed to find realm by name " << realm_name << std::endl;
             return -ret;
@@ -6538,9 +6556,9 @@ int main(int argc, const char **argv)
     return 0;
   case OPT::PERIOD_UPDATE:
     {
-      int ret = update_period(realm_id, realm_name, period_id, period_epoch,
-                              commit, remote, url, opt_region,
-                              access_key, secret_key,
+      int ret = update_period(config_store.get(), realm_id, realm_name,
+                              period_id, period_epoch, commit, remote,
+                              url, opt_region, access_key, secret_key,
                               formatter.get(), yes_i_really_mean_it);
       if (ret < 0) {
 	return -ret;
@@ -6550,8 +6568,9 @@ int main(int argc, const char **argv)
   case OPT::PERIOD_COMMIT:
     {
       // read realm and staging period
-      RGWRealm realm(realm_id, realm_name);
-      int ret = realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+      RGWRealm realm;
+      int ret = config_store->read_realm(dpp(), null_yield, realm_id,
+                                         realm_name, realm, nullptr);
       if (ret < 0) {
         cerr << "Error initializing realm: " << cpp_strerror(-ret) << std::endl;
         return -ret;
