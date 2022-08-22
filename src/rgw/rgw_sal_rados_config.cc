@@ -202,13 +202,18 @@ struct RadosConfigStore::Impl {
     std::size_t count = 0;
     try {
       auto iter = ioctx.nobjects_begin(oc);
-      for (; count < entries.size() && iter != ioctx.nobjects_end(); ++iter) {
+      const auto end = ioctx.nobjects_end();
+      for (; count < entries.size() && iter != end; ++iter) {
         std::string oid = iter->get_oid();
         if (oid.starts_with(prefix)) {
           entries[count++] = std::move(oid);
         }
       }
-      result.next = iter.get_cursor().to_str();
+      if (iter == end) {
+        result.next.clear();
+      } else {
+        result.next = iter.get_cursor().to_str();
+      }
     } catch (const std::exception& e) {
       ldpp_dout(dpp, 10) << "NObjectIterator exception " << e.what() << dendl;
       return -EIO;
