@@ -14,6 +14,10 @@ constexpr std::string_view realm_info_oid_prefix = "realms.";
 constexpr std::string_view default_realm_info_oid = "default.realm";
 constexpr std::string_view zonegroup_names_oid_prefix = "zonegroups_names.";
 
+constexpr std::string_view period_info_oid_prefix = "periods.";
+constexpr std::string_view period_latest_epoch_info_oid = ".latest_epoch";
+constexpr std::string_view period_staging_suffix = ":staging";
+
 constexpr std::string_view default_zone_root_pool = "rgw.root";
 constexpr std::string_view default_zonegroup_root_pool = "rgw.root";
 constexpr std::string_view default_realm_root_pool = "rgw.root";
@@ -264,14 +268,7 @@ int RadosConfigStore::create_realm(const DoutPrefixProvider* dpp,
 
   // create control object for watch/notify
   const auto control_oid = string_cat_reserve(info_oid, ".control");
-  r = impl->create(dpp, y, pool, control_oid, true, nullptr);
-  if (r < 0) {
-    return r;
-  }
-  // TODO: create a new period
-  // TODO: set current period
-
-  return r;
+  return impl->create(dpp, y, pool, control_oid, true, nullptr);
 }
 
 int RadosConfigStore::write_default_realm_id(const DoutPrefixProvider* dpp,
@@ -501,14 +498,34 @@ int RadosConfigStore::list_realm_names(const DoutPrefixProvider* dpp,
 
 
 // Period
+static std::string get_period_oid(std::string_view period_id, epoch_t epoch)
+{
+  // omit the epoch for the staging period
+  if (period_id.ends_with(period_staging_suffix)) {
+    return string_cat_reserve(period_info_oid_prefix, period_id);
+  }
+  return fmt::format("{}{}.{}", period_info_oid_prefix, period_id, epoch);
+}
+
 int RadosConfigStore::create_period(const DoutPrefixProvider* dpp,
-                                    optional_yield y,
+                                    optional_yield y, bool exclusive,
                                     const RGWPeriod& info,
                                     RGWObjVersionTracker* objv)
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
-  return -ENOTSUP;
+
+  if (info.get_id().empty()) {
+    ldpp_dout(dpp, 0) << "period cannot have an empty id" << dendl;
+    return -EINVAL;
+  }
+  if (info.get_epoch() == 0) {
+    ldpp_dout(dpp, 0) << "period cannot have an empty epoch" << dendl;
+    return -EINVAL;
+  }
+  const auto& pool = impl->period_pool;
+  const auto info_oid = get_period_oid(info.get_id(), info.get_epoch());
+  return impl->write(dpp, y, pool, info_oid, exclusive, info, objv);
 }
 
 int RadosConfigStore::write_period_latest_epoch(const DoutPrefixProvider* dpp,
@@ -520,7 +537,14 @@ int RadosConfigStore::write_period_latest_epoch(const DoutPrefixProvider* dpp,
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
-  return -ENOTSUP;
+
+  const auto& pool = impl->period_pool;
+  const auto latest_oid = string_cat_reserve(
+      period_info_oid_prefix, period_id,
+      name_or_default(dpp->get_cct()->_conf->rgw_period_latest_epoch_info_oid,
+                      period_latest_epoch_info_oid));
+  const auto latest = RGWPeriodLatestEpochInfo{epoch};
+  return impl->write(dpp, y, pool, latest_oid, exclusive, latest, objv);
 }
 
 int RadosConfigStore::read_period_latest_epoch(const DoutPrefixProvider* dpp,
@@ -531,7 +555,18 @@ int RadosConfigStore::read_period_latest_epoch(const DoutPrefixProvider* dpp,
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
-  return -ENOTSUP;
+
+  const auto& pool = impl->period_pool;
+  const auto latest_oid = string_cat_reserve(
+      period_info_oid_prefix, period_id,
+      name_or_default(dpp->get_cct()->_conf->rgw_period_latest_epoch_info_oid,
+                      period_latest_epoch_info_oid));
+  RGWPeriodLatestEpochInfo latest;
+  int r = impl->read(dpp, y, pool, latest_oid, latest, objv);
+  if (r >= 0) {
+    epoch = latest.epoch;
+  }
+  return r;
 }
 
 int RadosConfigStore::read_period(const DoutPrefixProvider* dpp,
@@ -543,7 +578,19 @@ int RadosConfigStore::read_period(const DoutPrefixProvider* dpp,
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
-  return -ENOTSUP;
+
+  int r = 0;
+  if (!epoch) {
+    epoch = 0;
+    r = read_period_latest_epoch(dpp, y, period_id, *epoch, nullptr);
+    if (r < 0) {
+      return r;
+    }
+  }
+
+  const auto& pool = impl->period_pool;
+  const auto info_oid = get_period_oid(info.get_id(), info.get_epoch());
+  return impl->read(dpp, y, pool, info_oid, info, objv);
 }
 
 int RadosConfigStore::update_period(const DoutPrefixProvider* dpp,
@@ -553,7 +600,15 @@ int RadosConfigStore::update_period(const DoutPrefixProvider* dpp,
 {
   const auto wrapped = RadosConfigPrefix{*dpp};
   dpp = &wrapped;
-  return -ENOTSUP;
+
+  if (info.get_id().empty()) {
+    ldpp_dout(dpp, 0) << "period cannot have an empty id" << dendl;
+    return -EINVAL;
+  }
+
+  const auto& pool = impl->realm_pool;
+  const auto info_oid = get_period_oid(info.get_id(), info.get_epoch());
+  return impl->write(dpp, y, pool, info_oid, false, info, objv);
 }
 
 int RadosConfigStore::delete_period(const DoutPrefixProvider* dpp,

@@ -76,7 +76,7 @@ class RadosConfigStore : public ConfigStore {
 
   // Period
   virtual int create_period(const DoutPrefixProvider* dpp,
-                            optional_yield y,
+                            optional_yield y, bool exclusive,
                             const RGWPeriod& info,
                             RGWObjVersionTracker* objv) override;
   virtual int write_period_latest_epoch(const DoutPrefixProvider* dpp,

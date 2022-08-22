@@ -113,7 +113,7 @@ class ConfigStore {
   ///@{
   /// write a period. may return EEXIST
   virtual int create_period(const DoutPrefixProvider* dpp,
-                            optional_yield y,
+                            optional_yield y, bool exclusive,
                             const RGWPeriod& info,
                             RGWObjVersionTracker* objv) = 0;
   /// set the latest epoch for a given period id
