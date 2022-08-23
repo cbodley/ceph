@@ -77,8 +77,7 @@ WRITE_CLASS_ENCODER(RGWDefaultSystemMetaObjInfo)
 class RGWSI_SysObj;
 class RGWSI_Zone;
 
-class RGWSystemMetaObj {
-protected:
+struct RGWSystemMetaObj {
   std::string id;
   std::string name;
 
@@ -97,7 +96,6 @@ protected:
   /* read and use default id */
   int use_default(const DoutPrefixProvider *dpp, optional_yield y, bool old_format = false);
 
-public:
   RGWSystemMetaObj() {}
   RGWSystemMetaObj(const std::string& _name): name(_name) {}
   RGWSystemMetaObj(const std::string& _id, const std::string& _name) : id(_id), name(_name) {}
@@ -1092,14 +1090,14 @@ WRITE_CLASS_ENCODER(RGWPeriodConfig)
 class RGWRealm;
 class RGWPeriod;
 
-class RGWRealm : public RGWSystemMetaObj
+struct RGWRealm : public RGWSystemMetaObj
 {
   std::string current_period;
   epoch_t epoch{0}; //< realm epoch, incremented for each new period
 
   int create_control(const DoutPrefixProvider *dpp, bool exclusive, optional_yield y);
   int delete_control(const DoutPrefixProvider *dpp, optional_yield y);
-public:
+
   RGWRealm() {}
   RGWRealm(const std::string& _id, const std::string& _name = "") : RGWSystemMetaObj(_id, _name) {}
   RGWRealm(CephContext *_cct, RGWSI_SysObj *_sysobj_svc): RGWSystemMetaObj(_cct, _sysobj_svc) {}
@@ -1204,7 +1202,7 @@ WRITE_CLASS_ENCODER(RGWPeriodLatestEpochInfo)
  * RGWPeriod::predecessor_uuid field, thus creating a "linked
  * list"-like structure of RGWPeriods back to the cluster's creation.
  */
-class RGWPeriod
+struct RGWPeriod
 {
   std::string id; //< a uuid
   epoch_t epoch{0};
@@ -1239,7 +1237,6 @@ class RGWPeriod
                          const RGWPeriod &current_period,
                          std::ostream& error_stream, bool force_if_stale);
 
-public:
   RGWPeriod() {}
 
   explicit RGWPeriod(const std::string& period_id, epoch_t _epoch = 0)
