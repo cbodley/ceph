@@ -1380,7 +1380,6 @@ struct RGWPeriod
 };
 WRITE_CLASS_ENCODER(RGWPeriod)
 
-
 namespace rgw::sal { class ConfigStore; }
 
 // global state about the multisite configuration. initialized once during
@@ -1402,5 +1401,31 @@ class RGWZoneConfig {
   const RGWZone& get_this_zone() const { return *this_zone; }
   const RGWZoneParams& get_this_zone_params() const { return zone_params; }
 };
+
+
+int realm_create(const DoutPrefixProvider* dpp, optional_yield y,
+                 rgw::sal::ConfigStore* store, bool exclusive,
+                 RGWRealm& info, RGWObjVersionTracker* objv);
+
+int realm_set_current_period(const DoutPrefixProvider* dpp, optional_yield y,
+                             rgw::sal::ConfigStore* store, RGWRealm& info,
+                             RGWPeriod& period,
+                             RGWObjVersionTracker* realm_objv);
+
+int period_create(const DoutPrefixProvider* dpp, optional_yield y,
+                  rgw::sal::ConfigStore* store, RGWPeriod& info,
+                  RGWObjVersionTracker* objv);
+
+int period_update_latest_epoch(const DoutPrefixProvider *dpp, optional_yield y,
+                               rgw::sal::ConfigStore* store,
+                               std::string_view period_id, epoch_t epoch);
+
+int period_update(const DoutPrefixProvider* dpp, optional_yield y,
+                  rgw::sal::ConfigStore* store, RGWPeriod& period);
+
+int period_reflect(const DoutPrefixProvider* dpp, optional_yield y,
+                   rgw::sal::ConfigStore* store, const RGWPeriod& period);
+
+void period_fork(const DoutPrefixProvider* dpp, RGWPeriod& period);
 
 #endif

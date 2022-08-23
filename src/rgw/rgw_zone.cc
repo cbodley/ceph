@@ -7,6 +7,7 @@
 #include "rgw_realm_watcher.h"
 #include "rgw_meta_sync_status.h"
 #include "rgw_sync.h"
+#include "rgw_sal_config.h"
 
 #include "services/svc_zone.h"
 #include "services/svc_sys_obj.h"
@@ -811,6 +812,45 @@ int RGWRealm::create(const DoutPrefixProvider *dpp, optional_yield y, bool exclu
   return 0;
 }
 
+int realm_create(const DoutPrefixProvider* dpp, optional_yield y,
+                 rgw::sal::ConfigStore* store, bool exclusive,
+                 RGWRealm& info, RGWObjVersionTracker* objv)
+{
+  if (info.id.empty()) {
+    /* create unique id */
+    uuid_d uuid;
+    uuid.generate_random();
+    info.id = uuid.to_string();
+  }
+
+  int ret = store->create_realm(dpp, y, exclusive, info, objv);
+  if (ret < 0) {
+    return ret;
+  }
+
+  RGWPeriod period;
+  RGWObjVersionTracker period_objv;
+  if (info.current_period.empty()) {
+    // create new period for the realm
+    period_objv.generate_new_write_ver(dpp->get_cct());
+    ret = period_create(dpp, y, store, period, &period_objv);
+    if (ret < 0) {
+      ldpp_dout(dpp, 0) << "ERROR: couldn't create period: " << cpp_strerror(ret) << dendl;
+      return ret;
+    }
+    info.current_period = period.get_id();
+  } else {
+    ret = store->read_period(dpp, y, info.current_period,
+                             std::nullopt, period, &period_objv);
+    if (ret < 0) {
+      ldpp_dout(dpp, 0) << "ERROR: failed to init period " << info.current_period << dendl;
+      return ret;
+    }
+  }
+
+  return realm_set_current_period(dpp, y, store, info, period, objv);
+}
+
 int RGWRealm::delete_obj(const DoutPrefixProvider *dpp, optional_yield y)
 {
   int ret = RGWSystemMetaObj::delete_obj(dpp, y);
@@ -896,6 +936,35 @@ int RGWRealm::set_current_period(const DoutPrefixProvider *dpp, RGWPeriod& perio
   }
 
   return 0;
+}
+
+int realm_set_current_period(const DoutPrefixProvider* dpp, optional_yield y,
+                             rgw::sal::ConfigStore* store, RGWRealm& realm,
+                             RGWPeriod& period,
+                             RGWObjVersionTracker* realm_objv)
+{
+  // update realm epoch to match the period's
+  if (realm.epoch > period.get_realm_epoch()) {
+    ldpp_dout(dpp, 0) << "ERROR: set_current_period with old realm epoch "
+        << period.get_realm_epoch() << ", current epoch=" << realm.epoch << dendl;
+    return -EINVAL;
+  }
+  if (realm.epoch == period.get_realm_epoch() &&
+      realm.current_period != period.get_id()) {
+    ldpp_dout(dpp, 0) << "ERROR: set_current_period with same realm epoch "
+        << period.get_realm_epoch() << ", but different period id "
+        << period.get_id() << " != " << realm.current_period << dendl;
+    return -EINVAL;
+  }
+
+  realm.epoch = period.get_realm_epoch();
+  realm.current_period = period.get_id();
+
+  int ret = store->overwrite_realm(dpp, y, realm, realm_objv);
+  if (ret < 0) {
+    return ret;
+  }
+  return period_reflect(dpp, y, store, period);
 }
 
 string RGWRealm::get_control_oid() const
@@ -1244,6 +1313,55 @@ int RGWPeriod::update_latest_epoch(const DoutPrefixProvider *dpp, epoch_t epoch,
   return -ECANCELED; // fail after max retries
 }
 
+int period_update_latest_epoch(const DoutPrefixProvider *dpp, optional_yield y,
+                               rgw::sal::ConfigStore* store,
+                               std::string_view period_id, epoch_t epoch)
+{
+  static constexpr int MAX_RETRIES = 20;
+
+  for (int i = 0; i < MAX_RETRIES; i++) {
+    epoch_t existing_epoch = 0;
+    RGWObjVersionTracker objv;
+    bool exclusive = false;
+
+    // read existing epoch
+    int r = store->read_period_latest_epoch(dpp, y, period_id,
+                                            existing_epoch, &objv);
+    if (r == -ENOENT) {
+      // use an exclusive create to set the epoch atomically
+      exclusive = true;
+      ldpp_dout(dpp, 20) << "creating initial latest_epoch=" << epoch
+          << " for period=" << period_id << dendl;
+    } else if (r < 0) {
+      ldpp_dout(dpp, 0) << "ERROR: failed to read latest_epoch" << dendl;
+      return r;
+    } else if (epoch <= existing_epoch) {
+      r = -EEXIST; // fail with EEXIST if epoch is not newer
+      ldpp_dout(dpp, 10) << "found existing latest_epoch " << existing_epoch
+          << " >= given epoch " << epoch << ", returning r=" << r << dendl;
+      return r;
+    } else {
+      ldpp_dout(dpp, 20) << "updating latest_epoch from " << existing_epoch
+          << " -> " << epoch << " on period=" << period_id << dendl;
+    }
+
+    r = store->write_period_latest_epoch(dpp, y, exclusive, period_id,
+                                         epoch, &objv);
+    if (r == -EEXIST) {
+      continue; // exclusive create raced with another update, retry
+    } else if (r == -ECANCELED) {
+      continue; // write raced with a conflicting version, retry
+    }
+    if (r < 0) {
+      ldpp_dout(dpp, 0) << "ERROR: failed to write latest_epoch" << dendl;
+      return r;
+    }
+    return 0; // return success
+  }
+
+  return -ECANCELED; // fail after max retries
+}
+
 int RGWPeriod::delete_obj(const DoutPrefixProvider *dpp, optional_yield y)
 {
   rgw_pool pool(get_pool(cct));
@@ -1322,6 +1440,36 @@ int RGWPeriod::create(const DoutPrefixProvider *dpp, optional_yield y, bool excl
     ldpp_dout(dpp, 0) << "ERROR: setting latest epoch " << id << ": " << cpp_strerror(-ret) << dendl;
   }
 
+  return ret;
+}
+
+int period_create(const DoutPrefixProvider* dpp, optional_yield y,
+                  rgw::sal::ConfigStore* store, RGWPeriod& info,
+                  RGWObjVersionTracker* objv)
+{
+  if (info.id.empty()) {
+    /* create unique id */
+    uuid_d uuid;
+    uuid.generate_random();
+    info.id = uuid.to_string();
+  }
+  info.period_map.id = info.id;
+  info.epoch = FIRST_EPOCH;
+
+  // exclusive create the latest epoch
+  RGWObjVersionTracker latest_objv;
+  latest_objv.generate_new_write_ver(dpp->get_cct());
+  int ret = store->write_period_latest_epoch(dpp, y, true, info.id,
+                                             info.epoch, &latest_objv);
+  if (ret < 0) {
+    return ret;
+  }
+
+  // exclusive create the period
+  ret = store->create_period(dpp, y, true, info, objv);
+  if (ret < 0) {
+    (void) store->delete_period_latest_epoch(dpp, y, info.id, &latest_objv);
+  }
   return ret;
 }
 
@@ -1421,6 +1569,12 @@ int RGWPeriod::update(const DoutPrefixProvider *dpp, optional_yield y)
   return 0;
 }
 
+int period_update(const DoutPrefixProvider* dpp, optional_yield y,
+                  rgw::sal::ConfigStore* store, RGWPeriod& period)
+{
+  return -ENOTSUP;
+}
+
 int RGWPeriod::reflect(const DoutPrefixProvider *dpp, optional_yield y)
 {
   for (auto& iter : period_map.zonegroups) {
@@ -1450,6 +1604,12 @@ int RGWPeriod::reflect(const DoutPrefixProvider *dpp, optional_yield y)
   return 0;
 }
 
+int period_reflect(const DoutPrefixProvider* dpp, optional_yield y,
+                   rgw::sal::ConfigStore* store, const RGWPeriod& period)
+{
+  return -ENOTSUP;
+}
+
 void RGWPeriod::fork()
 {
   ldout(cct, 20) << __func__ << " realm " << realm_id << " period " << id << dendl;
@@ -1457,6 +1617,15 @@ void RGWPeriod::fork()
   id = get_staging_id(realm_id);
   period_map.reset();
   realm_epoch++;
+}
+
+void period_fork(const DoutPrefixProvider* dpp, RGWPeriod& period)
+{
+  ldpp_dout(dpp, 20) << __func__ << " realm " << period.realm_id << " period " << period.id << dendl;
+  period.predecessor_uuid = std::move(period.id);
+  period.id = RGWPeriod::get_staging_id(period.realm_id);
+  period.period_map.reset();
+  period.realm_epoch++;
 }
 
 static int read_sync_status(const DoutPrefixProvider *dpp, rgw::sal::RadosStore* store, rgw_meta_sync_status *sync_status)

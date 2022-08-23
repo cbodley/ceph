@@ -39,7 +39,7 @@ class RadosConfigStore : public ConfigStore {
                            const RGWRealm& info,
                            RGWObjVersionTracker* objv) override;
   virtual int write_default_realm_id(const DoutPrefixProvider* dpp,
-                                     optional_yield y,
+                                     optional_yield y, bool exclusive,
                                      std::string_view realm_id,
                                      RGWObjVersionTracker* objv) override;
   virtual int read_default_realm_id(const DoutPrefixProvider* dpp,
@@ -58,9 +58,9 @@ class RadosConfigStore : public ConfigStore {
   virtual int read_realm_id(const DoutPrefixProvider* dpp,
                             optional_yield y, std::string_view realm_name,
                             std::string& realm_id) override;
-  virtual int update_realm(const DoutPrefixProvider* dpp,
-                           optional_yield y, const RGWRealm& info,
-                           RGWObjVersionTracker* objv) override;
+  virtual int overwrite_realm(const DoutPrefixProvider* dpp,
+                              optional_yield y, const RGWRealm& info,
+                              RGWObjVersionTracker* objv) override;
   virtual int rename_realm(const DoutPrefixProvider* dpp,
                            optional_yield y, RGWRealm& info,
                            std::string_view new_name,
@@ -69,10 +69,13 @@ class RadosConfigStore : public ConfigStore {
                            optional_yield y,
                            const RGWRealm& old_info,
                            RGWObjVersionTracker* objv) override;
+  virtual int realm_notify_new_period(const DoutPrefixProvider* dpp,
+                                      optional_yield y,
+                                      const RGWPeriod& period) override;
   virtual int list_realm_names(const DoutPrefixProvider* dpp,
                                optional_yield y, const std::string& marker,
                                std::span<std::string> entries,
-                               ListResult& result) override;
+                               ListResult<std::string>& result) override;
 
   // Period
   virtual int create_period(const DoutPrefixProvider* dpp,
@@ -85,26 +88,29 @@ class RadosConfigStore : public ConfigStore {
                                         epoch_t epoch,
                                         RGWObjVersionTracker* objv) override;
   virtual int read_period_latest_epoch(const DoutPrefixProvider* dpp,
-                                        optional_yield y,
-                                        std::string_view period_id,
-                                        epoch_t& epoch,
-                                        RGWObjVersionTracker* objv) override;
+                                       optional_yield y,
+                                       std::string_view period_id,
+                                       epoch_t& epoch,
+                                       RGWObjVersionTracker* objv) override;
+  virtual int delete_period_latest_epoch(const DoutPrefixProvider* dpp,
+                                         optional_yield y,
+                                         std::string_view period_id,
+                                         RGWObjVersionTracker* objv) override;
   virtual int read_period(const DoutPrefixProvider* dpp,
                           optional_yield y, std::string_view period_id,
                           std::optional<epoch_t> epoch, RGWPeriod& info,
                           RGWObjVersionTracker* objv) override;
-  virtual int update_period(const DoutPrefixProvider* dpp,
-                            optional_yield y,
-                            const RGWPeriod& info,
-                            RGWObjVersionTracker* objv) override;
+  virtual int overwrite_period(const DoutPrefixProvider* dpp,
+                               optional_yield y,
+                               const RGWPeriod& info,
+                               RGWObjVersionTracker* objv) override;
   virtual int delete_period(const DoutPrefixProvider* dpp,
                             optional_yield y,
-                            const RGWPeriod& old_info,
-                            RGWObjVersionTracker* objv) override;
+                            std::string_view period_id) override;
   virtual int list_period_ids(const DoutPrefixProvider* dpp,
                               optional_yield y, const std::string& marker,
                               std::span<std::string> entries,
-                              ListResult& result) override;
+                              ListResult<std::string>& result) override;
 
   // factory function
   static auto create(const DoutPrefixProvider* dpp)

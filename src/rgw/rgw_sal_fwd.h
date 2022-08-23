@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <span>
+#include <string>
 
 namespace rgw { namespace sal {
 
@@ -34,5 +36,14 @@ namespace rgw { namespace sal {
   struct RGWRoleInfo;
   class ConfigStore;
   class ReloadPauser;
+
+  /// Results of a listing operation
+  template <typename T>
+  struct ListResult {
+    /// The subspan of the input entries that were intialized with results
+    std::span<T> entries;
+    /// The next marker to resume listing, or empty
+    std::string next;
+  };
 
 } } // namespace rgw::sal
