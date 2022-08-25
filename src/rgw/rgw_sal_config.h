@@ -21,8 +21,10 @@
 
 class DoutPrefixProvider;
 class optional_yield;
-struct RGWRealm;
 struct RGWPeriod;
+struct RGWRealm;
+struct RGWZone;
+struct RGWZoneGroup;
 class RGWObjVersionTracker;
 
 namespace rgw::sal {
@@ -137,11 +139,6 @@ class ConfigStore {
                           optional_yield y, std::string_view period_id,
                           std::optional<epoch_t> epoch, RGWPeriod& info,
                           RGWObjVersionTracker* objv) = 0;
-  /// Overwrite an existing period. Must not change id
-  virtual int overwrite_period(const DoutPrefixProvider* dpp,
-                               optional_yield y,
-                               const RGWPeriod& info,
-                               RGWObjVersionTracker* objv) = 0;
   /// Delete all period epochs with the given period id
   virtual int delete_period(const DoutPrefixProvider* dpp,
                             optional_yield y,
@@ -152,40 +149,61 @@ class ConfigStore {
                               std::span<std::string> entries,
                               ListResult<std::string>& result) = 0;
   ///@}
-#if 0
-  /// write a zonegroup. may return EEXIST
+
+  /// @group ZoneGroup
+  ///@{
+
+  /// Write a zonegroup
   virtual int create_zonegroup(const DoutPrefixProvider* dpp,
-                               optional_yield y,
+                               optional_yield y, bool exclusive,
                                const RGWZoneGroup& info,
-                               RGWObjVersionTracker& objv) = 0;
-  /// load a zonegroup by id
-  virtual int read_zonegroup_by_id(const DoutPrefixProvider* dpp,
-                                   optional_yield y,
-                                   std::string_view zonegroup_id,
-                                   RGWZoneGroup& info,
-                                   RGWObjVersionTracker& objv) = 0;
-  /// load a zonegroup by name
-  virtual int read_zonegroup_by_name(const DoutPrefixProvider* dpp,
-                                     optional_yield y,
-                                     std::string_view zonegroup_name,
-                                     RGWZoneGroup& info,
-                                     RGWObjVersionTracker& objv) = 0;
-  /// overwrite an existing zonegroup. must not change id
-  virtual int update_zonegroup(const DoutPrefixProvider* dpp,
-                               optional_yield y,
-                               const RGWZoneGroup& info,
-                               const RGWZoneGroup& old_info,
-                               RGWObjVersionTracker& objv) = 0;
+                               RGWObjVersionTracker* objv) = 0;
+  /// Set the cluster-wide default zonegroup id
+  virtual int write_default_zonegroup_id(const DoutPrefixProvider* dpp,
+                                         optional_yield y, bool exclusive,
+                                         std::string_view zonegroup_id,
+                                         RGWObjVersionTracker* objv) = 0;
+  /// Read the cluster's default zonegroup id
+  virtual int read_default_zonegroup_id(const DoutPrefixProvider* dpp,
+                                        optional_yield y,
+                                        std::string& zonegroup_id,
+                                        RGWObjVersionTracker* objv) = 0;
+  /// Delete the cluster's default zonegroup id
+  virtual int delete_default_zonegroup_id(const DoutPrefixProvider* dpp,
+                                          optional_yield y,
+                                          RGWObjVersionTracker* objv) = 0;
+  /// Load a zonegroup by id or name. If both are empty, try to load the
+  /// cluster's default zonegroup
+  virtual int read_zonegroup(const DoutPrefixProvider* dpp,
+                             optional_yield y,
+                             std::string_view zonegroup_id,
+                             std::string_view zonegroup_name,
+                             RGWZoneGroup& info,
+                             RGWObjVersionTracker* objv) = 0;
+  /// Overwrite an existing zonegroup. must not change id or name
+  virtual int overwrite_zonegroup(const DoutPrefixProvider* dpp,
+                                  optional_yield y,
+                                  const RGWZoneGroup& info,
+                                  RGWObjVersionTracker* objv) = 0;
+  /// Rename an existing zonegroup
+  virtual int rename_zonegroup(const DoutPrefixProvider* dpp,
+                               optional_yield y, RGWZoneGroup& info,
+                               std::string_view new_name,
+                               RGWObjVersionTracker* objv) = 0;
   /// delete an existing zonegroup
   virtual int delete_zonegroup(const DoutPrefixProvider* dpp,
                                optional_yield y,
                                const RGWZoneGroup& old_info,
-                               RGWObjVersionTracker& objv) = 0;
-  /// list all zonegroup names
+                               RGWObjVersionTracker* objv) = 0;
+  /// List all zonegroup names
   virtual int list_zonegroup_names(const DoutPrefixProvider* dpp,
                                    optional_yield y,
                                    std::list<std::string>& names) = 0;
+  ///@}
 
+#if 0
+  /// @group Zone
+  ///@{
   /// write a zone. may return EEXIST
   virtual int create_zone(const DoutPrefixProvider* dpp,
                           optional_yield y,
@@ -247,17 +265,18 @@ class ConfigStore {
                                  optional_yield y,
                                  const RGWZoneParams& old_info,
                                  RGWObjVersionTracker& objv) = 0;
+  ///@}
 
   /// read period config for zones that don't belong to a realm
   virtual int read_realmless_config(const DoutPrefixProvider* dpp,
                                     optional_yield y,
                                     const RGWPeriodConfig& info,
-                                    RGWObjVersionTracker& objv) = 0;
+                                    RGWObjVersionTracker* objv) = 0;
   /// write period config for zones that don't belong to a realm
   virtual int write_realmless_config(const DoutPrefixProvider* dpp,
                                      optional_yield y,
                                      const RGWPeriodConfig& info,
-                                     RGWObjVersionTracker& objv) = 0;
+                                     RGWObjVersionTracker* objv) = 0;
 #endif
 }; // ConfigStore
 

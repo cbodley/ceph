@@ -348,6 +348,12 @@ void RGWZoneGroup::post_process_params(const DoutPrefixProvider *dpp, optional_y
   }
 }
 
+int zonegroup_post_process(const DoutPrefixProvider *dpp, optional_yield y,
+                           rgw::sal::ConfigStore* store, RGWZoneGroup& info)
+{
+  return -ENOTSUP;
+}
+
 int RGWZoneGroup::remove_zone(const DoutPrefixProvider *dpp, const std::string& zone_id, optional_yield y)
 {
   auto iter = zones.find(zone_id);
@@ -418,7 +424,7 @@ int RGWSystemMetaObj::init(const DoutPrefixProvider *dpp, CephContext *_cct, RGW
   }
 
   if (id.empty()) {
-    id = get_predefined_id(cct);
+    id = get_predefined_id(cct); // TODO: handle predefined ids and names
   }
 
   if (id.empty()) {

@@ -100,10 +100,6 @@ class RadosConfigStore : public ConfigStore {
                           optional_yield y, std::string_view period_id,
                           std::optional<epoch_t> epoch, RGWPeriod& info,
                           RGWObjVersionTracker* objv) override;
-  virtual int overwrite_period(const DoutPrefixProvider* dpp,
-                               optional_yield y,
-                               const RGWPeriod& info,
-                               RGWObjVersionTracker* objv) override;
   virtual int delete_period(const DoutPrefixProvider* dpp,
                             optional_yield y,
                             std::string_view period_id) override;
@@ -111,6 +107,45 @@ class RadosConfigStore : public ConfigStore {
                               optional_yield y, const std::string& marker,
                               std::span<std::string> entries,
                               ListResult<std::string>& result) override;
+
+  // ZoneGroup
+  virtual int create_zonegroup(const DoutPrefixProvider* dpp,
+                               optional_yield y, bool exclusive,
+                               const RGWZoneGroup& info,
+                               RGWObjVersionTracker* objv) override;
+  virtual int write_default_zonegroup_id(const DoutPrefixProvider* dpp,
+                                         optional_yield y, bool exclusive,
+                                         std::string_view zonegroup_id,
+                                         RGWObjVersionTracker* objv) override;
+  virtual int read_default_zonegroup_id(const DoutPrefixProvider* dpp,
+                                        optional_yield y,
+                                        std::string& zonegroup_id,
+                                        RGWObjVersionTracker* objv) override;
+  virtual int delete_default_zonegroup_id(const DoutPrefixProvider* dpp,
+                                          optional_yield y,
+                                          RGWObjVersionTracker* objv) override;
+  virtual int read_zonegroup(const DoutPrefixProvider* dpp,
+                             optional_yield y,
+                             std::string_view zonegroup_id,
+                             std::string_view zonegroup_name,
+                             RGWZoneGroup& info,
+                             RGWObjVersionTracker* objv) override;
+  virtual int overwrite_zonegroup(const DoutPrefixProvider* dpp,
+                                  optional_yield y,
+                                  const RGWZoneGroup& info,
+                                  const RGWZoneGroup& old_info,
+                                  RGWObjVersionTracker* objv) override;
+  virtual int rename_zonegroup(const DoutPrefixProvider* dpp,
+                               optional_yield y, RGWZoneGroup& info,
+                               std::string_view new_name,
+                               RGWObjVersionTracker* objv) override;
+  virtual int delete_zonegroup(const DoutPrefixProvider* dpp,
+                               optional_yield y,
+                               const RGWZoneGroup& old_info,
+                               RGWObjVersionTracker* objv) override;
+  virtual int list_zonegroup_names(const DoutPrefixProvider* dpp,
+                                   optional_yield y,
+                                   std::list<std::string>& names) override;
 
   // factory function
   static auto create(const DoutPrefixProvider* dpp)

@@ -14,11 +14,14 @@ constexpr std::string_view realm_names_oid_prefix = "realms_names.";
 constexpr std::string_view realm_info_oid_prefix = "realms.";
 constexpr std::string_view realm_control_oid_suffix = ".control";
 constexpr std::string_view default_realm_info_oid = "default.realm";
-constexpr std::string_view zonegroup_names_oid_prefix = "zonegroups_names.";
 
 constexpr std::string_view period_info_oid_prefix = "periods.";
 constexpr std::string_view period_latest_epoch_info_oid = ".latest_epoch";
 constexpr std::string_view period_staging_suffix = ":staging";
+
+constexpr std::string_view zonegroup_names_oid_prefix = "zonegroups_names.";
+constexpr std::string_view zonegroup_info_oid_prefix = "zonegroup_info.";
+constexpr std::string_view default_zonegroup_info_oid = "default.zonegroup";
 
 constexpr std::string_view default_zone_root_pool = "rgw.root";
 constexpr std::string_view default_zonegroup_root_pool = "rgw.root";
@@ -652,24 +655,6 @@ int RadosConfigStore::read_period(const DoutPrefixProvider* dpp,
   return impl->read(dpp, y, pool, info_oid, info, objv);
 }
 
-int RadosConfigStore::overwrite_period(const DoutPrefixProvider* dpp,
-                                       optional_yield y,
-                                       const RGWPeriod& info,
-                                       RGWObjVersionTracker* objv)
-{
-  const auto wrapped = RadosConfigPrefix{*dpp};
-  dpp = &wrapped;
-
-  if (info.get_id().empty()) {
-    ldpp_dout(dpp, 0) << "period cannot have an empty id" << dendl;
-    return -EINVAL;
-  }
-
-  const auto& pool = impl->period_pool;
-  const auto info_oid = get_period_oid(info.get_id(), info.get_epoch());
-  return impl->write(dpp, y, pool, info_oid, Create::MustExist, info, objv);
-}
-
 int RadosConfigStore::delete_period(const DoutPrefixProvider* dpp,
                                     optional_yield y,
                                     std::string_view period_id)
@@ -729,6 +714,157 @@ int RadosConfigStore::list_period_ids(const DoutPrefixProvider* dpp,
   return impl->list(dpp, y, pool, marker, prefix, entries, result);
 }
 
+
+// ZoneGroup
+int RadosConfigStore::create_zonegroup(const DoutPrefixProvider* dpp,
+                                       optional_yield y, bool exclusive,
+                                       const RGWZoneGroup& info,
+                                       RGWObjVersionTracker* objv)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+
+  if (info.get_id().empty()) {
+    ldpp_dout(dpp, 0) << "zonegroup cannot have an empty id" << dendl;
+    return -EINVAL;
+  }
+  if (info.get_name().empty()) {
+    ldpp_dout(dpp, 0) << "zonegroup cannot have an empty name" << dendl;
+    return -EINVAL;
+  }
+  const auto& pool = impl->zonegroup_pool;
+  const auto info_oid = string_cat_reserve(zonegroup_info_oid_prefix, info.id);
+  const auto create = exclusive ? Create::MustNotExist : Create::MayExist;
+  return impl->write(dpp, y, pool, info_oid, create, info, objv);
+}
+
+int RadosConfigStore::write_default_zonegroup_id(const DoutPrefixProvider* dpp,
+                                                 optional_yield y,
+                                                 bool exclusive,
+                                                 std::string_view zonegroup_id,
+                                                 RGWObjVersionTracker* objv)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+
+  const auto& pool = impl->zonegroup_pool;
+  const auto oid = name_or_default(
+      dpp->get_cct()->_conf->rgw_default_zonegroup_info_oid,
+      default_zonegroup_info_oid);
+  const auto create = exclusive ? Create::MustNotExist : Create::MayExist;
+
+  RGWDefaultSystemMetaObjInfo default_info;
+  default_info.default_id = zonegroup_id;
+
+  return impl->write(dpp, y, pool, oid, create, default_info, objv);
+}
+
+int RadosConfigStore::read_default_zonegroup_id(const DoutPrefixProvider* dpp,
+                                                optional_yield y,
+                                                std::string& zonegroup_id,
+                                                RGWObjVersionTracker* objv)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+
+  const auto& pool = impl->zonegroup_pool;
+  const auto oid = name_or_default(
+      dpp->get_cct()->_conf->rgw_default_zonegroup_info_oid,
+      default_zonegroup_info_oid);
+
+  RGWDefaultSystemMetaObjInfo default_info;
+  int r = impl->read(dpp, y, pool, oid, default_info, objv);
+  if (r >= 0) {
+    zonegroup_id = default_info.default_id;
+  }
+  return r;
+}
+
+int RadosConfigStore::delete_default_zonegroup_id(const DoutPrefixProvider* dpp,
+                                                  optional_yield y,
+                                                  RGWObjVersionTracker* objv)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+
+  const auto& pool = impl->zonegroup_pool;
+  const auto oid = name_or_default(
+      dpp->get_cct()->_conf->rgw_default_zonegroup_info_oid,
+      default_zonegroup_info_oid);
+
+  return impl->remove(dpp, y, pool, oid, objv);
+}
+
+int RadosConfigStore::read_zonegroup(const DoutPrefixProvider* dpp,
+                                     optional_yield y,
+                                     std::string_view zonegroup_id,
+                                     std::string_view zonegroup_name,
+                                     RGWZoneGroup& info,
+                                     RGWObjVersionTracker* objv)
+{
+  const auto wrapped = RadosConfigPrefix{*dpp};
+  dpp = &wrapped;
+
+  const auto& pool = impl->zonegroup_pool;
+  RGWDefaultSystemMetaObjInfo default_info;
+  RGWNameToId name;
+
+  int r = 0;
+  if (zonegroup_id.empty()) {
+    if (zonegroup_name.empty()) {
+      // read default zonegroup id
+      const auto default_oid = name_or_default(
+          dpp->get_cct()->_conf->rgw_default_zonegroup_info_oid,
+          default_zonegroup_info_oid);
+      r = impl->read(dpp, y, pool, default_oid, default_info, nullptr);
+      if (r < 0) {
+        return r;
+      }
+      zonegroup_id = default_info.default_id;
+    } else {
+      // look up zonegroup id by name
+      const auto name_oid = string_cat_reserve(zonegroup_names_oid_prefix,
+                                               zonegroup_name);
+      r = impl->read(dpp, y, pool, name_oid, name, nullptr);
+      if (r < 0) {
+        return r;
+      }
+      zonegroup_id = name.obj_id;
+    }
+  }
+
+  const auto info_oid = string_cat_reserve(zonegroup_info_oid_prefix, zonegroup_id);
+  return impl->read(dpp, y, pool, info_oid, info, objv);
+
+}
+
+int RadosConfigStore::overwrite_zonegroup(const DoutPrefixProvider* dpp,
+                                          optional_yield y,
+                                          const RGWZoneGroup& info,
+                                          const RGWZoneGroup& old_info,
+                                          RGWObjVersionTracker* objv)
+{
+}
+
+int RadosConfigStore::rename_zonegroup(const DoutPrefixProvider* dpp,
+                                       optional_yield y, RGWZoneGroup& info,
+                                       std::string_view new_name,
+                                       RGWObjVersionTracker* objv)
+{
+}
+
+int RadosConfigStore::delete_zonegroup(const DoutPrefixProvider* dpp,
+                                       optional_yield y,
+                                       const RGWZoneGroup& old_info,
+                                       RGWObjVersionTracker* objv)
+{
+}
+
+int RadosConfigStore::list_zonegroup_names(const DoutPrefixProvider* dpp,
+                                           optional_yield y,
+                                           std::list<std::string>& names)
+{
+}
 
 auto RadosConfigStore::create(const DoutPrefixProvider* dpp)
   -> std::unique_ptr<RadosConfigStore>

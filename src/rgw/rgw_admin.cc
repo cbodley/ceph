@@ -4550,7 +4550,7 @@ int main(int argc, const char **argv)
             encode_json("id", id, formatter.get());
           }
         } while (!listing.next.empty());
-      }
+      } // close sections periods and periods_list
       formatter->flush(cout);
       break;
     case OPT::PERIOD_UPDATE:
@@ -4892,7 +4892,7 @@ int main(int argc, const char **argv)
             encode_json("name", name, formatter.get());
           }
         } while (!listing.next.empty());
-      }
+      } // close sections realms and realms_list
       formatter->flush(cout);
       break;
     case OPT::REALM_LIST_PERIODS:
@@ -5114,8 +5114,10 @@ int main(int argc, const char **argv)
 	  return EINVAL;
 	}
 
-	RGWZoneGroup zonegroup(zonegroup_id,zonegroup_name);
-	int ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+        RGWZoneGroup zonegroup;
+        RGWObjVersionTracker objv;
+        int ret = config_store->read_zonegroup(dpp(), null_yield, zonegroup_id,
+                                               zonegroup_name, zonegroup, &objv);
 	if (ret < 0) {
 	  cerr << "failed to initialize zonegroup " << zonegroup_name << " id " << zonegroup_id << ": "
 	       << cpp_strerror(-ret) << std::endl;
@@ -5203,14 +5205,19 @@ int main(int argc, const char **argv)
           zonegroup.enabled_features.erase(i);
         }
 
-	ret = zonegroup.create(dpp(), null_yield);
+        RGWObjVersionTracker objv;
+        objv.generate_new_write_ver(g_ceph_context);
+        constexpr bool exclusive = true;
+        ret = config_store->create_zonegroup(dpp(), null_yield, exclusive,
+                                             zonegroup, &objv);
 	if (ret < 0) {
 	  cerr << "failed to create zonegroup " << zonegroup_name << ": " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
 	}
 
         if (set_default) {
-          ret = zonegroup.set_as_default(dpp(), null_yield);
+          ret = config_store->write_default_zonegroup_id(dpp(), null_yield, false,
+                                                         zonegroup.id, nullptr);
           if (ret < 0) {
             cerr << "failed to set zonegroup " << zonegroup_name << " as default: " << cpp_strerror(-ret) << std::endl;
           }
@@ -5227,14 +5234,16 @@ int main(int argc, const char **argv)
 	  return EINVAL;
 	}
 
-	RGWZoneGroup zonegroup(zonegroup_id, zonegroup_name);
-	int ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	RGWZoneGroup zonegroup;
+        int ret = config_store->read_zonegroup(dpp(), null_yield, zonegroup_id,
+                                               zonegroup_name, zonegroup, nullptr);
 	if (ret < 0) {
 	  cerr << "failed to init zonegroup: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
 	}
 
-	ret = zonegroup.set_as_default(dpp(), null_yield);
+        ret = config_store->write_default_zonegroup_id(dpp(), null_yield, false,
+                                                       zonegroup.id, nullptr);
 	if (ret < 0) {
 	  cerr << "failed to set zonegroup as default: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -5243,18 +5252,20 @@ int main(int argc, const char **argv)
       break;
     case OPT::ZONEGROUP_DELETE:
       {
-	if (empty_opt(opt_zonegroup_id) && empty_opt(opt_zonegroup_name)) {
+	if (zonegroup_id.empty() && zonegroup_name.empty()) {
 	  cerr << "no zonegroup name or id provided" << std::endl;
 	  return EINVAL;
 	}
-	RGWZoneGroup zonegroup(safe_opt(opt_zonegroup_id), safe_opt(opt_zonegroup_name));
-	int ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj,
-				 null_yield);
+	RGWZoneGroup zonegroup;
+        RGWObjVersionTracker objv;
+        int ret = config_store->read_zonegroup(dpp(), null_yield, zonegroup_id,
+                                               zonegroup_name, zonegroup, &objv);
 	if (ret < 0) {
 	  cerr << "failed to init zonegroup: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
 	}
-	ret = zonegroup.delete_obj(dpp(), null_yield);
+        ret = config_store->delete_zonegroup(dpp(), null_yield,
+                                             zonegroup, &objv);
 	if (ret < 0) {
 	  cerr << "ERROR: couldn't delete zonegroup: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -5263,8 +5274,9 @@ int main(int argc, const char **argv)
       break;
     case OPT::ZONEGROUP_GET:
       {
-	RGWZoneGroup zonegroup(zonegroup_id, zonegroup_name);
-	int ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	RGWZoneGroup zonegroup;
+        int ret = config_store->read_zonegroup(dpp(), null_yield, zonegroup_id,
+                                               zonegroup_name, zonegroup, nullptr);
 	if (ret < 0) {
 	  cerr << "failed to init zonegroup: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -5276,36 +5288,39 @@ int main(int argc, const char **argv)
       break;
     case OPT::ZONEGROUP_LIST:
       {
-	RGWZoneGroup zonegroup;
-	int ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj,
-				 null_yield, false);
-	if (ret < 0) {
-	  cerr << "failed to init zonegroup: " << cpp_strerror(-ret) << std::endl;
-	  return -ret;
-	}
+        std::string default_id;
+        int ret = config_store->read_default_zonegroup_id(dpp(), null_yield,
+                                                          default_id, nullptr);
+        if (ret < 0 && ret != -ENOENT) {
+          std::cerr << "could not determine default zonegroup: " << cpp_strerror(-ret) << std::endl;
+        }
 
-	list<string> zonegroups;
-	ret = static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->list_zonegroups(dpp(), zonegroups);
-	if (ret < 0) {
-	  cerr << "failed to list zonegroups: " << cpp_strerror(-ret) << std::endl;
-	  return -ret;
-	}
-	string default_zonegroup;
-	ret = zonegroup.read_default_id(dpp(), default_zonegroup, null_yield);
-	if (ret < 0 && ret != -ENOENT) {
-	  cerr << "could not determine default zonegroup: " << cpp_strerror(-ret) << std::endl;
-	}
-	formatter->open_object_section("zonegroups_list");
-	encode_json("default_info", default_zonegroup, formatter.get());
-	encode_json("zonegroups", zonegroups, formatter.get());
-	formatter->close_section();
-	formatter->flush(cout);
-      }
+        Formatter::ObjectSection zonegroups_list{*formatter, "zonegroups_list"};
+        encode_json("default_info", default_id, formatter.get());
+
+        Formatter::ArraySection zonegroups{*formatter, "zonegroups"};
+        rgw::sal::ListResult<std::string> listing;
+        std::array<std::string, 1000> names; // list in pages of 1000
+        do {
+          ret = config_store->list_zonegroup_names(dpp(), null_yield, listing.next,
+                                                   names, listing);
+          if (ret < 0) {
+            std::cerr << "failed to list zonegroups: " << cpp_strerror(-ret) << std::endl;
+            return -ret;
+          }
+          for (const auto& name : listing.entries) {
+            encode_json("name", name, formatter.get());
+          }
+        } while (!listing.next.empty());
+      } // close sections zonegroups and zonegroups_list
+      formatter->flush(cout);
       break;
     case OPT::ZONEGROUP_MODIFY:
       {
-	RGWZoneGroup zonegroup(zonegroup_id, zonegroup_name);
-	int ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	RGWZoneGroup zonegroup;
+        RGWObjVersionTracker objv;
+        int ret = config_store->read_zonegroup(dpp(), null_yield, zonegroup_id,
+                                               zonegroup_name, zonegroup, &objv);
 	if (ret < 0) {
 	  cerr << "failed to init zonegroup: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -5371,7 +5386,8 @@ int main(int argc, const char **argv)
         }
 
         if (need_update) {
-	  ret = zonegroup.update(dpp(), null_yield);
+          ret = config_store->overwrite_zonegroup(dpp(), null_yield,
+                                                  zonegroup, &objv);
 	  if (ret < 0) {
 	    cerr << "failed to update zonegroup: " << cpp_strerror(-ret) << std::endl;
 	    return -ret;
@@ -5379,7 +5395,8 @@ int main(int argc, const char **argv)
 	}
 
         if (set_default) {
-          ret = zonegroup.set_as_default(dpp(), null_yield);
+          ret = config_store->write_default_zonegroup_id(dpp(), null_yield, false,
+                                                         zonegroup.id, nullptr);
           if (ret < 0) {
             cerr << "failed to set zonegroup " << zonegroup_name << " as default: " << cpp_strerror(-ret) << std::endl;
           }
@@ -5396,18 +5413,12 @@ int main(int argc, const char **argv)
                                            realm_name, realm, nullptr);
 	bool default_realm_not_exist = (ret == -ENOENT && realm_id.empty() && realm_name.empty());
 
-	if (ret < 0 && !default_realm_not_exist ) {
+	if (ret < 0 && !default_realm_not_exist) {
 	  cerr << "failed to init realm: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
 	}
 
 	RGWZoneGroup zonegroup;
-	ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj,
-			     null_yield, false);
-	if (ret < 0) {
-	  cerr << "failed to init zonegroup: " << cpp_strerror(-ret) << std::endl;
-	  return -ret;
-	}
 	ret = read_decode_json(infile, zonegroup);
 	if (ret < 0) {
 	  return 1;
@@ -5441,20 +5452,17 @@ int main(int argc, const char **argv)
             }
           }
         }
-	ret = zonegroup.create(dpp(), null_yield);
-	if (ret < 0 && ret != -EEXIST) {
+        constexpr bool exclusive = false; // can overwrite existing zongroup
+        ret = config_store->create_zonegroup(dpp(), null_yield, exclusive,
+                                             zonegroup, nullptr);
+	if (ret < 0) {
 	  cerr << "ERROR: couldn't create zonegroup info: " << cpp_strerror(-ret) << std::endl;
-	  return 1;
-	} else if (ret == -EEXIST) {
-	  ret = zonegroup.update(dpp(), null_yield);
-	  if (ret < 0) {
-	    cerr << "ERROR: couldn't store zonegroup info: " << cpp_strerror(-ret) << std::endl;
-	    return 1;
-	  }
+	  return -ret;
 	}
 
         if (set_default) {
-          ret = zonegroup.set_as_default(dpp(), null_yield);
+          ret = config_store->write_default_zonegroup_id(dpp(), null_yield, false,
+                                                         zonegroup.id, nullptr);
           if (ret < 0) {
             cerr << "failed to set zonegroup " << zonegroup_name << " as default: " << cpp_strerror(-ret) << std::endl;
           }
@@ -5466,9 +5474,11 @@ int main(int argc, const char **argv)
       break;
     case OPT::ZONEGROUP_REMOVE:
       {
-        RGWZoneGroup zonegroup(zonegroup_id, zonegroup_name);
-        int ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
-        if (ret < 0) {
+	RGWZoneGroup zonegroup;
+        RGWObjVersionTracker objv;
+        int ret = config_store->read_zonegroup(dpp(), null_yield, zonegroup_id,
+                                               zonegroup_name, zonegroup, &objv);
+	if (ret < 0) {
           cerr << "failed to init zonegroup: " << cpp_strerror(-ret) << std::endl;
           return -ret;
         }
@@ -5493,6 +5503,8 @@ int main(int argc, const char **argv)
         }
 
         ret = zonegroup.remove_zone(dpp(), zone_id, null_yield);
+          ret = config_store->overwrite_zonegroup(dpp(), null_yield,
+                                                  zonegroup, &objv);
         if (ret < 0) {
           cerr << "failed to remove zone: " << cpp_strerror(-ret) << std::endl;
           return -ret;
@@ -5512,13 +5524,16 @@ int main(int argc, const char **argv)
 	  cerr << "no zonegroup name or id provided" << std::endl;
 	  return EINVAL;
 	}
-	RGWZoneGroup zonegroup(zonegroup_id, zonegroup_name);
-	int ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	RGWZoneGroup zonegroup;
+        RGWObjVersionTracker objv;
+        int ret = config_store->read_zonegroup(dpp(), null_yield, zonegroup_id,
+                                               zonegroup_name, zonegroup, &objv);
 	if (ret < 0) {
 	  cerr << "failed to init zonegroup: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
 	}
-	ret = zonegroup.rename(dpp(), zonegroup_new_name, null_yield);
+        ret = config_store->rename_zonegroup(dpp(), null_yield, zonegroup,
+                                             zonegroup_new_name, &objv);
 	if (ret < 0) {
 	  cerr << "failed to rename zonegroup: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -5527,9 +5542,9 @@ int main(int argc, const char **argv)
       break;
     case OPT::ZONEGROUP_PLACEMENT_LIST:
       {
-	RGWZoneGroup zonegroup(zonegroup_id, zonegroup_name);
-	int ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj,
-				 null_yield);
+	RGWZoneGroup zonegroup;
+        int ret = config_store->read_zonegroup(dpp(), null_yield, zonegroup_id,
+                                               zonegroup_name, zonegroup, nullptr);
 	if (ret < 0) {
 	  cerr << "failed to init zonegroup: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -5546,8 +5561,9 @@ int main(int argc, const char **argv)
 	  return EINVAL;
 	}
 
-	RGWZoneGroup zonegroup(zonegroup_id, zonegroup_name);
-	int ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	RGWZoneGroup zonegroup;
+        int ret = config_store->read_zonegroup(dpp(), null_yield, zonegroup_id,
+                                               zonegroup_name, zonegroup, nullptr);
 	if (ret < 0) {
 	  cerr << "failed to init zonegroup: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -5583,8 +5599,10 @@ int main(int argc, const char **argv)
       rule.storage_class = opt_storage_class.value_or(string());
     }
 
-	RGWZoneGroup zonegroup(zonegroup_id, zonegroup_name);
-	int ret = zonegroup.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield);
+	RGWZoneGroup zonegroup;
+        RGWObjVersionTracker objv;
+        int ret = config_store->read_zonegroup(dpp(), null_yield, zonegroup_id,
+                                               zonegroup_name, zonegroup, &objv);
 	if (ret < 0) {
 	  cerr << "failed to init zonegroup: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;
@@ -5689,8 +5707,9 @@ int main(int argc, const char **argv)
       zonegroup.default_placement = rule;
     }
 
-    zonegroup.post_process_params(dpp(), null_yield);
-    ret = zonegroup.update(dpp(), null_yield);
+    zonegroup_post_process(dpp(), null_yield, zonegroup);
+    ret = config_store->overwrite_zonegroup(dpp(), null_yield,
+                                            zonegroup, &objv);
     if (ret < 0) {
       cerr << "failed to update zonegroup: " << cpp_strerror(-ret) << std::endl;
       return -ret;

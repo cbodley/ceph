@@ -1428,4 +1428,7 @@ int period_reflect(const DoutPrefixProvider* dpp, optional_yield y,
 
 void period_fork(const DoutPrefixProvider* dpp, RGWPeriod& period);
 
+int zonegroup_post_process(const DoutPrefixProvider *dpp, optional_yield y,
+                           rgw::sal::ConfigStore* store, RGWZoneGroup& info);
+
 #endif
