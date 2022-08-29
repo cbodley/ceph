@@ -133,7 +133,6 @@ class RadosConfigStore : public ConfigStore {
   virtual int overwrite_zonegroup(const DoutPrefixProvider* dpp,
                                   optional_yield y,
                                   const RGWZoneGroup& info,
-                                  const RGWZoneGroup& old_info,
                                   RGWObjVersionTracker* objv) override;
   virtual int rename_zonegroup(const DoutPrefixProvider* dpp,
                                optional_yield y, RGWZoneGroup& info,
@@ -144,8 +143,51 @@ class RadosConfigStore : public ConfigStore {
                                const RGWZoneGroup& old_info,
                                RGWObjVersionTracker* objv) override;
   virtual int list_zonegroup_names(const DoutPrefixProvider* dpp,
+                                   optional_yield y, const std::string& marker,
+                                   std::span<std::string> entries,
+                                   ListResult<std::string>& result) override;
+
+  // Zone
+  virtual int create_zone(const DoutPrefixProvider* dpp,
+                          optional_yield y, bool exclusive,
+                          const RGWZoneParams& info,
+                          RGWObjVersionTracker* objv) override;
+  virtual int write_default_zone_id(const DoutPrefixProvider* dpp,
+                                    optional_yield y, bool exclusive,
+                                    std::string_view realm_id,
+                                    std::string_view zone_id,
+                                    RGWObjVersionTracker* objv) override;
+  virtual int read_default_zone_id(const DoutPrefixProvider* dpp,
                                    optional_yield y,
-                                   std::list<std::string>& names) override;
+                                   std::string_view realm_id,
+                                   std::string& zone_id,
+                                   RGWObjVersionTracker* objv) override;
+  virtual int delete_default_zone_id(const DoutPrefixProvider* dpp,
+                                     optional_yield y,
+                                     std::string_view realm_id,
+                                     RGWObjVersionTracker* objv) override;
+  virtual int read_zone(const DoutPrefixProvider* dpp,
+                        optional_yield y,
+                        std::string_view zone_id,
+                        std::string_view zone_name,
+                        RGWZoneParams& info,
+                        RGWObjVersionTracker* objv) override;
+  virtual int overwrite_zone(const DoutPrefixProvider* dpp,
+                             optional_yield y,
+                             const RGWZoneParams& info,
+                             RGWObjVersionTracker* objv) override;
+  virtual int rename_zone(const DoutPrefixProvider* dpp,
+                          optional_yield y, RGWZoneParams& info,
+                          std::string_view new_name,
+                          RGWObjVersionTracker* objv) override;
+  virtual int delete_zone(const DoutPrefixProvider* dpp,
+                          optional_yield y,
+                          const RGWZoneParams& old_info,
+                          RGWObjVersionTracker* objv) override;
+  virtual int list_zone_names(const DoutPrefixProvider* dpp,
+                              optional_yield y, const std::string& marker,
+                              std::span<std::string> entries,
+                              ListResult<std::string>& result) override;
 
   // factory function
   static auto create(const DoutPrefixProvider* dpp)

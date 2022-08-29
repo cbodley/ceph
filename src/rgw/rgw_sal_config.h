@@ -22,12 +22,16 @@
 class DoutPrefixProvider;
 class optional_yield;
 struct RGWPeriod;
+struct RGWPeriodConfig;
 struct RGWRealm;
-struct RGWZone;
 struct RGWZoneGroup;
-class RGWObjVersionTracker;
+struct RGWZoneParams;
 
 namespace rgw::sal {
+
+class RealmWriter;
+class ZoneGroupWriter;
+class ZoneWriter;
 
 /// When the realm's period configuration changes, all Stores are reloaded with
 /// that new configuration. Everything outside of sal that refers to these
@@ -51,52 +55,44 @@ class ConfigStore {
   /// @group Realm
   ///@{
 
+  /// Set the cluster-wide default realm id
+  virtual int write_default_realm_id(const DoutPrefixProvider* dpp,
+                                     optional_yield y, bool exclusive,
+                                     std::string_view realm_id) = 0;
+  /// Read the cluster's default realm id
+  virtual int read_default_realm_id(const DoutPrefixProvider* dpp,
+                                    optional_yield y,
+                                    std::string& realm_id) = 0;
+  /// Delete the cluster's default realm id
+  virtual int delete_default_realm_id(const DoutPrefixProvider* dpp,
+                                      optional_yield y) = 0;
+
   /// Create a realm
   virtual int create_realm(const DoutPrefixProvider* dpp,
                            optional_yield y, bool exclusive,
                            const RGWRealm& info,
-                           RGWObjVersionTracker* objv) = 0;
-  /// Set the cluster-wide default realm id
-  virtual int write_default_realm_id(const DoutPrefixProvider* dpp,
-                                     optional_yield y, bool exclusive,
-                                     std::string_view realm_id,
-                                     RGWObjVersionTracker* objv) = 0;
-  /// Read the cluster's default realm id
-  virtual int read_default_realm_id(const DoutPrefixProvider* dpp,
-                                    optional_yield y,
-                                    std::string& realm_id,
-                                    RGWObjVersionTracker* objv) = 0;
-  /// Delete the cluster's default realm id
-  virtual int delete_default_realm_id(const DoutPrefixProvider* dpp,
-                                      optional_yield y,
-                                      RGWObjVersionTracker* objv) = 0;
-  /// Load a realm by id or name. If both are empty, try to load the cluster's
-  /// default realm
-  virtual int read_realm(const DoutPrefixProvider* dpp,
-                         optional_yield y,
-                         std::string_view realm_id,
-                         std::string_view realm_name,
-                         RGWRealm& info,
-                         RGWObjVersionTracker* objv) = 0;
+                           std::unique_ptr<RealmWriter>* writer) = 0;
+  /// Read a realm by id
+  virtual int read_realm_by_id(const DoutPrefixProvider* dpp,
+                               optional_yield y,
+                               std::string_view realm_id,
+                               RGWRealm& info,
+                               std::unique_ptr<RealmWriter>* writer) = 0;
+  /// Read a realm by name
+  virtual int read_realm_by_name(const DoutPrefixProvider* dpp,
+                                 optional_yield y,
+                                 std::string_view realm_name,
+                                 RGWRealm& info,
+                                 std::unique_ptr<RealmWriter>* writer) = 0;
+  /// Read the cluster's default realm
+  virtual int read_default_realm(const DoutPrefixProvider* dpp,
+                                 optional_yield y,
+                                 RGWRealm& info,
+                                 std::unique_ptr<RealmWriter>* writer) = 0;
   /// Look up a realm id by its name
   virtual int read_realm_id(const DoutPrefixProvider* dpp,
                             optional_yield y, std::string_view realm_name,
                             std::string& realm_id) = 0;
-  /// Overwrite an existing realm. Must not change id or name
-  virtual int overwrite_realm(const DoutPrefixProvider* dpp,
-                              optional_yield y,
-                              const RGWRealm& info,
-                              RGWObjVersionTracker* objv) = 0;
-  /// Rename an existing realm
-  virtual int rename_realm(const DoutPrefixProvider* dpp,
-                           optional_yield y, RGWRealm& info,
-                           std::string_view new_name,
-                           RGWObjVersionTracker* objv) = 0;
-  /// Delete an existing realm
-  virtual int delete_realm(const DoutPrefixProvider* dpp,
-                           optional_yield y,
-                           const RGWRealm& old_info,
-                           RGWObjVersionTracker* objv) = 0;
   /// Notify the cluster of a new period, so radosgws can reload with the new
   /// configuration
   virtual int realm_notify_new_period(const DoutPrefixProvider* dpp,
@@ -112,33 +108,14 @@ class ConfigStore {
   /// @group Period
   ///@{
 
-  /// Write a period
+  /// Write a period and advance its latest epoch
   virtual int create_period(const DoutPrefixProvider* dpp,
                             optional_yield y, bool exclusive,
-                            const RGWPeriod& info,
-                            RGWObjVersionTracker* objv) = 0;
-  /// Set the latest epoch for a given period id
-  virtual int write_period_latest_epoch(const DoutPrefixProvider* dpp,
-                                        optional_yield y, bool exclusive,
-                                        std::string_view period_id,
-                                        epoch_t epoch,
-                                        RGWObjVersionTracker* objv) = 0;
-  /// Read the latest epoch for a given period id
-  virtual int read_period_latest_epoch(const DoutPrefixProvider* dpp,
-                                       optional_yield y,
-                                       std::string_view period_id,
-                                       epoch_t& epoch,
-                                       RGWObjVersionTracker* objv) = 0;
-  /// Delete the latest epoch for a given period id
-  virtual int delete_period_latest_epoch(const DoutPrefixProvider* dpp,
-                                         optional_yield y,
-                                         std::string_view period_id,
-                                         RGWObjVersionTracker* objv) = 0;
-  /// Load a period by id and epoch. If no epoch is given, read the latest
+                            const RGWPeriod& info) = 0;
+  /// Read a period by id and epoch. If no epoch is given, read the latest
   virtual int read_period(const DoutPrefixProvider* dpp,
                           optional_yield y, std::string_view period_id,
-                          std::optional<epoch_t> epoch, RGWPeriod& info,
-                          RGWObjVersionTracker* objv) = 0;
+                          std::optional<epoch_t> epoch, RGWPeriod& info) = 0;
   /// Delete all period epochs with the given period id
   virtual int delete_period(const DoutPrefixProvider* dpp,
                             optional_yield y,
@@ -153,131 +130,176 @@ class ConfigStore {
   /// @group ZoneGroup
   ///@{
 
-  /// Write a zonegroup
-  virtual int create_zonegroup(const DoutPrefixProvider* dpp,
-                               optional_yield y, bool exclusive,
-                               const RGWZoneGroup& info,
-                               RGWObjVersionTracker* objv) = 0;
   /// Set the cluster-wide default zonegroup id
   virtual int write_default_zonegroup_id(const DoutPrefixProvider* dpp,
                                          optional_yield y, bool exclusive,
-                                         std::string_view zonegroup_id,
-                                         RGWObjVersionTracker* objv) = 0;
+                                         std::string_view zonegroup_id) = 0;
   /// Read the cluster's default zonegroup id
   virtual int read_default_zonegroup_id(const DoutPrefixProvider* dpp,
                                         optional_yield y,
-                                        std::string& zonegroup_id,
-                                        RGWObjVersionTracker* objv) = 0;
+                                        std::string& zonegroup_id) = 0;
   /// Delete the cluster's default zonegroup id
   virtual int delete_default_zonegroup_id(const DoutPrefixProvider* dpp,
-                                          optional_yield y,
-                                          RGWObjVersionTracker* objv) = 0;
-  /// Load a zonegroup by id or name. If both are empty, try to load the
-  /// cluster's default zonegroup
-  virtual int read_zonegroup(const DoutPrefixProvider* dpp,
-                             optional_yield y,
-                             std::string_view zonegroup_id,
-                             std::string_view zonegroup_name,
-                             RGWZoneGroup& info,
-                             RGWObjVersionTracker* objv) = 0;
-  /// Overwrite an existing zonegroup. must not change id or name
-  virtual int overwrite_zonegroup(const DoutPrefixProvider* dpp,
-                                  optional_yield y,
-                                  const RGWZoneGroup& info,
-                                  RGWObjVersionTracker* objv) = 0;
-  /// Rename an existing zonegroup
-  virtual int rename_zonegroup(const DoutPrefixProvider* dpp,
-                               optional_yield y, RGWZoneGroup& info,
-                               std::string_view new_name,
-                               RGWObjVersionTracker* objv) = 0;
-  /// delete an existing zonegroup
-  virtual int delete_zonegroup(const DoutPrefixProvider* dpp,
-                               optional_yield y,
-                               const RGWZoneGroup& old_info,
-                               RGWObjVersionTracker* objv) = 0;
-  /// List all zonegroup names
-  virtual int list_zonegroup_names(const DoutPrefixProvider* dpp,
+                                          optional_yield y) = 0;
+
+  /// Create a zonegroup
+  virtual int create_zonegroup(const DoutPrefixProvider* dpp,
+                               optional_yield y, bool exclusive,
+                               const RGWZoneGroup& info,
+                               std::unique_ptr<ZoneGroupWriter>* writer) = 0;
+  /// Read a zonegroup by id
+  virtual int read_zonegroup_by_id(const DoutPrefixProvider* dpp,
                                    optional_yield y,
-                                   std::list<std::string>& names) = 0;
+                                   std::string_view zonegroup_id,
+                                   RGWZoneGroup& info,
+                                   std::unique_ptr<ZoneGroupWriter>* writer) = 0;
+  /// Read a zonegroup by name
+  virtual int read_zonegroup_by_name(const DoutPrefixProvider* dpp,
+                                     optional_yield y,
+                                     std::string_view zonegroup_name,
+                                     RGWZoneGroup& info,
+                                     std::unique_ptr<ZoneGroupWriter>* writer) = 0;
+  /// Read the cluster's default zonegroup
+  virtual int read_default_zonegroup(const DoutPrefixProvider* dpp,
+                                     optional_yield y,
+                                     RGWZoneGroup& info,
+                                     std::unique_ptr<ZoneGroupWriter>* writer) = 0;
+  /// List up to 'entries.size()' zonegroup names starting from the given marker
+  virtual int list_zonegroup_names(const DoutPrefixProvider* dpp,
+                                   optional_yield y, const std::string& marker,
+                                   std::span<std::string> entries,
+                                   ListResult<std::string>& result) = 0;
   ///@}
 
-#if 0
   /// @group Zone
   ///@{
-  /// write a zone. may return EEXIST
+
+  /// Set the realm-wide default zone id
+  virtual int write_default_zone_id(const DoutPrefixProvider* dpp,
+                                    optional_yield y, bool exclusive,
+                                    std::string_view realm_id,
+                                    std::string_view zone_id) = 0;
+  /// Read the realm's default zone id
+  virtual int read_default_zone_id(const DoutPrefixProvider* dpp,
+                                   optional_yield y,
+                                   std::string_view realm_id,
+                                   std::string& zone_id) = 0;
+  /// Delete the realm's default zone id
+  virtual int delete_default_zone_id(const DoutPrefixProvider* dpp,
+                                     optional_yield y,
+                                     std::string_view realm_id) = 0;
+
+  /// Create a zone
   virtual int create_zone(const DoutPrefixProvider* dpp,
-                          optional_yield y,
-                          const RGWZone& info,
-                          RGWObjVersionTracker& objv) = 0;
-  /// load a zone by id
+                          optional_yield y, bool exclusive,
+                          const RGWZoneParams& info,
+                          std::unique_ptr<ZoneWriter>* writer) = 0;
+  /// Read a zone by id
   virtual int read_zone_by_id(const DoutPrefixProvider* dpp,
                               optional_yield y,
                               std::string_view zone_id,
-                              RGWZone& info,
-                              RGWObjVersionTracker& objv) = 0;
-  /// load a zone by name
+                              RGWZoneParams& info,
+                              std::unique_ptr<ZoneWriter>* writer) = 0;
+  /// Read a zone by id or name. If both are empty, try to load the
+  /// cluster's default zone
   virtual int read_zone_by_name(const DoutPrefixProvider* dpp,
                                 optional_yield y,
                                 std::string_view zone_name,
-                                RGWZone& info,
-                                RGWObjVersionTracker& objv) = 0;
-  /// overwrite an existing zone. must not change id
-  virtual int update_zone(const DoutPrefixProvider* dpp,
-                          optional_yield y,
-                          const RGWZone& info,
-                          const RGWZone& old_info,
-                          RGWObjVersionTracker& objv) = 0;
-  /// delete an existing zone
-  virtual int delete_zone(const DoutPrefixProvider* dpp,
-                          optional_yield y,
-                          const RGWZone& old_info,
-                          RGWObjVersionTracker& objv) = 0;
-  /// list all zone names
+                                RGWZoneParams& info,
+                                std::unique_ptr<ZoneWriter>* writer) = 0;
+  /// Read the realm's default zone
+  virtual int read_default_zone(const DoutPrefixProvider* dpp,
+                                optional_yield y,
+                                std::string_view realm_id,
+                                RGWZoneParams& info,
+                                std::unique_ptr<ZoneWriter>* writer) = 0;
+  /// List up to 'entries.size()' zone names starting from the given marker
   virtual int list_zone_names(const DoutPrefixProvider* dpp,
-                              optional_yield y,
-                              std::list<std::string>& names) = 0;
-
-  /// write zone params. may return EEXIST
-  virtual int create_zone_params(const DoutPrefixProvider* dpp,
-                                 optional_yield y,
-                                 const RGWZoneParams& info,
-                                 RGWObjVersionTracker& objv) = 0;
-  /// load zone params by id
-  virtual int read_zone_params_by_id(const DoutPrefixProvider* dpp,
-                                     optional_yield y,
-                                     std::string_view zone_id,
-                                     RGWZoneParams& info,
-                                     RGWObjVersionTracker& objv) = 0;
-  /// load zone params by name
-  virtual int read_zone_params_by_name(const DoutPrefixProvider* dpp,
-                                       optional_yield y,
-                                       std::string_view zone_name,
-                                       RGWZoneParams& info,
-                                       RGWObjVersionTracker& objv) = 0;
-  /// overwrite existing zone params. must not change id
-  virtual int update_zone_params(const DoutPrefixProvider* dpp,
-                                 optional_yield y,
-                                 const RGWZoneParams& info,
-                                 const RGWZoneParams& old_info,
-                                 RGWObjVersionTracker& objv) = 0;
-  /// delete existing zone params
-  virtual int delete_zone_params(const DoutPrefixProvider* dpp,
-                                 optional_yield y,
-                                 const RGWZoneParams& old_info,
-                                 RGWObjVersionTracker& objv) = 0;
+                              optional_yield y, const std::string& marker,
+                              std::span<std::string> entries,
+                              ListResult<std::string>& result) = 0;
   ///@}
 
-  /// read period config for zones that don't belong to a realm
-  virtual int read_realmless_config(const DoutPrefixProvider* dpp,
+  /// @group PeriodConfig
+  ///@{
+
+  /// Read period config object
+  virtual int read_period_config(const DoutPrefixProvider* dpp,
                                     optional_yield y,
-                                    const RGWPeriodConfig& info,
-                                    RGWObjVersionTracker* objv) = 0;
-  /// write period config for zones that don't belong to a realm
-  virtual int write_realmless_config(const DoutPrefixProvider* dpp,
+                                    const RGWPeriodConfig& info) = 0;
+  /// Write period config object
+  virtual int write_period_config(const DoutPrefixProvider* dpp,
                                      optional_yield y,
-                                     const RGWPeriodConfig& info,
-                                     RGWObjVersionTracker* objv) = 0;
-#endif
+                                     const RGWPeriodConfig& info) = 0;
+  ///@}
+
 }; // ConfigStore
+
+
+/// A handle to manage the atomic updates of an existing realm object. This is
+/// initialized on read, and any subsequent writes through this handle will fail
+/// with -ECANCELED if another writer updates the object in the meantime.
+class RealmWriter {
+ public:
+  virtual ~RealmWriter() {}
+
+  /// Overwrite an existing realm. Must not change id or name
+  virtual int write(const DoutPrefixProvider* dpp,
+                    optional_yield y,
+                    const RGWRealm& info) = 0;
+  /// Rename an existing realm. Must not change id
+  virtual int rename(const DoutPrefixProvider* dpp,
+                     optional_yield y,
+                     RGWRealm& info,
+                     std::string_view new_name) = 0;
+  /// Delete an existing realm
+  virtual int remove(const DoutPrefixProvider* dpp,
+                     optional_yield y,
+                     const RGWRealm& info) = 0;
+};
+
+/// A handle to manage the atomic updates of an existing zonegroup object. This
+/// is initialized on read, and any subsequent writes through this handle will
+/// fail with -ECANCELED if another writer updates the object in the meantime.
+class ZoneGroupWriter {
+ public:
+  virtual ~ZoneGroupWriter() {}
+
+  /// Overwrite an existing zonegroup. Must not change id or name
+  virtual int write(const DoutPrefixProvider* dpp,
+                    optional_yield y,
+                    const RGWZoneGroup& info) = 0;
+  /// Rename an existing zonegroup. Must not change id
+  virtual int rename(const DoutPrefixProvider* dpp,
+                     optional_yield y,
+                     RGWZoneGroup& info,
+                     std::string_view new_name) = 0;
+  /// Delete an existing zonegroup
+  virtual int remove(const DoutPrefixProvider* dpp,
+                     optional_yield y,
+                     const RGWZoneGroup& info) = 0;
+};
+
+/// A handle to manage the atomic updates of an existing zone object. This is
+/// initialized on read, and any subsequent writes through this handle will fail
+/// with -ECANCELED if another writer updates the object in the meantime.
+class ZoneWriter {
+ public:
+  virtual ~ZoneWriter() {}
+
+  /// Overwrite an existing zone. Must not change id or name
+  virtual int write(const DoutPrefixProvider* dpp,
+                    optional_yield y,
+                    const RGWZoneParams& info) = 0;
+  /// Rename an existing zone. Must not change id
+  virtual int rename(const DoutPrefixProvider* dpp,
+                     optional_yield y,
+                     RGWZoneParams& info,
+                     std::string_view new_name) = 0;
+  /// Delete an existing zone
+  virtual int remove(const DoutPrefixProvider* dpp,
+                     optional_yield y,
+                     const RGWZoneParams& info) = 0;
+};
 
 } // namespace rgw::sal
