@@ -3521,7 +3521,7 @@ options:
 - name: dbstore_config_uri
   type: str
   level: advanced
-  desc: 'Config database URI. URIs beginning with file: refer to local files opened with SQLite.'
+  desc: 'Config database URI. URIs beginning with file: refer to local files opened with SQLite. URIs beginning with postgresql:// refer to a network connection to a PostgreSQL server.'
   default: file:/var/lib/ceph/radosgw/dbstore-config.db
   see_also:
   - rgw_config_store

@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.14.0)
 project(dbstore)
 
 option(USE_SQLITE "Enable SQLITE DB" ON)
+option(WITH_RADOSGW_DBSTORE_POSTGRES "Enable PostgreSQL DBStore backend" ON)
 
 set (CMAKE_INCLUDE_DIR ${CMAKE_INCLUDE_DIR} "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
@@ -17,6 +18,10 @@ IF(USE_SQLITE)
       sqlite/connection.cc
       sqlite/error.cc
       sqlite/statement.cc)
+endif()
+if (WITH_RADOSGW_DBSTORE_POSTGRES)
+  list(APPEND dbstore_srcs
+      config/postgres.cc)
 endif()
 
 set(dbstore_mgr_srcs
@@ -45,6 +50,11 @@ IF(USE_SQLITE)
   set (CMAKE_LINK_LIBRARIES ${CMAKE_LINK_LIBRARIES} sqlite_db)
   add_dependencies(sqlite_db dbstore_lib)
 ENDIF()
+if (WITH_RADOSGW_DBSTORE_POSTGRES)
+  find_package(libpqxx REQUIRED)
+  target_link_libraries(dbstore_lib PUBLIC libpqxx::pqxx)
+  target_compile_definitions(dbstore_lib PUBLIC HAVE_PQXX)
+endif()
 
 # add pthread library
 set (CMAKE_LINK_LIBRARIES ${CMAKE_LINK_LIBRARIES} pthread)

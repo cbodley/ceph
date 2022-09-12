@@ -23,6 +23,9 @@
 #ifdef SQLITE_ENABLED
 #include "sqlite.h"
 #endif
+#ifdef HAVE_PQXX
+#include "postgres.h"
+#endif
 
 namespace rgw::dbstore {
 
@@ -32,6 +35,11 @@ auto create_config_store(const DoutPrefixProvider* dpp, const std::string& uri)
 #ifdef SQLITE_ENABLED
   if (uri.starts_with("file:")) {
     return config::create_sqlite_store(dpp, uri);
+  }
+#endif
+#ifdef HAVE_PQXX
+  if (uri.starts_with("postgresql:")) {
+    return config::create_postgres_store(dpp, uri);
   }
 #endif
   throw std::runtime_error(fmt::format("unrecognized URI {}", uri));
