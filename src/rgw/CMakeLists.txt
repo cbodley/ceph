@@ -134,7 +134,6 @@ set(librgw_common_srcs
   rgw_rest_iam.cc
   rgw_object_lock.cc
   rgw_kms.cc
-  rgw_kmip_client.cc
   rgw_url.cc
   rgw_oidc_provider.cc
   rgw_log.cc
@@ -204,6 +203,9 @@ list(APPEND librgw_common_srcs
   driver/rados/config/zone.cc
   driver/rados/config/zonegroup.cc)
 
+if (WITH_RADOSGW_KMIP)
+  list(APPEND librgw_common_srcs rgw_kmip_client.cc)
+endif()
 if(WITH_RADOSGW_AMQP_ENDPOINT)
   list(APPEND librgw_common_srcs rgw_amqp.cc)
 endif()
@@ -277,6 +279,11 @@ target_include_directories(rgw_common
   PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw/driver/rados"
   PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw"
   PUBLIC "${LUA_INCLUDE_DIR}")
+if (WITH_RADOSGW_KMIP)
+  target_link_libraries(rgw_common PUBLIC kmip)
+  target_include_directories(rgw_common PUBLIC "${CMAKE_SOURCE_DIR}/src/libkmip")
+  target_compile_definitions(rgw_common PUBLIC "HAVE_KMIP")
+endif()
 if(WITH_RADOSGW_KAFKA_ENDPOINT)
   # used by rgw_kafka.cc
   target_link_libraries(rgw_common
@@ -337,7 +344,6 @@ set(rgw_a_srcs
   rgw_file.cc
   rgw_frontend.cc
   rgw_http_client_curl.cc
-  rgw_kmip_client_impl.cc
   rgw_lib.cc
   rgw_loadgen.cc
   rgw_loadgen_process.cc
@@ -364,6 +370,10 @@ set(rgw_a_srcs
   driver/rados/rgw_rest_log.cc
   driver/rados/rgw_rest_realm.cc)
 
+if (WITH_RADOSGW_KMIP)
+  list(APPEND rgw_a_srcs rgw_kmip_client_impl.cc)
+endif()
+
 gperf_generate(${CMAKE_SOURCE_DIR}/src/rgw/rgw_iam_policy_keywords.gperf
   rgw_iam_policy_keywords.frag.cc)
 set_source_files_properties(rgw_iam_policy.cc PROPERTIES
@@ -379,8 +389,7 @@ target_compile_definitions(rgw_a PUBLIC "-DCLS_CLIENT_HIDE_IOCTX")
 target_include_directories(rgw_a
   PUBLIC "${CMAKE_SOURCE_DIR}/src/dmclock/support/src"
   PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw"
-  PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw/driver/rados"
-  PRIVATE "${CMAKE_SOURCE_DIR}/src/libkmip")
+  PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw/driver/rados")
 
 if(WITH_RADOSGW_AMQP_ENDPOINT)
   find_package(RabbitMQ REQUIRED)
@@ -432,13 +441,12 @@ endif(WITH_RADOSGW_ARROW_FLIGHT)
 target_compile_definitions(radosgw PUBLIC "-DCLS_CLIENT_HIDE_IOCTX")
 target_include_directories(radosgw
   PUBLIC "${CMAKE_SOURCE_DIR}/src/dmclock/support/src"
-  PRIVATE "${CMAKE_SOURCE_DIR}/src/libkmip"
   PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw"
   PRIVATE "${LUA_INCLUDE_DIR}")
 
 target_include_directories(radosgw SYSTEM PUBLIC "../rapidjson/include")
 
-target_link_libraries(radosgw PRIVATE ${rgw_libs} rgw_schedulers kmip)
+target_link_libraries(radosgw PRIVATE ${rgw_libs} rgw_schedulers)
 if(WITH_RADOSGW_BEAST_OPENSSL)
   # used by rgw_asio_frontend.cc
   target_link_libraries(radosgw PRIVATE OpenSSL::SSL)
@@ -515,7 +523,6 @@ add_library(rgw SHARED ${librgw_srcs})
 target_compile_definitions(rgw PUBLIC "-DCLS_CLIENT_HIDE_IOCTX")
 target_include_directories(rgw
   PUBLIC "${CMAKE_SOURCE_DIR}/src/dmclock/support/src"
-  PRIVATE "${CMAKE_SOURCE_DIR}/src/libkmip"
   PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw"
   PRIVATE "${LUA_INCLUDE_DIR}")
 
@@ -525,7 +532,6 @@ target_link_libraries(rgw
   PRIVATE
   ${rgw_libs}
   rgw_schedulers
-  kmip
   librados
   cls_rgw_client
   cls_otp_client
