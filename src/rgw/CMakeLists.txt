@@ -373,6 +373,15 @@ set(rgw_a_srcs
 if (WITH_RADOSGW_KMIP)
   list(APPEND rgw_a_srcs rgw_kmip_client_impl.cc)
 endif()
+if (WITH_RADOSGW_QUICHE)
+  list(APPEND rgw_a_srcs
+      h3/address_validation.cc
+      h3/client_io.cc
+      h3/connection.cc
+      h3/error.cc
+      h3/frontend.cc
+      h3/listener.cc)
+endif()
 
 gperf_generate(${CMAKE_SOURCE_DIR}/src/rgw/rgw_iam_policy_keywords.gperf
   rgw_iam_policy_keywords.frag.cc)
@@ -413,6 +422,10 @@ if(WITH_CURL_OPENSSL)
   # used by rgw_http_client_curl.cc
   target_link_libraries(rgw_a PRIVATE OpenSSL::Crypto)
 endif()
+if (WITH_RADOSGW_QUICHE)
+  target_link_libraries(rgw_a PUBLIC Quiche::Quiche)
+  target_compile_definitions(rgw_a PUBLIC HAVE_QUICHE)
+endif()
 
 set(rgw_libs rgw_a)
 
@@ -424,6 +437,8 @@ set(rgw_schedulers_srcs
 add_library(rgw_schedulers STATIC ${rgw_schedulers_srcs})
 target_link_libraries(rgw_schedulers
   PUBLIC dmclock::dmclock spawn)
+
+target_link_libraries(rgw_a PUBLIC rgw_schedulers)
 
 set(radosgw_srcs
   rgw_main.cc)
@@ -446,7 +461,7 @@ target_include_directories(radosgw
 
 target_include_directories(radosgw SYSTEM PUBLIC "../rapidjson/include")
 
-target_link_libraries(radosgw PRIVATE ${rgw_libs} rgw_schedulers)
+target_link_libraries(radosgw PRIVATE ${rgw_libs})
 if(WITH_RADOSGW_BEAST_OPENSSL)
   # used by rgw_asio_frontend.cc
   target_link_libraries(radosgw PRIVATE OpenSSL::SSL)
