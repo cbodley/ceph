@@ -27,6 +27,9 @@ namespace rgw::dmclock {
 namespace rgw::lua {
   class Background;
 }
+namespace rgw::sal {
+  class LuaManager;
+}
 
 struct RGWProcessEnv {
   rgw::sal::Store* store;
@@ -38,6 +41,7 @@ struct RGWProcessEnv {
   //maybe there is a better place to store the rate limit data structure
   ActiveRateLimiter* ratelimiting;
   rgw::lua::Background* lua_background;
+  std::unique_ptr<rgw::sal::LuaManager> lua_manager;
 };
 
 class RGWFrontendConfig;
@@ -181,7 +185,7 @@ extern int process_request(rgw::sal::Store* store,
                            ceph::coarse_real_clock::duration* latency,
                            std::shared_ptr<RateLimiter> ratelimit,
                            rgw::lua::Background* lua_background,
-                           std::unique_ptr<rgw::sal::LuaManager>& lua_manager,
+                           rgw::sal::LuaManager* lua_manager,
                            int* http_ret = nullptr);
 
 extern int rgw_process_authenticated(RGWHandler_REST* handler,

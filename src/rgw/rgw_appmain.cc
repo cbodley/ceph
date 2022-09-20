@@ -432,7 +432,8 @@ int rgw::AppMain::init_frontends2(RGWLib* rgwlib)
       config->get_val("prefix", "", &uri_prefix);
 
       RGWProcessEnv env = {store, &rest, olog, port, uri_prefix,
-	    auth_registry, ratelimiter.get(), lua_background.get()};
+	    auth_registry, ratelimiter.get(), lua_background.get(),
+            store->get_lua_manager()};
 
       fe = new RGWLoadGenFrontend(env, config);
     }
@@ -442,12 +443,13 @@ int rgw::AppMain::init_frontends2(RGWLib* rgwlib)
       std::string uri_prefix;
       config->get_val("prefix", "", &uri_prefix);
       RGWProcessEnv env{store, &rest, olog, port, uri_prefix,
-	    auth_registry, ratelimiter.get(), lua_background.get()};
+	    auth_registry, ratelimiter.get(), lua_background.get(),
+            store->get_lua_manager()};
       fe = new RGWAsioFrontend(env, config, *(sched_ctx.get()));
     }
     else if (framework == "rgw-nfs") {
       int port = 80;
-      RGWProcessEnv env = { store, &rest, olog, port };
+      RGWProcessEnv env = {store, &rest, olog, port};
       fe = new RGWLibFrontend(env, config);
       if (rgwlib) {
         rgwlib->set_fe(static_cast<RGWLibFrontend*>(fe));

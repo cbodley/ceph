@@ -274,7 +274,7 @@ int process_request(rgw::sal::Store* const store,
                     ceph::coarse_real_clock::duration* latency,
                     std::shared_ptr<RateLimiter> ratelimit,
                     rgw::lua::Background* lua_background,
-                    std::unique_ptr<rgw::sal::LuaManager>& lua_manager,
+                    rgw::sal::LuaManager* lua_manager,
                     int* http_ret)
 {
   int ret = client_io->init(g_ceph_context);
@@ -329,7 +329,7 @@ int process_request(rgw::sal::Store* const store,
     goto done;
   }
   s->lua_background = lua_background;
-  s->lua_manager = lua_manager.get();
+  s->lua_manager = lua_manager;
   {
     s->trace_enabled = tracing::rgw::tracer.is_enabled();
     std::string script;
