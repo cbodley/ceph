@@ -442,6 +442,7 @@ option(WITH_RADOSGW_DAOS "DAOS backend for RADOS Gateway" OFF)
 option(WITH_RADOSGW_SELECT_PARQUET "Support for s3 select on parquet objects" ON)
 option(WITH_RADOSGW_ARROW_FLIGHT "Build arrow flight when not using system-provided arrow" OFF)
 option(WITH_RADOSGW_BACKTRACE_LOGGING "Enable backtraces in rgw logs" OFF)
+option(WITH_RADOSGW_QUICHE "Rados Gateway's Quiche HTTP/3 frontend" OFF)
 
 option(WITH_SYSTEM_ARROW "Use system-provided arrow" OFF)
 option(WITH_SYSTEM_UTF8PROC "Use system-provided utf8proc" OFF)
@@ -449,6 +450,19 @@ option(WITH_SYSTEM_UTF8PROC "Use system-provided utf8proc" OFF)
 if(WITH_RADOSGW)
   find_package(EXPAT REQUIRED)
   find_package(OATH REQUIRED)
+
+  if (WITH_RADOSGW_QUICHE)
+    # Quiche requires BoringSSL, make sure that find_package(OpenSSL) found it
+    cmake_push_check_state()
+    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+    check_symbol_exists(OPENSSL_IS_BORINGSSL "openssl/base.h" HAVE_BORINGSSL)
+    cmake_pop_check_state()
+    if (NOT HAVE_BORINGSSL)
+      message(FATAL_ERROR "WITH_RADOSGW_QUICHE requires OPENSSL_IS_BORINGSSL")
+    endif()
+
+    find_package(Quiche 0.14.0 REQUIRED)
+  endif()
 
 # https://curl.haxx.se/docs/install.html mentions the
 # configure flags for various ssl backends
