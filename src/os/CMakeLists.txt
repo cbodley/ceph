@@ -66,9 +66,7 @@ if(HAVE_LIBZFS)
 endif()
 
 add_library(os STATIC ${libos_srcs})
-target_link_libraries(os blk)
-
-target_link_libraries(os heap_profiler kv)
+target_link_libraries(os blk common heap_profiler)
 
 if(WITH_BLUEFS)
   add_library(bluefs SHARED 
