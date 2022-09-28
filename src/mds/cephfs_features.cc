@@ -69,7 +69,7 @@ void cephfs_dump_features(ceph::Formatter *f, const feature_bitset_t& features)
   for (size_t i = 0; i < feature_names.size(); ++i) {
     if (!features.test(i))
       continue;
-    char s[18];
+    char s[36];
     snprintf(s, sizeof(s), "feature_%zu", i);
     f->dump_string(s, cephfs_feature_name(i));
   }
