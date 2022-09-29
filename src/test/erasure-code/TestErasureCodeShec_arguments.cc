@@ -77,45 +77,45 @@ void create_table_shec432() {
         }
         if (std::popcount(avails) == 2 &&
             std::popcount(want) == 1) {
-          if ((want | avails) == getint(0,1,5) ||
-              (want | avails) == getint(2,3,6)) {
+          if (std::cmp_equal(want | avails,  getint(0,1,5)) ||
+	      std::cmp_equal(want | avails, getint(2,3,6))) {
             vec.push_back(avails);
           }
         }
       }
-      
+
       for (unsigned avails = 0; avails < (1<<7); ++avails) {
         if (want & avails) {
           continue;
         }
         if (std::popcount(avails) == 4) {
-          if ((avails) == getint(0,1,2,3) ||
-              (avails) == getint(0,1,2,4) ||
-              (avails) == getint(0,1,2,6) ||
-              (avails) == getint(0,1,3,4) ||
-              (avails) == getint(0,1,3,6) ||
-              (avails) == getint(0,1,4,6) ||
-              (avails) == getint(0,2,3,4) ||
-              (avails) == getint(0,2,3,5) ||
-              (avails) == getint(0,2,4,5) ||
-              (avails) == getint(0,2,4,6) ||
-              (avails) == getint(0,2,5,6) ||
-              (avails) == getint(0,3,4,5) ||
-              (avails) == getint(0,3,4,6) ||
-              (avails) == getint(0,3,5,6) ||
-              (avails) == getint(0,4,5,6) ||
-              (avails) == getint(1,2,3,4) ||
-              (avails) == getint(1,2,3,5) ||
-              (avails) == getint(1,2,4,5) ||
-              (avails) == getint(1,2,4,6) ||
-              (avails) == getint(1,2,5,6) ||
-              (avails) == getint(1,3,4,5) ||
-              (avails) == getint(1,3,4,6) ||
-              (avails) == getint(1,3,5,6) ||
-              (avails) == getint(1,4,5,6) ||
-              (avails) == getint(2,3,4,5) ||
-              (avails) == getint(2,4,5,6) ||
-              (avails) == getint(3,4,5,6)) {
+          if (std::cmp_equal(avails, getint(0,1,2,3)) ||
+              std::cmp_equal(avails, getint(0,1,2,4)) ||
+              std::cmp_equal(avails, getint(0,1,2,6)) ||
+              std::cmp_equal(avails, getint(0,1,3,4)) ||
+              std::cmp_equal(avails, getint(0,1,3,6)) ||
+              std::cmp_equal(avails, getint(0,1,4,6)) ||
+              std::cmp_equal(avails, getint(0,2,3,4)) ||
+              std::cmp_equal(avails, getint(0,2,3,5)) ||
+              std::cmp_equal(avails, getint(0,2,4,5)) ||
+              std::cmp_equal(avails, getint(0,2,4,6)) ||
+              std::cmp_equal(avails, getint(0,2,5,6)) ||
+              std::cmp_equal(avails, getint(0,3,4,5)) ||
+              std::cmp_equal(avails, getint(0,3,4,6)) ||
+              std::cmp_equal(avails, getint(0,3,5,6)) ||
+              std::cmp_equal(avails, getint(0,4,5,6)) ||
+              std::cmp_equal(avails, getint(1,2,3,4)) ||
+              std::cmp_equal(avails, getint(1,2,3,5)) ||
+              std::cmp_equal(avails, getint(1,2,4,5)) ||
+              std::cmp_equal(avails, getint(1,2,4,6)) ||
+              std::cmp_equal(avails, getint(1,2,5,6)) ||
+              std::cmp_equal(avails, getint(1,3,4,5)) ||
+              std::cmp_equal(avails, getint(1,3,4,6)) ||
+              std::cmp_equal(avails, getint(1,3,5,6)) ||
+              std::cmp_equal(avails, getint(1,4,5,6)) ||
+              std::cmp_equal(avails, getint(2,3,4,5)) ||
+              std::cmp_equal(avails, getint(2,4,5,6)) ||
+              std::cmp_equal(avails, getint(3,4,5,6))) {
             vec.push_back(avails);
           }
         }
