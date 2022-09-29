@@ -147,6 +147,20 @@ add_executable(unittest_rgw_putobj test_rgw_putobj.cc)
 add_ceph_unittest(unittest_rgw_putobj)
 target_link_libraries(unittest_rgw_putobj ${rgw_libs} ${UNITTEST_LIBS})
 
+set(test_rgw_copyobj_srcs test_rgw_copyobj.cc)
+add_executable(ceph_test_rgw_copyobj
+  ${test_rgw_copyobj_srcs}
+  $<TARGET_OBJECTS:unit-main>)
+target_link_libraries(ceph_test_rgw_copyobj
+  ${rgw_libs}
+  cls_refcount_client
+  librados
+  global
+  ${UNITTEST_LIBS}
+  radostest-cxx
+  )
+install(TARGETS ceph_test_rgw_copyobj DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 add_executable(ceph_test_rgw_throttle
   test_rgw_throttle.cc
   $<TARGET_OBJECTS:unit-main>)
