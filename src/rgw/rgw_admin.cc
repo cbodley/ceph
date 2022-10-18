@@ -1887,7 +1887,7 @@ static int send_to_remote_or_url(RGWRESTConn *conn, const string& url,
   return send_to_url(url, opt_region, access, secret, info, in_data, parser);
 }
 
-static int commit_period(rgw::sal::ConfigStore* cfgstore,
+static int commit_period(rgw::sal::ConfigStore* cfgstore, const rgw_zone_id& zone_id,
                          RGWRealm& realm, rgw::sal::RealmWriter& realm_writer,
                          RGWPeriod& period, string remote, const string& url,
                          std::optional<string> opt_region,
@@ -1900,7 +1900,7 @@ static int commit_period(rgw::sal::ConfigStore* cfgstore,
     return -EINVAL;
   }
   // are we the period's master zone?
-  if (store->get_zone()->get_id() == master_zone) {
+  if (zone_id == master_zone) {
     // read the current period
     RGWPeriod current_period;
     int ret = cfgstore->read_period(dpp(), null_yield, realm.current_period,
@@ -1992,7 +1992,7 @@ static int commit_period(rgw::sal::ConfigStore* cfgstore,
   return ret;
 }
 
-static int update_period(rgw::sal::ConfigStore* cfgstore,
+static int update_period(rgw::sal::ConfigStore* cfgstore, const rgw_zone_id& zone_id,
                          const string& realm_id, const string& realm_name,
                          const string& period_epoch, bool commit,
                          const string& remote, const string& url,
@@ -2035,8 +2035,8 @@ static int update_period(rgw::sal::ConfigStore* cfgstore,
     return ret;
   }
   if (commit) {
-    ret = commit_period(cfgstore, realm, *realm_writer, period, remote, url,
-                        opt_region, access, secret, force);
+    ret = commit_period(cfgstore, zone_id, realm, *realm_writer, period,
+                        remote, url, opt_region, access, secret, force);
     if (ret < 0) {
       cerr << "failed to commit period: " << cpp_strerror(-ret) << std::endl;
       return ret;
@@ -2123,7 +2123,8 @@ stringstream& push_ss(stringstream& ss, list<string>& l, int tab = 0)
   return ss;
 }
 
-static void get_md_sync_status(list<string>& status)
+static void get_md_sync_status(const std::string& master_period,
+                               list<string>& status)
 {
   RGWMetaSyncStatusManager sync(static_cast<rgw::sal::RadosStore*>(store), static_cast<rgw::sal::RadosStore*>(store)->svc()->rados->get_async_processor());
 
@@ -2191,8 +2192,6 @@ static void get_md_sync_status(list<string>& status)
   push_ss(ss, status) << "incremental sync: " << num_inc << "/" << total_shards << " shards";
 
   map<int, RGWMetadataLogInfo> master_shards_info;
-  string master_period = static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->get_current_period_id();
-
   ret = sync.read_master_log_shards_info(dpp(), master_period, &master_shards_info);
   if (ret < 0) {
     status.push_back(string("failed to fetch master sync status: ") + cpp_strerror(-ret));
@@ -2445,24 +2444,19 @@ static auto get_disabled_features(const rgw::zone_features::set& enabled) {
 }
 
 
-static void sync_status(Formatter *formatter)
+static void sync_status(const RGWRealm& realm, const RGWZoneGroup& zonegroup,
+                        const RGWZone& zone, Formatter *formatter)
 {
-  const rgw::sal::ZoneGroup& zonegroup = store->get_zone()->get_zonegroup();
-  rgw::sal::Zone* zone = store->get_zone();
-
   int width = 15;
 
-  cout << std::setw(width) << "realm" << std::setw(1) << " " << zone->get_realm_id() << " (" << zone->get_realm_name() << ")" << std::endl;
-  cout << std::setw(width) << "zonegroup" << std::setw(1) << " " << zonegroup.get_id() << " (" << zonegroup.get_name() << ")" << std::endl;
-  cout << std::setw(width) << "zone" << std::setw(1) << " " << zone->get_id() << " (" << zone->get_name() << ")" << std::endl;
+  cout << std::setw(width) << "realm" << std::setw(1) << " " << realm.id << " (" << realm.name << ")" << std::endl;
+  cout << std::setw(width) << "zonegroup" << std::setw(1) << " " << zonegroup.id << " (" << zonegroup.name << ")" << std::endl;
+  cout << std::setw(width) << "zone" << std::setw(1) << " " << zone.id << " (" << zone.name << ")" << std::endl;
   cout << std::setw(width) << "current time" << std::setw(1) << " "
        << to_iso_8601(ceph::real_clock::now(), iso_8601_format::YMDhms) << std::endl;
 
-  const auto& rzg =
-    static_cast<const rgw::sal::RadosZoneGroup&>(zonegroup).get_group();
-
-  cout << std::setw(width) << "zonegroup features enabled: " << rzg.enabled_features << std::endl;
-  if (auto d = get_disabled_features(rzg.enabled_features); !d.empty()) {
+  cout << std::setw(width) << "zonegroup features enabled: " << zonegroup.enabled_features << std::endl;
+  if (auto d = get_disabled_features(zonegroup.enabled_features); !d.empty()) {
     cout << std::setw(width) << "                   disabled: " << d << std::endl;
   }
 
@@ -2471,7 +2465,7 @@ static void sync_status(Formatter *formatter)
   if (store->is_meta_master()) {
     md_status.push_back("no sync (zone is master)");
   } else {
-    get_md_sync_status(md_status);
+    get_md_sync_status(realm.current_period, md_status);
   }
 
   tab_dump("metadata sync", width, md_status);
@@ -2485,8 +2479,9 @@ static void sync_status(Formatter *formatter)
     string source_str = "source: ";
     string s = source_str + source_id.id;
     std::unique_ptr<rgw::sal::Zone> sz;
-    if (store->get_zone()->get_zonegroup().get_zone_by_id(source_id.id, &sz) == 0) {
-      s += string(" (") + sz->get_name() + ")";
+    if (auto sz = zonegroup.zones.find(source_id.id);
+        sz != zonegroup.zones.end()) {
+      s += string(" (") + sz->second.name + ")";
     }
     data_status.push_back(s);
     get_data_sync_status(source_id, data_status, source_str.size());
@@ -2664,26 +2659,11 @@ static void get_hint_entities(const std::set<rgw_zone_id>& zones, const std::set
   }
 }
 
-static rgw_zone_id resolve_zone_id(const string& s)
+static int sync_info(const RGWZoneGroup& zonegroup, const rgw_zone_id& my_zone_id,
+                     std::optional<rgw_zone_id> opt_target_zone,
+                     std::optional<rgw_bucket> opt_bucket, Formatter *formatter)
 {
-  std::unique_ptr<rgw::sal::Zone> zone;
-  int ret = store->get_zone()->get_zonegroup().get_zone_by_id(s, &zone);
-  if (ret < 0)
-    ret = store->get_zone()->get_zonegroup().get_zone_by_name(s, &zone);
-  if (ret < 0)
-    return rgw_zone_id(s);
-
-  return rgw_zone_id(zone->get_id());
-}
-
-rgw_zone_id validate_zone_id(const rgw_zone_id& zone_id)
-{
-  return resolve_zone_id(zone_id.id);
-}
-
-static int sync_info(std::optional<rgw_zone_id> opt_target_zone, std::optional<rgw_bucket> opt_bucket, Formatter *formatter)
-{
-  rgw_zone_id zone_id = opt_target_zone.value_or(store->get_zone()->get_id());
+  rgw_zone_id zone_id = opt_target_zone.value_or(my_zone_id);
 
   auto zone_policy_handler = store->get_zone()->get_sync_policy_handler();
 
@@ -2752,7 +2732,7 @@ static int sync_info(std::optional<rgw_zone_id> opt_target_zone, std::optional<r
       continue; /* shouldn't really happen */
     }
 
-    auto zid = validate_zone_id(*hint_entity.zone);
+    auto zid = *hint_entity.zone;
     auto& hint_bucket = *hint_entity.bucket;
 
     RGWBucketSyncPolicyHandlerRef hint_bucket_handler;
@@ -2794,16 +2774,15 @@ static int sync_info(std::optional<rgw_zone_id> opt_target_zone, std::optional<r
   return 0;
 }
 
-static int bucket_sync_info(rgw::sal::Store* store, const RGWBucketInfo& info,
-                              std::ostream& out)
+static int bucket_sync_info(rgw::sal::Store* store, const RGWRealm& realm,
+                            const RGWZoneGroup& zonegroup, const RGWZone& zone,
+                            const RGWBucketInfo& info, std::ostream& out)
 {
-  const rgw::sal::ZoneGroup& zonegroup = store->get_zone()->get_zonegroup();
-  rgw::sal::Zone* zone = store->get_zone();
   constexpr int width = 15;
 
-  out << indented{width, "realm"} << zone->get_realm_id() << " (" << zone->get_realm_name() << ")\n";
-  out << indented{width, "zonegroup"} << zonegroup.get_id() << " (" << zonegroup.get_name() << ")\n";
-  out << indented{width, "zone"} << zone->get_id() << " (" << zone->get_name() << ")\n";
+  out << indented{width, "realm"} << realm.id << " (" << realm.name << ")\n";
+  out << indented{width, "zonegroup"} << zonegroup.id << " (" << zonegroup.name << ")\n";
+  out << indented{width, "zone"} << zone.id << " (" << zone.name << ")\n";
   out << indented{width, "bucket"} << info.bucket << "\n\n";
 
   if (!static_cast<rgw::sal::RadosStore*>(store)->ctl()->bucket->bucket_imports_data(info.bucket, null_yield, dpp())) {
@@ -2832,18 +2811,20 @@ static int bucket_sync_info(rgw::sal::Store* store, const RGWBucketInfo& info,
   return 0;
 }
 
-static int bucket_sync_status(rgw::sal::Store* store, const RGWBucketInfo& info,
+static int bucket_sync_status(rgw::sal::Store* store,
+                              const RGWRealm& realm,
+                              const RGWZoneGroup& zonegroup,
+                              const RGWZone& zone,
+                              const RGWBucketInfo& info,
                               const rgw_zone_id& source_zone_id,
 			      std::optional<rgw_bucket>& opt_source_bucket,
                               std::ostream& out)
 {
-  const rgw::sal::ZoneGroup& zonegroup = store->get_zone()->get_zonegroup();
-  rgw::sal::Zone* zone = store->get_zone();
   constexpr int width = 15;
 
-  out << indented{width, "realm"} << zone->get_realm_id() << " (" << zone->get_realm_name() << ")\n";
-  out << indented{width, "zonegroup"} << zonegroup.get_id() << " (" << zonegroup.get_name() << ")\n";
-  out << indented{width, "zone"} << zone->get_id() << " (" << zone->get_name() << ")\n";
+  out << indented{width, "realm"} << realm.id << " (" << realm.name << ")\n";
+  out << indented{width, "zonegroup"} << zonegroup.id << " (" << zonegroup.name << ")\n";
+  out << indented{width, "zone"} << zone.id << " (" << zone.name << ")\n";
   out << indented{width, "bucket"} << info.bucket << "\n";
   out << indented{width, "current time"}
     << to_iso_8601(ceph::real_clock::now(), iso_8601_format::YMDhms) << "\n\n";
@@ -2868,32 +2849,21 @@ static int bucket_sync_status(rgw::sal::Store* store, const RGWBucketInfo& info,
   set<rgw_zone_id> zone_ids;
 
   if (!source_zone_id.empty()) {
-    std::unique_ptr<rgw::sal::Zone> zone;
-    int ret = store->get_zone()->get_zonegroup().get_zone_by_id(source_zone_id.id, &zone);
-    if (ret < 0) {
-      ldpp_dout(dpp(), -1) << "Source zone not found in zonegroup "
-          << zonegroup.get_name() << dendl;
-      return -EINVAL;
-    }
     auto c = zone_conn_map.find(source_zone_id);
     if (c == zone_conn_map.end()) {
-      ldpp_dout(dpp(), -1) << "No connection to zone " << zone->get_name() << dendl;
+      ldpp_dout(dpp(), -1) << "No connection to zone " << zone.name << dendl;
       return -EINVAL;
     }
     zone_ids.insert(source_zone_id);
   } else {
-    std::list<std::string> ids;
-    int ret = store->get_zone()->get_zonegroup().list_zones(ids);
-    if (ret == 0) {
-      for (const auto& entry : ids) {
-	zone_ids.insert(entry);
-      }
+    for (const auto& [zid, z] : zonegroup.zones) {
+      zone_ids.insert(zid);
     }
   }
 
-  for (auto& zone_id : zone_ids) {
-    auto z = static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->get_zonegroup().zones.find(zone_id.id);
-    if (z == static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->get_zonegroup().zones.end()) { /* should't happen */
+  for (const auto& zone_id : zone_ids) {
+    auto z = zonegroup.zones.find(zone_id.id);
+    if (z == zonegroup.zones.end()) { /* should't happen */
       continue;
     }
     auto c = zone_conn_map.find(zone_id.id);
@@ -2908,7 +2878,7 @@ static int bucket_sync_status(rgw::sal::Store* store, const RGWBucketInfo& info,
 	continue;
       }
       if (pipe.source.zone.value_or(rgw_zone_id()) == z->second.id) {
-	bucket_source_sync_status(dpp(), static_cast<rgw::sal::RadosStore*>(store), static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->get_zone(), z->second,
+	bucket_source_sync_status(dpp(), static_cast<rgw::sal::RadosStore*>(store), zone, z->second,
 				  c->second,
 				  info, pipe,
 				  width, out);
@@ -3217,38 +3187,37 @@ public:
   }
 };
 
-void resolve_zone_id_opt(std::optional<string>& zone_name, std::optional<rgw_zone_id>& zone_id)
+void resolve_zone_id_opt(const RGWZoneGroup& zonegroup,
+                         const std::optional<string>& zone_name,
+                         std::optional<rgw_zone_id>& zone_id)
 {
   if (!zone_name || zone_id) {
     return;
   }
-  zone_id.emplace();
-  std::unique_ptr<rgw::sal::Zone> zone;
-  int ret = store->get_zone()->get_zonegroup().get_zone_by_name(*zone_name, &zone);
-  if (ret < 0) {
-    cerr << "WARNING: cannot find source zone id for name=" << *zone_name << std::endl;
-    zone_id = rgw_zone_id(*zone_name);
-  } else {
-    zone_id->id = zone->get_id();
+  // find zone by name
+  for (const auto& [zid, zone] : zonegroup.zones) {
+    if (zone.name == *zone_name) {
+      zone_id = zid;
+      return;
+    }
   }
+  cerr << "WARNING: cannot find source zone id for name=" << *zone_name << std::endl;
+  // XXX: why would we expect zone name to work as a zone id?
+  zone_id = rgw_zone_id(*zone_name);
 }
-void resolve_zone_ids_opt(std::optional<vector<string> >& names, std::optional<vector<rgw_zone_id> >& ids)
+
+void resolve_zone_ids_opt(const RGWZoneGroup& zonegroup,
+                          const std::optional<std::vector<std::string>>& names,
+                          std::optional<std::vector<rgw_zone_id>>& ids)
 {
   if (!names || ids) {
     return;
   }
   ids.emplace();
-  for (auto& name : *names) {
-    rgw_zone_id zid;
-    std::unique_ptr<rgw::sal::Zone> zone;
-    int ret = store->get_zone()->get_zonegroup().get_zone_by_name(name, &zone);
-    if (ret < 0) {
-      cerr << "WARNING: cannot find source zone id for name=" << name << std::endl;
-      zid = rgw_zone_id(name);
-    } else {
-      zid.id = zone->get_id();
-    }
-    ids->push_back(zid);
+  for (const auto& name : *names) {
+    std::optional<rgw_zone_id> zone_id;
+    resolve_zone_id_opt(zonegroup, name, zone_id);
+    ids->push_back(*zone_id);
   }
 }
 
@@ -3265,24 +3234,27 @@ static vector<rgw_zone_id> zone_ids_from_str(const string& val)
 
 class JSONFormatter_PrettyZone : public JSONFormatter {
   class Handler : public JSONEncodeFilter::Handler<rgw_zone_id> {
+    const RGWZoneGroup& zonegroup;
+   public:
+    explicit Handler(const RGWZoneGroup& zonegroup) : zonegroup(zonegroup) {}
+
     void encode_json(const char *name, const void *pval, ceph::Formatter *f) const override {
-      auto zone_id = *(static_cast<const rgw_zone_id *>(pval));
-      string zone_name;
-      std::unique_ptr<rgw::sal::Zone> zone;
-      if (store->get_zone()->get_zonegroup().get_zone_by_id(zone_id.id, &zone) == 0) {
-        zone_name = zone->get_name();
+      const auto& zone_id = *(static_cast<const rgw_zone_id *>(pval));
+      auto z = zonegroup.zones.find(zone_id);
+      if (z != zonegroup.zones.end()) {
+        ::encode_json(name, z->second.name, f); // encode zone name
       } else {
         cerr << "WARNING: cannot find zone name for id=" << zone_id << std::endl;
-        zone_name = zone_id.id;
+        ::encode_json(name, zone_id.id, f); // encode zone id
       }
-
-      ::encode_json(name, zone_name, f);
     }
   } zone_id_type_handler;
 
   JSONEncodeFilter encode_filter;
 public:
-  JSONFormatter_PrettyZone(bool pretty_format) : JSONFormatter(pretty_format) {
+  JSONFormatter_PrettyZone(const RGWZoneGroup& zonegroup, bool pretty_format)
+      : JSONFormatter(pretty_format), zone_id_type_handler(zonegroup)
+  {
     encode_filter.register_type(&zone_id_type_handler);
   }
 
@@ -3509,7 +3481,6 @@ int main(int argc, const char **argv)
   string bucket_id;
   string new_bucket_name;
   std::unique_ptr<Formatter> formatter;
-  std::unique_ptr<Formatter> zone_formatter;
   int purge_data = false;
   int pretty_format = false;
   int show_log_entries = true;
@@ -4457,8 +4428,6 @@ int main(int argc, const char **argv)
     exit(1);
   }
 
-  zone_formatter = std::make_unique<JSONFormatter_PrettyZone>(pretty_format);
-
   realm_name = g_conf()->rgw_realm;
   zone_name = g_conf()->rgw_zone;
   zonegroup_name = g_conf()->rgw_zonegroup;
@@ -4480,16 +4449,6 @@ int main(int argc, const char **argv)
   RGWUserAdminOpState user_op(store);
   if (!user_email.empty()) {
     user_op.user_email_specified=true;
-  }
-
-  if (!source_zone_name.empty()) {
-    std::unique_ptr<rgw::sal::Zone> zone;
-    if (store->get_zone()->get_zonegroup().get_zone_by_name(source_zone_name, &zone) < 0) {
-      cerr << "WARNING: cannot find source zone id for name=" << source_zone_name << std::endl;
-      source_zone = source_zone_name;
-    } else {
-      source_zone.id = zone->get_id();
-    }
   }
 
   rgw_http_client_init(g_ceph_context);
@@ -4608,7 +4567,7 @@ int main(int argc, const char **argv)
       break;
     case OPT::PERIOD_UPDATE:
       {
-        int ret = update_period(cfgstore.get(), realm_id, realm_name,
+        int ret = update_period(cfgstore.get(), rgw_zone_id{}, realm_id, realm_name,
                                 period_epoch, commit, remote, url,
                                 opt_region, access_key, secret_key,
                                 formatter.get(), yes_i_really_mean_it);
@@ -6436,12 +6395,30 @@ int main(int argc, const char **argv)
     return -r;
   }
 
-  resolve_zone_id_opt(opt_effective_zone_name, opt_effective_zone_id);
-  resolve_zone_id_opt(opt_source_zone_name, opt_source_zone_id);
-  resolve_zone_id_opt(opt_dest_zone_name, opt_dest_zone_id);
-  resolve_zone_ids_opt(opt_zone_names, opt_zone_ids);
-  resolve_zone_ids_opt(opt_source_zone_names, opt_source_zone_ids);
-  resolve_zone_ids_opt(opt_dest_zone_names, opt_dest_zone_ids);
+  const auto& zone = site.get_zone();
+  const auto& zonegroup = site.get_zonegroup();
+  const auto& period = site.get_period();
+  const auto& realm = site.get_realm();
+
+  resolve_zone_id_opt(zonegroup, opt_effective_zone_name, opt_effective_zone_id);
+  resolve_zone_id_opt(zonegroup, opt_source_zone_name, opt_source_zone_id);
+  resolve_zone_id_opt(zonegroup, opt_dest_zone_name, opt_dest_zone_id);
+  resolve_zone_ids_opt(zonegroup, opt_zone_names, opt_zone_ids);
+  resolve_zone_ids_opt(zonegroup, opt_source_zone_names, opt_source_zone_ids);
+  resolve_zone_ids_opt(zonegroup, opt_dest_zone_names, opt_dest_zone_ids);
+
+  if (!source_zone_name.empty() && period) {
+    RGWZone sz;
+    if (!period->period_map.find_zone_by_name(source_zone_name, nullptr, &sz)) {
+      cerr << "WARNING: cannot find source zone id for name=" << source_zone_name << std::endl;
+      source_zone = source_zone_name;
+    } else {
+      source_zone.id = sz.id;
+    }
+  }
+
+  std::unique_ptr<Formatter> zone_formatter =
+      std::make_unique<JSONFormatter_PrettyZone>(zonegroup, pretty_format);
 
   bool non_master_cmd = (!store->is_meta_master() && !yes_i_really_mean_it);
   std::set<OPT> non_master_ops_list = {OPT::USER_CREATE, OPT::USER_RM, 
@@ -6740,7 +6717,7 @@ int main(int argc, const char **argv)
     return 0;
   case OPT::PERIOD_UPDATE:
     {
-      int ret = update_period(cfgstore.get(), realm_id, realm_name,
+      int ret = update_period(cfgstore.get(), zone.id, realm_id, realm_name,
                               period_epoch, commit, remote, url,
                               opt_region, access_key, secret_key,
                               formatter.get(), yes_i_really_mean_it);
@@ -6770,7 +6747,7 @@ int main(int argc, const char **argv)
         cerr << "failed to load period: " << cpp_strerror(-ret) << std::endl;
         return -ret;
       }
-      ret = commit_period(cfgstore.get(), realm, *realm_writer, period,
+      ret = commit_period(cfgstore.get(), zone.id, realm, *realm_writer, period,
                           remote, url, opt_region, access_key, secret_key,
                           yes_i_really_mean_it);
       if (ret < 0) {
@@ -8950,11 +8927,16 @@ next:
   }
 
   if (opt_cmd == OPT::SYNC_INFO) {
-    sync_info(opt_effective_zone_id, opt_bucket, zone_formatter.get());
+    sync_info(zonegroup, zone.id, opt_effective_zone_id,
+              opt_bucket, zone_formatter.get());
   }
 
   if (opt_cmd == OPT::SYNC_STATUS) {
-    sync_status(formatter.get());
+    if (!realm) {
+      cerr << "ERROR: zone " << zone.name << " is not in a realm" << std::endl;
+      return EINVAL;
+    }
+    sync_status(*realm, zonegroup, zone, formatter.get());
   }
 
   if (opt_cmd == OPT::METADATA_SYNC_STATUS) {
@@ -9256,7 +9238,11 @@ next:
     if (ret < 0) {
       return -ret;
     }
-    bucket_sync_info(store, bucket->get_info(), std::cout);
+    if (!realm) {
+      cerr << "ERROR: zone " << zone.name << " is not in a realm" << std::endl;
+      return EINVAL;
+    }
+    bucket_sync_info(store, *realm, zonegroup, zone, bucket->get_info(), std::cout);
   }
 
   if (opt_cmd == OPT::BUCKET_SYNC_STATUS) {
@@ -9268,7 +9254,12 @@ next:
     if (ret < 0) {
       return -ret;
     }
-    bucket_sync_status(store, bucket->get_info(), source_zone, opt_source_bucket, std::cout);
+    if (!realm) {
+      cerr << "ERROR: zone " << zone.name << " is not in a realm" << std::endl;
+      return EINVAL;
+    }
+    bucket_sync_status(store, *realm, zonegroup, zone, bucket->get_info(),
+                       source_zone, opt_source_bucket, std::cout);
   }
 
   if (opt_cmd == OPT::BUCKET_SYNC_MARKERS) {
@@ -10503,7 +10494,7 @@ next:
   }
 
   if (opt_cmd == OPT::PUBSUB_SUB_GET) {
-    if (store->get_zone()->get_tier_type() != "pubsub") {
+    if (zone.tier_type != "pubsub") {
       cerr << "ERROR: only pubsub tier type supports this command" << std::endl;
       return EINVAL;
     }
@@ -10527,7 +10518,7 @@ next:
   }
 
  if (opt_cmd == OPT::PUBSUB_SUB_RM) {
-    if (store->get_zone()->get_tier_type() != "pubsub") {
+    if (zone.tier_type != "pubsub") {
       cerr << "ERROR: only pubsub tier type supports this command" << std::endl;
       return EINVAL;
     }
@@ -10547,7 +10538,7 @@ next:
   }
 
  if (opt_cmd == OPT::PUBSUB_SUB_PULL) {
-    if (store->get_zone()->get_tier_type() != "pubsub") {
+    if (zone.tier_type != "pubsub") {
       cerr << "ERROR: only pubsub tier type supports this command" << std::endl;
       return EINVAL;
     }
@@ -10572,7 +10563,7 @@ next:
  }
 
  if (opt_cmd == OPT::PUBSUB_EVENT_RM) {
-    if (store->get_zone()->get_tier_type() != "pubsub") {
+    if (zone.tier_type != "pubsub") {
       cerr << "ERROR: only pubsub tier type supports this command" << std::endl;
       return EINVAL;
     }
