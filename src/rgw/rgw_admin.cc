@@ -6426,6 +6426,14 @@ int main(int argc, const char **argv)
       break;
     }
     return 0;
+  } // raw_storage_op
+
+  // load/create the site config
+  rgw::SiteConfig site;
+  int r = site.load(dpp(), null_yield, cfgstore.get());
+  if (r < 0) {
+    cerr << "failed to load site configuration" << std::endl;
+    return -r;
   }
 
   resolve_zone_id_opt(opt_effective_zone_name, opt_effective_zone_id);
