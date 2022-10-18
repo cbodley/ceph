@@ -1757,13 +1757,6 @@ namespace rgw::sal {
     return 0;
   }
 
-  int DBStore::list_all_zones(const DoutPrefixProvider* dpp,
-			      std::list<std::string>& zone_ids)
-  {
-    zone_ids.push_back(zone.get_id());
-    return 0;
-  }
-
   int DBStore::cluster_stat(RGWClusterStat& stats)
   {
     return 0;

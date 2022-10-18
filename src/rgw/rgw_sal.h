@@ -317,8 +317,6 @@ class Store {
     virtual std::string zone_unique_trans_id(const uint64_t unique_num) = 0;
     /** Lookup a zonegroup by ID */
     virtual int get_zonegroup(const std::string& id, std::unique_ptr<ZoneGroup>* zonegroup) = 0;
-    /** List all zones in all zone groups by ID */
-    virtual int list_all_zones(const DoutPrefixProvider* dpp, std::list<std::string>& zone_ids) = 0;
     /** Get statistics about the cluster represented by this Store */
     virtual int cluster_stat(RGWClusterStat& stats) = 0;
     /** Get a @a Lifecycle object. Used to manage/run lifecycle transitions */
@@ -1468,8 +1466,6 @@ public:
   virtual int get_zone_by_id(const std::string& id, std::unique_ptr<Zone>* zone) = 0;
   /** Get a zone by Name */
   virtual int get_zone_by_name(const std::string& name, std::unique_ptr<Zone>* zone) = 0;
-  /** List zones in zone group by ID */
-  virtual int list_zones(std::list<std::string>& zone_ids) = 0;
   /** Clone a copy of this zonegroup. */
   virtual std::unique_ptr<ZoneGroup> clone() = 0;
 };

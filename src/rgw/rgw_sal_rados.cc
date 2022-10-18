@@ -1240,11 +1240,6 @@ int RadosStore::get_zonegroup(const std::string& id,
   return 0;
 }
 
-int RadosStore::list_all_zones(const DoutPrefixProvider* dpp, std::list<std::string>& zone_ids)
-{
-  return svc()->zone->list_zones(dpp, zone_ids);
-}
-
 int RadosStore::cluster_stat(RGWClusterStat& stats)
 {
   rados_cluster_stat_t rados_stats;
@@ -3042,15 +3037,6 @@ int RadosZoneGroup::get_zone_by_name(const std::string& name, std::unique_ptr<Zo
 
   Zone* z = new RadosZone(store, clone(), *rz);
   zone->reset(z);
-  return 0;
-}
-
-int RadosZoneGroup::list_zones(std::list<std::string>& zone_ids)
-{
-  for (const auto& entry : group.zones)
-    {
-      zone_ids.push_back(entry.second.id);
-    }
   return 0;
 }
 
