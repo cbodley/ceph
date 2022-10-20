@@ -2263,19 +2263,20 @@ static void get_md_sync_status(const std::string& master_period,
   flush_ss(ss, status);
 }
 
-static void get_data_sync_status(const rgw_zone_id& source_zone, list<string>& status, int tab)
+static void get_data_sync_status(const RGWZoneGroup& zonegroup, const RGWZone& zone,
+                                 const rgw_zone_id& source_zone, list<string>& status, int tab)
 {
   stringstream ss;
 
-  RGWZone *sz;
-
-  if (!(sz = static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->find_zone(source_zone))) {
+  auto i = zonegroup.zones.find(source_zone);
+  if (i == zonegroup.zones.end()) {
     push_ss(ss, status, tab) << string("zone not found");
     flush_ss(ss, status);
     return;
   }
+  const RGWZone& sz = i->second;
 
-  if (!static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->zone_syncs_from(static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->get_zone(), *sz)) {
+  if (!static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->zone_syncs_from(zone, sz)) {
     push_ss(ss, status, tab) << string("not syncing from zone");
     flush_ss(ss, status);
     return;
@@ -2478,13 +2479,13 @@ static void sync_status(const RGWRealm& realm, const RGWZoneGroup& zonegroup,
     const rgw_zone_id& source_id = iter.first;
     string source_str = "source: ";
     string s = source_str + source_id.id;
-    std::unique_ptr<rgw::sal::Zone> sz;
     if (auto sz = zonegroup.zones.find(source_id.id);
         sz != zonegroup.zones.end()) {
       s += string(" (") + sz->second.name + ")";
     }
     data_status.push_back(s);
-    get_data_sync_status(source_id, data_status, source_str.size());
+    get_data_sync_status(zonegroup, zone, source_id,
+                         data_status, source_str.size());
   }
 
   tab_dump("data sync", width, data_status);
