@@ -295,7 +295,6 @@ if(WITH_CEPHFS_JAVA)
   add_subdirectory(java)
 endif()
 
-option(WITH_CPP_REDIS "Build radosgw with cpp_redis library" OFF)
 if(WITH_CPP_REDIS)
   add_subdirectory(cpp_redis)
 endif()
