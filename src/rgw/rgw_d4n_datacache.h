@@ -15,8 +15,8 @@ class RGWD4NCache {
 
     void init(CephContext *_cct) {
       cct = _cct;
-      host = cct->_conf->rgw_directory_host;
-      port = cct->_conf->rgw_directory_port;
+      host = cct->_conf->rgw_d4n_directory_host;
+      port = cct->_conf->rgw_d4n_directory_port;
     }
 
     void findClient(cpp_redis::client *client);

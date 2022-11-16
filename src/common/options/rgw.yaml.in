@@ -3692,7 +3692,7 @@ options:
   default: tank
   services:
   - rgw
-- name: rgw_directory_host
+- name: rgw_d4n_directory_host
   type: str
   level: advanced
   desc: The rgw directory host
@@ -3702,7 +3702,7 @@ options:
   flags:
   - startup
   with_legacy: true
-- name: rgw_directory_port
+- name: rgw_d4n_directory_port
   type: int
   level: advanced
   desc: The rgw directory port

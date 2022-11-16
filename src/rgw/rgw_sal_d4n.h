@@ -19,7 +19,7 @@
 #include "rgw_sal.h"
 #include "rgw_oidc_provider.h"
 #include "rgw_role.h"
-#include "rgw_directory.h"
+#include "rgw_d4n_directory.h"
 #include "rgw_d4n_datacache.h"
 #include "common/dout.h" 
 
