@@ -63,6 +63,10 @@ class D4NFilterTestCase(unittest.TestCase):
 
         self.assertEqual(response_put.get('ResponseMetadata').get('HTTPStatusCode'), 200) 
 
+        response_get = obj.get()
+    
+        self.assertEqual(response_get.get('ResponseMetadata').get('HTTPStatusCode'), 200) 
+    
         data = r.hgetall('rgw-object:test.txt:directory')
 
         self.assertEqual(data.get('key'), 'rgw-object:test.txt:directory')
@@ -70,19 +74,6 @@ class D4NFilterTestCase(unittest.TestCase):
         self.assertEqual(data.get('bucket_name'), 'bkt')
         self.assertEqual(data.get('obj_name'), 'test.txt')
         self.assertEqual(data.get('hosts'), '127.0.0.1:6379')
-
-        # Check if object name in directory instance matches redis update
-        r.hset('rgw-object:test.txt:directory', 'obj_name', 'newoid')
-        
-        response_get = obj.get()
-    
-        res_get = response_get.get('ResponseMetadata')
-    
-        self.assertEqual(res_get.get('HTTPStatusCode'), 200) 
-    
-        data = r.hget('rgw-object:test.txt:directory', 'obj_name')
-        
-        self.assertEqual(data, 'newoid')
 
         r.flushall()
    
@@ -94,6 +85,9 @@ class D4NFilterTestCase(unittest.TestCase):
 
         self.assertEqual(response_put.get('ResponseMetadata').get('HTTPStatusCode'), 200) 
 
+        # Ensure directory entry exists in cache before deletion
+        self.assertTrue(r.exists('rgw-object:test.txt:directory'))
+
         response_del = obj.delete()
 
         self.assertEqual(response_del.get('ResponseMetadata').get('HTTPStatusCode'), 204) 
@@ -102,9 +96,9 @@ class D4NFilterTestCase(unittest.TestCase):
         r.flushall()
 
     '''
-    D4N Cache Unit Tests: Not currently working due to lack of get_obj_attrs() call in set operation
+    D4N Cache Unit Tests
     '''
-    
+
     # Successful setObject Call and Redis Check
     def test_set_object(self):
         r = redis.Redis(host='localhost', port=6379, db=0)
@@ -152,6 +146,10 @@ class D4NFilterTestCase(unittest.TestCase):
 
         self.assertEqual(response_put.get('ResponseMetadata').get('HTTPStatusCode'), 200) 
 
+        response_get = obj.get()
+    
+        self.assertEqual(response_get.get('ResponseMetadata').get('HTTPStatusCode'), 200) 
+
         data = r.hgetall('rgw-object:test.txt:cache')
         output = subprocess.check_output(['./bin/radosgw-admin', 'object', 'stat', '--bucket=bkt', '--object=test.txt'])
         attrs = json.loads(output)
@@ -181,20 +179,9 @@ class D4NFilterTestCase(unittest.TestCase):
                '\x00\x00\x00' 
         self.assertEqual((data.get(b'user.rgw.acl')), tmp5.encode("latin1"))
 
-        # Check if object name in directory instance matches redis update
-        r.hset('rgw-object:test.txt:cache', b'user.rgw.source_zone', 'source_zone_1')
-        
-        response_get = obj.get()
-    
-        self.assertEqual(response_get.get('ResponseMetadata').get('HTTPStatusCode'), 200) 
-        
-        data = r.hget('rgw-object:test.txt:cache', b'user.rgw.source_zone')
-        
-        self.assertEqual(data, b'source_zone_1')
-       
         r.flushall()
-   
-   # Successful copyObject Call and Redis Check
+
+    # Successful copyObject Call and Redis Check
     def test_copy_object(self):
         r = redis.Redis(host='localhost', port=6379, db=0)
         test_txt = b'test'
@@ -202,11 +189,17 @@ class D4NFilterTestCase(unittest.TestCase):
 
         self.assertEqual(response_put.get('ResponseMetadata').get('HTTPStatusCode'), 200) 
 
-        # Update object with different metadata directives
+        # Copy to new object with 'COPY' directive; metadata value should not change
         obj.metadata.update({'test':'value'})
         m = obj.metadata
         m['test'] = 'value_replace'
-        client.copy_object(Bucket='bkt', Key='test.txt', CopySource='bkt/test.txt', Metadata = obj.metadata, MetadataDirective='REPLACE')
+
+        client.copy_object(Bucket='bkt', Key='test_copy.txt', CopySource='bkt/test.txt', Metadata = m, MetadataDirective='COPY')
+
+        self.assertEqual(r.hexists('rgw-object:test_copy.txt:cache', b'user.rgw.x-amz-meta-test') , 0)
+
+        # Update object with 'REPLACE' directive; metadata value should change
+        client.copy_object(Bucket='bkt', Key='test.txt', CopySource='bkt/test.txt', Metadata = m, MetadataDirective='REPLACE')
 
         data = r.hget('rgw-object:test.txt:cache', b'user.rgw.x-amz-meta-test')
 
@@ -214,7 +207,7 @@ class D4NFilterTestCase(unittest.TestCase):
 
         r.flushall()
     
-   # Successful delObject Call and Redis Check
+    # Successful delObject Call and Redis Check
     def test_delete_object(self):
         r = redis.Redis(host='localhost', port=6379, db=0)
         test_txt = b'test'
@@ -222,12 +215,19 @@ class D4NFilterTestCase(unittest.TestCase):
 
         self.assertEqual(response_put.get('ResponseMetadata').get('HTTPStatusCode'), 200) 
 
+        # Ensure cache entry exists in cache before deletion
+        self.assertTrue(r.exists('rgw-object:test.txt:cache'))
+
         response_del = obj.delete()
 
         self.assertEqual(response_del.get('ResponseMetadata').get('HTTPStatusCode'), 204) 
         self.assertFalse(r.exists('rgw-object:test.txt:cache'))
 
         r.flushall()
+
+    @classmethod
+    def tearDownClass(cls):
+        print("D4NFilterTest teardown.")
 
 if __name__ == '__main__':
     
