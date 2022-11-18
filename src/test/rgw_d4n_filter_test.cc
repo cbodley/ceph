@@ -32,6 +32,16 @@ class Environment : public ::testing::Environment {
     virtual ~Environment() {}
 
     void SetUp() override {
+      /* Ensure redis instance is running */
+      try {
+        env_client.connect(hostStr, stoi(portStr), nullptr, 0, 5, 1000);
+      } catch (std::exception &e) {
+        std::cerr << "[          ] ERROR: Redis instance not running." << std::endl;
+      }
+
+      ASSERT_EQ((bool)env_client.is_connected(), (bool)1);
+
+      /* Proceed with environment setup */
       global_pre_init(NULL, args, CEPH_ENTITY_TYPE_CLIENT, CODE_ENVIRONMENT_UTILITY, 0);
       cct = global_init(NULL, args, CEPH_ENTITY_TYPE_CLIENT, CODE_ENVIRONMENT_UTILITY, CINIT_FLAG_NO_MON_CONFIG, false);
       
@@ -55,12 +65,17 @@ class Environment : public ::testing::Environment {
     }
 
     void TearDown() override {
-      delete store;
-      delete dpp;
+      if (env_client.is_connected()) {
+        delete store;
+        delete dpp;
+        
+	env_client.disconnect();
+      }
     }
 
     boost::intrusive_ptr<CephContext> cct;
     rgw::sal::Store* store;
+    cpp_redis::client env_client;
 };
 
 class D4NFilterFixture : public ::testing::Test {

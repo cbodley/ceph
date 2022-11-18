@@ -31,7 +31,18 @@ bucket = s3.Bucket('bkt')
 bucket_location = bucket.create()
 obj = s3.Object(bucket_name='bkt', key='test.txt')
 
-class D4NFilterTestCase(unittest.TestCase):
+class D4NFilterTestCase(unittest.case.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        print("D4NFilterTest setup.")
+
+        try:
+            cls._connection = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+            cls._connection.ping() 
+        except:
+            print("ERROR: Redis instance not running.")
+            raise
     
     '''
     D4N Directory Unit Tests
