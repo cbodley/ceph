@@ -251,7 +251,7 @@ target_include_directories(rgw_common
   PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw"
   PUBLIC "${LUA_INCLUDE_DIR}")
 
-if(WITH_CPP_REDIS)
+if(WITH_RADOSGW_D4N_FILTER)
   add_dependencies(rgw_common cpp_redis)
   target_link_libraries(rgw_common PRIVATE cpp_redis)
   target_include_directories(rgw_common PUBLIC "${CMAKE_SOURCE_DIR}/src/cpp_redis/includes")

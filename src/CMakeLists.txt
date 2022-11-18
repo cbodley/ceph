@@ -295,7 +295,7 @@ if(WITH_CEPHFS_JAVA)
   add_subdirectory(java)
 endif()
 
-if(WITH_CPP_REDIS)
+if(WITH_RADOSGW_D4N_FILTER)
   add_subdirectory(cpp_redis)
 endif()
 
