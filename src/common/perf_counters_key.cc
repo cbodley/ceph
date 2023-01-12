@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <iterator>
 #include <numeric>
-#include <optional>
 #include "common/perf_counters_key.h"
 
 namespace ceph::perf_counters {
@@ -25,76 +24,6 @@ inline std::size_t label_size(const label_pair& l)
   return l.first.size() + sizeof(delimiter)
       + l.second.size() + sizeof(delimiter);
 }
-
-// a forward iterator over label_pairs encoded on a flat buffer
-class label_iterator {
-  using base_iterator = const char*;
-
-  struct iterator_state {
-    base_iterator pos; // end of current label
-    base_iterator end; // end of buffer
-    label_pair label; // current label
-
-    auto operator<=>(const iterator_state& rhs) const = default;
-  };
-  // an empty state represents a past-the-end iterator
-  std::optional<iterator_state> state;
-
-  // find the next two delimiters and construct the label string views
-  static void advance(std::optional<iterator_state>& s)
-  {
-    auto d = std::find(s->pos, s->end, delimiter);
-    if (d == s->end) { // no delimiter for label key
-      s = std::nullopt;
-      return;
-    }
-    s->label.first = std::string_view{s->pos, d};
-    s->pos = std::next(d);
-
-    d = std::find(s->pos, s->end, delimiter);
-    if (d == s->end) { // no delimiter for label name
-      s = std::nullopt;
-      return;
-    }
-    s->label.second = std::string_view{s->pos, d};
-    s->pos = std::next(d);
-  }
-
-  // try to parse the first label pair
-  static auto make_state(base_iterator begin, base_iterator end)
-  {
-    std::optional state = iterator_state{begin, end};
-    advance(state);
-    return state;
-  }
-
- public:
-  using difference_type = std::ptrdiff_t;
-  using value_type = label_pair;
-  using pointer = const value_type*;
-  using reference = const value_type&;
-
-  label_iterator() = default;
-  label_iterator(base_iterator begin, base_iterator end)
-      : state(make_state(begin, end)) {
-    static_assert(std::forward_iterator<label_iterator>);
-  }
-
-  label_iterator& operator++() {
-    advance(state);
-    return *this;
-  }
-  label_iterator operator++(int) {
-    label_iterator tmp = *this;
-    advance(state);
-    return tmp;
-  }
-
-  reference operator*() const { return state->label; }
-  pointer operator->() const { return &state->label; }
-
-  auto operator<=>(const label_iterator& rhs) const = default;
-};
 
 // an output iterator that writes label_pairs to a flat buffer
 template <std::contiguous_iterator Iterator>
@@ -210,6 +139,21 @@ std::string insert(const char* begin1, const char* end1,
   return result;
 }
 
+std::string_view name(const char* begin, const char* end)
+{
+  auto pos = std::find(begin, end, delimiter);
+  return {begin, pos};
+}
+
+std::string_view labels(const char* begin, const char* end)
+{
+  auto pos = std::find(begin, end, delimiter);
+  if (pos == end) {
+    return {};
+  }
+  return {std::next(pos), end};
+}
+
 } // namespace detail
 
 
@@ -217,6 +161,63 @@ std::string key_create(std::string_view counter_name)
 {
   label_pair* end = nullptr;
   return detail::create(counter_name, end, end);
+}
+
+std::string_view key_name(std::string_view key)
+{
+  return detail::name(key.begin(), key.end());
+}
+
+label_range key_labels(std::string_view key)
+{
+  return detail::labels(key.begin(), key.end());
+}
+
+
+label_iterator::label_iterator(base_iterator begin, base_iterator end)
+    : state(make_state(begin, end))
+{
+  static_assert(std::forward_iterator<label_iterator>);
+}
+
+void label_iterator::advance(std::optional<iterator_state>& s)
+{
+  auto d = std::find(s->pos, s->end, detail::delimiter);
+  if (d == s->end) { // no delimiter for label key
+    s = std::nullopt;
+    return;
+  }
+  s->label.first = std::string_view{s->pos, d};
+  s->pos = std::next(d);
+
+  d = std::find(s->pos, s->end, detail::delimiter);
+  if (d == s->end) { // no delimiter for label name
+    s = std::nullopt;
+    return;
+  }
+  s->label.second = std::string_view{s->pos, d};
+  s->pos = std::next(d);
+}
+
+auto label_iterator::make_state(base_iterator begin, base_iterator end)
+    -> std::optional<iterator_state>
+{
+  std::optional state = iterator_state{begin, end};
+  advance(state);
+  return state;
+}
+
+label_iterator& label_iterator::operator++()
+{
+  advance(state);
+  return *this;
+}
+
+label_iterator label_iterator::operator++(int)
+{
+  label_iterator tmp = *this;
+  advance(state);
+  return tmp;
 }
 
 } // namespace ceph::perf_counters

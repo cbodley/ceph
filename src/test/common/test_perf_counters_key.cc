@@ -80,4 +80,50 @@ TEST(PerfCounters, key_insert)
             std::string_view("p\0a\0a\0b\0z\0c\0c\0z\0z\0", 18));
 }
 
+TEST(PerfCounters, key_name)
+{
+  EXPECT_EQ(key_name(""),
+            "");
+  EXPECT_EQ(key_name({"\0", 1}),
+            "");
+  EXPECT_EQ(key_name({"perf\0", 5}),
+            "perf");
+  EXPECT_EQ(key_name({"perf\0\0\0", 7}),
+            "perf");
+}
+
+TEST(PerfCounters, key_labels)
+{
+  {
+    auto labels = key_labels("");
+    EXPECT_EQ(labels.begin(), labels.end());
+  }
+  {
+    auto labels = key_labels({"\0", 1});
+    EXPECT_EQ(labels.begin(), labels.end());
+  }
+  {
+    auto labels = key_labels({"perf\0", 5});
+    EXPECT_EQ(labels.begin(), labels.end());
+  }
+  {
+    auto labels = key_labels({"\0\0\0", 3});
+    ASSERT_EQ(1, std::distance(labels.begin(), labels.end()));
+    EXPECT_EQ(label_pair("", ""), *labels.begin());
+  }
+  {
+    auto labels = key_labels({"\0a\0b\0", 5});
+    ASSERT_EQ(1, std::distance(labels.begin(), labels.end()));
+    EXPECT_EQ(label_pair("a", "b"), *labels.begin());
+    EXPECT_EQ(std::next(labels.begin()), labels.end());
+  }
+  {
+    auto labels = key_labels({"\0a\0b\0c\0d\0", 9});
+    ASSERT_EQ(2, std::distance(labels.begin(), labels.end()));
+    EXPECT_EQ(label_pair("a", "b"), *labels.begin());
+    EXPECT_EQ(label_pair("c", "d"), *std::next(labels.begin()));
+    EXPECT_EQ(std::next(labels.begin(), 2), labels.end());
+  }
+}
+
 } // namespace ceph::perf_counters
