@@ -47,7 +47,8 @@ namespace ssl = boost::asio::ssl;
 struct Connection;
 
 // use explicit executor types instead of the type-erased boost::asio::executor
-using executor_type = boost::asio::io_context::executor_type;
+using executor_type = boost::asio::strand<
+      boost::asio::io_context::executor_type>;
 
 using tcp_socket = boost::asio::basic_stream_socket<tcp, executor_type>;
 using tcp_stream = boost::beast::basic_stream<tcp, executor_type>;
@@ -396,12 +397,11 @@ class AsioFrontend {
   struct Listener {
     tcp::endpoint endpoint;
     tcp::acceptor acceptor;
-    tcp_socket socket;
     bool use_ssl = false;
     bool use_nodelay = false;
 
     explicit Listener(boost::asio::io_context& context)
-      : acceptor(context), socket(context) {}
+      : acceptor(context) {}
   };
   std::vector<Listener> listeners;
 
@@ -417,7 +417,8 @@ class AsioFrontend {
   CephContext* ctx() const { return env.driver->ctx(); }
   std::optional<dmc::ClientCounters> client_counters;
   std::unique_ptr<dmc::ClientConfig> client_config;
-  void accept(Listener& listener, boost::system::error_code ec);
+  void accept(Listener& listener, boost::system::error_code ec,
+              tcp_socket&& socket);
 
  public:
   AsioFrontend(RGWProcessEnv& env, RGWFrontendConfig* conf,
@@ -657,9 +658,10 @@ int AsioFrontend::init()
       }
     }
     l.acceptor.listen(max_connection_backlog);
-    l.acceptor.async_accept(l.socket,
-                            [this, &l] (boost::system::error_code ec) {
-                              accept(l, ec);
+    l.acceptor.async_accept(boost::asio::make_strand(context),
+                            [this, &l] (boost::system::error_code ec,
+                                        tcp_socket&& socket) {
+                              accept(l, ec, std::move(socket));
                             });
 
     ldout(ctx(), 4) << "frontend listening on " << l.endpoint << dendl;
@@ -977,7 +979,8 @@ int AsioFrontend::init_ssl()
 }
 #endif // WITH_RADOSGW_BEAST_OPENSSL
 
-void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
+void AsioFrontend::accept(Listener& l, boost::system::error_code ec,
+                          tcp_socket&& socket)
 {
   if (!l.acceptor.is_open()) {
     return;
@@ -987,23 +990,24 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
     ldout(ctx(), 1) << "accept failed: " << ec.message() << dendl;
     return;
   }
-  auto stream = std::move(l.socket);
-  stream.set_option(tcp::no_delay(l.use_nodelay), ec);
-  l.acceptor.async_accept(l.socket,
-                          [this, &l] (boost::system::error_code ec) {
-                            accept(l, ec);
+  socket.set_option(tcp::no_delay(l.use_nodelay), ec);
+  l.acceptor.async_accept(boost::asio::make_strand(context),
+                          [this, &l] (boost::system::error_code ec,
+                                      tcp_socket&& socket) {
+                            accept(l, ec, std::move(socket));
                           });
   
   // spawn a coroutine to handle the connection
 #ifdef WITH_RADOSGW_BEAST_OPENSSL
   if (l.use_ssl) {
-    spawn::spawn(context,
-      [this, s=std::move(stream)] (yield_context yield) mutable {
+    auto strand = socket.get_executor();
+    spawn::spawn(strand,
+      [this, s=std::move(socket), strand] (yield_context yield) mutable {
         auto conn = boost::intrusive_ptr{new Connection(std::move(s))};
         auto c = connections.add(*conn);
         // wrap the tcp stream in an ssl stream
         boost::asio::ssl::stream<tcp_socket&> stream{conn->socket, *ssl_context};
-        auto timeout = timeout_timer{context.get_executor(), request_timeout, conn};
+        auto timeout = timeout_timer{strand, request_timeout, conn};
         // do ssl handshake
         boost::system::error_code ec;
         timeout.start();
@@ -1028,11 +1032,12 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
 #else
   {
 #endif // WITH_RADOSGW_BEAST_OPENSSL
-    spawn::spawn(context,
-      [this, s=std::move(stream)] (yield_context yield) mutable {
+    auto strand = socket.get_executor();
+    spawn::spawn(strand,
+      [this, s=std::move(socket), strand] (yield_context yield) mutable {
         auto conn = boost::intrusive_ptr{new Connection(std::move(s))};
         auto c = connections.add(*conn);
-        auto timeout = timeout_timer{context.get_executor(), request_timeout, conn};
+        auto timeout = timeout_timer{strand, request_timeout, conn};
         boost::system::error_code ec;
         handle_connection(context, env, conn->socket, timeout, header_limit,
                           conn->buffer, false, pause_mutex, scheduler.get(),
@@ -1123,9 +1128,10 @@ void AsioFrontend::unpause()
 
   // start accepting connections again
   for (auto& l : listeners) {
-    l.acceptor.async_accept(l.socket,
-                            [this, &l] (boost::system::error_code ec) {
-                              accept(l, ec);
+    l.acceptor.async_accept(boost::asio::make_strand(context),
+                            [this, &l] (boost::system::error_code ec,
+                                        tcp_socket&& socket) {
+                              accept(l, ec, std::move(socket));
                             });
   }
 
