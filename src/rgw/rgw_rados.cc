@@ -21,6 +21,7 @@
 #include "common/Formatter.h"
 #include "common/Throttle.h"
 #include "common/BackTrace.h"
+#include "common/perf_counters_key.h"
 
 #include "rgw_sal.h"
 #include "rgw_zone.h"
@@ -475,7 +476,7 @@ public:
   RGWDataSyncProcessorThread(rgw::sal::RadosStore* _driver, RGWAsyncRadosProcessor *async_rados,
                              const RGWZone* source_zone)
     : RGWSyncProcessorThread(_driver->getRados(), "data-sync"),
-      counters(sync_counters::build(store->ctx(), std::string("data-sync-from-") + source_zone->name)),
+      counters(sync_counters::build(store->ctx(), ceph::perf_counters::key_create("data-sync", {{"source", source_zone->name}}))),
       sync(_driver, async_rados, source_zone->id, counters.get()),
       initialized(false) {}
 
