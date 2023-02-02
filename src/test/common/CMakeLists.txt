@@ -360,6 +360,10 @@ add_executable(unittest_async_shared_mutex test_async_shared_mutex.cc)
 add_ceph_unittest(unittest_async_shared_mutex)
 target_link_libraries(unittest_async_shared_mutex ceph-common Boost::system)
 
+add_executable(unittest_async_wait_for_all test_async_wait_for_all.cc)
+add_ceph_unittest(unittest_async_wait_for_all)
+target_link_libraries(unittest_async_wait_for_all ceph-common Boost::system)
+
 add_executable(unittest_cdc test_cdc.cc
   $<TARGET_OBJECTS:unit-main>)
 target_link_libraries(unittest_cdc global ceph-common)
