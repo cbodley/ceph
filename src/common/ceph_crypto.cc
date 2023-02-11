@@ -199,29 +199,14 @@ ssl::OpenSSLDigest::OpenSSLDigest(const EVP_MD * _type)
 
 ssl::OpenSSLDigest::~OpenSSLDigest() {
   EVP_MD_CTX_destroy(mpContext);
-  if (mpType_FIPS) {
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
-    EVP_MD_free(mpType_FIPS);
-#endif  // OPENSSL_VERSION_NUMBER >= 0x30000000L
-  }
 }
 
 void ssl::OpenSSLDigest::Restart() {
-  if (mpType_FIPS) {
-    EVP_DigestInit_ex(mpContext, mpType_FIPS, NULL);
-  } else {
-    EVP_DigestInit_ex(mpContext, mpType, NULL);
-  }
+  EVP_DigestInit_ex(mpContext, mpType, NULL);
 }
 
 void ssl::OpenSSLDigest::SetFlags(int flags) {
-  if (flags == EVP_MD_CTX_FLAG_NON_FIPS_ALLOW && OpenSSL_version_num() >= 0x30000000L && mpType == EVP_md5() && !mpType_FIPS) {
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
-    mpType_FIPS = EVP_MD_fetch(NULL, "MD5", "fips=no");
-#endif  // OPENSSL_VERSION_NUMBER >= 0x30000000L
-  } else {
-    EVP_MD_CTX_set_flags(mpContext, flags);
-  }
+  EVP_MD_CTX_set_flags(mpContext, flags);
   this->Restart();
 }
 
