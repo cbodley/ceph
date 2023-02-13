@@ -24,4 +24,3 @@ hello_world_cpp: hello_world.cc
 
 clean:
 	rm -f hello_world_cpp
-
