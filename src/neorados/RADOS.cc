@@ -810,7 +810,7 @@ void RADOS::execute(Object o, IOContext _ioc, WriteOp _op,
 }
 
 void RADOS::lookup_pool(std::string name,
-			std::unique_ptr<LookupPoolComp> c)
+			LookupPoolComp c)
 {
   // I kind of want to make lookup_pg_pool return
   // std::optional<int64_t> since it can only return one error code.
@@ -826,17 +826,22 @@ void RADOS::lookup_pool(std::string name,
 	  objecter->with_osdmap([&](const OSDMap &osdmap) {
 	    return osdmap.lookup_pg_pool_name(name);
 	  });
-	if (ret < 0)
-	  ca::dispatch(std::move(c), osdc_errc::pool_dne,
-		       std::int64_t(0));
-	else
-	  ca::dispatch(std::move(c), bs::error_code{}, ret);
+	if (ret < 0) {
+	  auto h = boost::asio::append(std::move(c), osdc_errc::pool_dne,
+				       std::int64_t(0));
+	  boost::asio::dispatch(std::move(h));
+	} else {
+	  auto h = boost::asio::append(std::move(c), bs::error_code{}, ret);
+	  boost::asio::dispatch(std::move(h));
+	}
       });
   } else if (ret < 0) {
-    ca::post(std::move(c), osdc_errc::pool_dne,
-		 std::int64_t(0));
+    auto h = boost::asio::append(std::move(c), osdc_errc::pool_dne,
+				 std::int64_t(0));
+    boost::asio::post(boost::asio::bind_executor(get_executor(), std::move(h)));
   } else {
-    ca::post(std::move(c), bs::error_code{}, ret);
+    auto h = boost::asio::append(std::move(c), bs::error_code{}, ret);
+    boost::asio::post(boost::asio::bind_executor(get_executor(), std::move(h)));
   }
 }
 

@@ -575,15 +575,13 @@ public:
 
   using LookupPoolSig = void(boost::system::error_code,
 			     std::int64_t);
-  using LookupPoolComp = ceph::async::Completion<LookupPoolSig>;
-  template<typename CompletionToken>
+  using LookupPoolComp = boost::asio::any_completion_handler<LookupPoolSig>;
+  template<boost::asio::completion_token_for<LookupPoolSig> CompletionToken>
   auto lookup_pool(std::string name,
 		   CompletionToken&& token) {
     return boost::asio::async_initiate<CompletionToken, LookupPoolSig>(
-      [name = std::move(name), this](auto&& handler) mutable {
-	lookup_pool(std::move(name),
-		    LookupPoolComp::create(get_executor(),
-					   std::move(handler)));
+      [name = std::move(name), this](LookupPoolComp handler) mutable {
+	lookup_pool(std::move(name), std::move(handler));
       }, token);
   }
 
@@ -905,7 +903,7 @@ private:
 	       const blkin_trace_info* trace_info);
 
 
-  void lookup_pool(std::string name, std::unique_ptr<LookupPoolComp> c);
+  void lookup_pool(std::string name, LookupPoolComp c);
   void list_pools(std::unique_ptr<LSPoolsComp> c);
   void create_pool_snap(int64_t pool, std::string snap_name,
 			std::unique_ptr<SimpleOpComp> c);
