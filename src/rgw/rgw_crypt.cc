@@ -404,6 +404,7 @@ public:
   static const size_t AES_256_KEYSIZE = 256 / 8;
   static const size_t AES_256_IVSIZE = 128 / 8;
   static const size_t CHUNK_SIZE = 4096;
+  static const size_t QAT_MIN_SIZE = 65536;
   const DoutPrefixProvider* dpp;
 private:
   static const uint8_t IV[AES_256_IVSIZE];
@@ -455,7 +456,7 @@ public:
     }
     bool result = true;
     static std::string accelerator = cct->_conf->plugin_crypto_accelerator;
-    if (accelerator == "crypto_qat" && crypto_accel != nullptr && y) {
+    if (accelerator == "crypto_qat" && crypto_accel != nullptr && y && size >= QAT_MIN_SIZE) {
       // now, batch mode is only for QAT plugin
       size_t iv_num = size / CHUNK_SIZE;
       if (size % CHUNK_SIZE) ++iv_num;
