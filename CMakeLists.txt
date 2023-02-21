@@ -451,19 +451,6 @@ if(WITH_RADOSGW)
   find_package(EXPAT REQUIRED)
   find_package(OATH REQUIRED)
 
-  if (WITH_RADOSGW_QUICHE)
-    # Quiche requires BoringSSL, make sure that find_package(OpenSSL) found it
-    cmake_push_check_state()
-    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
-    check_symbol_exists(OPENSSL_IS_BORINGSSL "openssl/base.h" HAVE_BORINGSSL)
-    cmake_pop_check_state()
-    if (NOT HAVE_BORINGSSL)
-      message(FATAL_ERROR "WITH_RADOSGW_QUICHE requires OPENSSL_IS_BORINGSSL")
-    endif()
-
-    find_package(Quiche 0.14.0 REQUIRED)
-  endif()
-
 # https://curl.haxx.se/docs/install.html mentions the
 # configure flags for various ssl backends
   execute_process(

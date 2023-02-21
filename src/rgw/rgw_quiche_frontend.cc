@@ -37,21 +37,6 @@
 
 #define dout_subsys ceph_subsys_rgw
 
-extern "C" {
-
-// entrypoints
-auto create_h3_config(const rgw::h3::Options& options)
-    -> std::unique_ptr<rgw::h3::Config>;
-
-auto create_h3_listener(rgw::h3::Config& config,
-                        rgw::h3::Observer& observer,
-                        rgw::h3::Listener::executor_type ex,
-                        rgw::h3::StreamHandler& on_new_stream,
-                        rgw::h3::udp_socket socket)
-    -> std::unique_ptr<rgw::h3::Listener>;
-
-} // extern "C"
-
 namespace rgw::h3 {
 
 // use mmap/mprotect to allocate 512k coroutine stacks
@@ -363,6 +348,7 @@ class LoggingObserver : public DoutPrefixPipe, public Observer {
 class Frontend : public RGWFrontend, public DoutPrefix {
   const RGWFrontendConfig* conf;
 
+  void* handle = nullptr; // dlopen() handle
   std::unique_ptr<Config> config;
 
   asio::io_context context;
@@ -390,6 +376,7 @@ class Frontend : public RGWFrontend, public DoutPrefix {
       on_new_stream(StreamHandlerImpl{this, env, conf, context,
                                       pause_mutex, &scheduler})
   {}
+  ~Frontend() override;
 
   int init() override;
 
@@ -421,8 +408,33 @@ static uint16_t parse_port(std::string_view input,
   return port;
 }
 
+Frontend::~Frontend()
+{
+  if (handle) {
+    ::dlclose(handle);
+  }
+}
+
 int Frontend::init()
 {
+  // load library and entrypoints
+  create_config_fn create_config = nullptr;
+  create_listener_fn create_listener = nullptr;
+
+  auto plugin_path = get_cct()->_conf.get_val<std::string>("plugin_dir") +
+      "/h3/librgw_h3_quiche.so";
+  handle = ::dlopen(plugin_path.c_str(), RTLD_NOW);
+  if (handle) {
+    create_config = (create_config_fn)::dlsym(handle, "create_h3_config");
+    create_listener = (create_listener_fn)::dlsym(handle, "create_h3_listener");
+  }
+
+  if (!handle || !create_config || !create_listener) {
+    ldpp_dout(this, 1) << "ERROR: failed to load plugin: "
+        << ::dlerror() << dendl;
+    return -ENOENT;
+  }
+
   Options opts;
 
   if (auto d = conf->get_val("debug"); d) {
@@ -449,7 +461,7 @@ int Frontend::init()
   opts.ssl_private_key_path = key->c_str();
 
   try {
-    config = create_h3_config(opts);
+    config = create_config(opts);
   } catch (const std::exception& e) {
     ldpp_dout(this, -1) << e.what() << dendl;
     return -EINVAL;
@@ -490,7 +502,7 @@ int Frontend::init()
 
     // construct the Listener and start accepting connections
     endpoints.emplace_back(*this, socket.local_endpoint());
-    endpoints.back().listener = create_h3_listener(
+    endpoints.back().listener = create_listener(
         *config, endpoints.back().observer, asio::make_strand(context),
         on_new_stream, std::move(socket));
     endpoints.back().listener->async_listen();

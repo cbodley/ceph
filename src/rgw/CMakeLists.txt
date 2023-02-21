@@ -370,19 +370,18 @@ set(rgw_a_srcs
   driver/rados/rgw_rest_log.cc
   driver/rados/rgw_rest_realm.cc)
 
-if (WITH_RADOSGW_KMIP)
-  list(APPEND rgw_a_srcs rgw_kmip_client_impl.cc)
-endif()
 if (WITH_RADOSGW_QUICHE)
+  # build the h3 library and its dependencies
+  include(BuildH3Frontend)
+  build_h3_frontend()
+
+  # install librgw_h3_quiche.so with other plugins
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/h3/librgw_h3_quiche.so
+    DESTINATION ${CEPH_INSTALL_PKGLIBDIR}/h3)
+
   list(APPEND rgw_a_srcs
       rgw_quiche_client_io.cc
-      rgw_quiche_frontend.cc
-      h3/src/address_validation.cc
-      h3/src/config.cc
-      h3/src/connection.cc
-      h3/src/error.cc
-      h3/src/lib.cc
-      h3/src/listener.cc)
+      rgw_quiche_frontend.cc)
 endif()
 
 gperf_generate(${CMAKE_SOURCE_DIR}/src/rgw/rgw_iam_policy_keywords.gperf
@@ -409,6 +408,12 @@ if(WITH_RADOSGW_KAFKA_ENDPOINT)
   find_package(RDKafka 0.9.2 REQUIRED)
 endif()
 
+if (WITH_RADOSGW_QUICHE)
+  add_dependencies(rgw_a h3_ext)
+  target_include_directories(rgw_a PRIVATE "h3/include")
+  target_compile_definitions(rgw_a PUBLIC HAVE_QUICHE)
+endif()
+
 target_link_libraries(rgw_a
   PRIVATE
     common_utf8 global
@@ -423,11 +428,6 @@ target_link_libraries(rgw_a
 if(WITH_CURL_OPENSSL)
   # used by rgw_http_client_curl.cc
   target_link_libraries(rgw_a PRIVATE OpenSSL::Crypto)
-endif()
-if (WITH_RADOSGW_QUICHE)
-  target_link_libraries(rgw_a PUBLIC Quiche::Quiche)
-  target_include_directories(rgw_a PRIVATE "h3/include")
-  target_compile_definitions(rgw_a PUBLIC HAVE_QUICHE)
 endif()
 
 set(rgw_libs rgw_a)
