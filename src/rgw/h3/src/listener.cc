@@ -15,30 +15,30 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <array>
-#include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/redirect_error.hpp>
 #include <boost/intrusive_ptr.hpp>
+#include <h3/observer.h>
 #include "address_validation.h"
+#include "config.h"
 #include "error.h"
 #include "listener.h"
 #include "message.h"
-#include "ostream.h"
 
 namespace rgw::h3 {
 
-Listener::Listener(CephContext* cct, quiche_config* config,
-                   quiche_h3_config* h3config, socket_type socket,
-                   stream_handler& on_new_stream)
-    : cct(cct), config(config), h3config(h3config),
-      ex(socket.get_executor()), socket(std::move(socket)),
+ListenerImpl::ListenerImpl(Observer& observer, executor_type ex, Config& cfg,
+                           udp_socket socket, StreamHandler& on_new_stream)
+    : observer(observer), config(static_cast<ConfigImpl&>(cfg).get_config()),
+      h3config(static_cast<ConfigImpl&>(cfg).get_h3_config()),
+      ex(ex), socket(std::move(socket)),
       on_new_stream(on_new_stream)
 {
 }
 
-auto Listener::listen() -> awaitable<void>
+// read and dispatch packets until the socket closes
+auto ListenerImpl::listen() -> asio::awaitable<void, executor_type>
 {
-  // read and dispatch packets until the socket closes
-  ldpp_dout(this, 20) << "listening" << dendl;
-
   // generator for random connection ids
   std::default_random_engine rng{std::random_device{}()};
 
@@ -77,15 +77,14 @@ auto Listener::listen() -> awaitable<void>
       if (ec == std::errc::operation_would_block ||
           ec == std::errc::resource_unavailable_try_again) {
         // wait until the socket is readable
-        co_await socket.async_wait(ip::udp::socket::wait_read,
+        co_await socket.async_wait(udp_socket::wait_read,
             asio::redirect_error(use_awaitable, ec));
         continue;
       }
 
-      ldpp_dout(this, 1) << "recvmmsg() failed: " << ec.message() << dendl;
+      observer.on_listener_recvmmsg_error(ec);
       break;
     }
-    ldpp_dout(this, 30) << "recvmmsg() got " << count << " packets" << dendl;
 
     auto self = socket.local_endpoint(ec);
     if (ec) {
@@ -103,39 +102,15 @@ auto Listener::listen() -> awaitable<void>
         break;
       }
     }
-#if 0
-    // handle the packets in parallel. the number of coroutines we spawn with
-    // co_await here must be known at compile-time, so we pass an empty span for
-    // any packets with i >= count and skip them
-    using namespace asio::experimental::awaitable_operators;
-    co_await (
-        on_packet(rng, &messages[0], end) &&
-        on_packet(rng, &messages[1], end) &&
-        on_packet(rng, &messages[2], end) &&
-        on_packet(rng, &messages[3], end) &&
-        on_packet(rng, &messages[4], end) &&
-        on_packet(rng, &messages[5], end) &&
-        on_packet(rng, &messages[6], end) &&
-        on_packet(rng, &messages[7], end) &&
-        on_packet(rng, &messages[8], end) &&
-        on_packet(rng, &messages[9], end) &&
-        on_packet(rng, &messages[10], end) &&
-        on_packet(rng, &messages[11], end) &&
-        on_packet(rng, &messages[12], end) &&
-        on_packet(rng, &messages[13], end) &&
-        on_packet(rng, &messages[14], end) &&
-        on_packet(rng, &messages[15], end)
-      );
-#endif
   }
 
-  ldpp_dout(this, 20) << "done listening" << dendl;
+  observer.on_listener_closed(ec);
   co_return;
 }
 
-auto Listener::on_packet(std::default_random_engine& rng,
-                         message* packet, ip::udp::endpoint self)
-  -> awaitable<error_code>
+auto ListenerImpl::on_packet(std::default_random_engine& rng,
+                             message* packet, ip::udp::endpoint self)
+  -> asio::awaitable<error_code, executor_type>
 {
   auto data = std::span(packet->buffer);
   ip::udp::endpoint& peer = packet->peer;
@@ -161,26 +136,25 @@ auto Listener::on_packet(std::default_random_engine& rng,
       token.data(), &token_len);
   if (rc < 0) {
     auto ec = error_code{rc, quic_category()};
-    ldpp_dout(this, 20) << "failed to parse packet header " << ec.message() << dendl;
+    observer.on_listener_header_info_error(ec);
     co_return error_code{}; // not fatal
   }
   scid.resize(scid_len);
   dcid.resize(dcid_len);
   token.resize(token_len);
 
-  ldpp_dout(this, 30) << "received packet type " << PacketType{type}
-      << " of " << data.size() << " bytes from " << peer
-      << " with scid=" << scid << " dcid=" << dcid << " token=" << token << dendl;
+  observer.on_listener_packet_received(type, data.size(), peer,
+                                       scid, dcid, token);
 
   // look up connection by dcid
-  boost::intrusive_ptr<Connection> connection;
+  boost::intrusive_ptr<ConnectionImpl> connection;
   {
     connection_set::insert_commit_data commit_data;
     auto insert = connections_by_id.insert_check(dcid, commit_data);
 
     if (!insert.second) {
       // connection existed, take a reference while we deliver the packet
-      connection = boost::intrusive_ptr<Connection>(&*insert.first);
+      connection = boost::intrusive_ptr<ConnectionImpl>(&*insert.first);
     } else {
       // dcid not found, can we accept the connection?
 
@@ -193,22 +167,20 @@ auto Listener::on_packet(std::default_random_engine& rng,
             outbuf.data(), outbuf.size());
         if (bytes <= 0) {
           auto ec = error_code{static_cast<int>(bytes), quic_category()};
-          ldpp_dout(this, 20) << "quiche_negotiate_version failed with "
-              << ec.message() << dendl;
+          observer.on_listener_negotiate_version_error(peer, ec);
           co_return error_code{}; // not fatal
         }
 
         error_code ec;
-        co_await socket.async_send_to(
-            asio::buffer(outbuf.data(), bytes), peer, 0,
-            asio::redirect_error(use_awaitable, ec));
-        if (ec) {
-          ldpp_dout(this, 20) << "send to " << peer
-              << " failed with " << ec.message() << dendl;
+        size_t sent = socket.send_to(asio::buffer(outbuf.data(), bytes),
+                                     peer, 0, ec);
+        if (ec == std::errc::operation_would_block ||
+            ec == std::errc::resource_unavailable_try_again) {
+          ec.clear(); // don't block the recvmmsg() loop
+        } else if (ec) {
+          observer.on_listener_sendto_error(peer, ec);
         } else {
-          ldpp_dout(this, 20) << "sent version negotitation packet of "
-              << bytes << " bytes to " << peer
-              << " that requested version=" << version << dendl;
+          observer.on_listener_negotiate_version(peer, sent, version);
         }
         co_return ec;
       }
@@ -216,10 +188,6 @@ auto Listener::on_packet(std::default_random_engine& rng,
       if (token_len == 0) {
         // stateless retry
         token_len = write_token(dcid, peer, token);
-        if (!token_len) {
-          ldpp_dout(this, 20) << "write_token failed" << dendl;
-          co_return error_code{};
-        }
 
         // generate a random cid
         connection_id cid;
@@ -230,26 +198,24 @@ auto Listener::on_packet(std::default_random_engine& rng,
         ssize_t bytes = ::quiche_retry(scid.data(), scid.size(),
                                        dcid.data(), dcid.size(),
                                        cid.data(), cid.size(),
-                                       token.data(), token.size(), version,
+                                       token.data(), token_len, version,
                                        outbuf.data(), outbuf.size());
         if (bytes <= 0) {
           auto ec = error_code{static_cast<int>(bytes), quic_category()};
-          ldpp_dout(this, 20) << "quiche_retry failed with "
-              << ec.message() << dendl;
+          observer.on_listener_stateless_retry_error(peer, ec);
           co_return error_code{}; // not fatal
         }
 
         error_code ec;
-        const size_t sent = co_await socket.async_send_to(
-            asio::buffer(outbuf.data(), bytes), peer, 0,
-            asio::redirect_error(use_awaitable, ec));
-        if (ec) {
-          ldpp_dout(this, 20) << "send to " << peer
-              << " failed with " << ec.message() << dendl;
+        size_t sent = socket.send_to(asio::buffer(outbuf.data(), bytes),
+                                     peer, 0, ec);
+        if (ec == std::errc::operation_would_block ||
+            ec == std::errc::resource_unavailable_try_again) {
+          ec.clear(); // don't block the recvmmsg() loop
+        } else if (ec) {
+          observer.on_listener_sendto_error(peer, ec);
         } else {
-          ldpp_dout(this, 20) << "sent retry packet of " << sent
-              << " bytes with token=" << token << " cid=" << cid
-              << " to " << peer << dendl;
+          observer.on_listener_stateless_retry(peer, sent, token, cid);
         }
         co_return ec;
       }
@@ -258,7 +224,7 @@ auto Listener::on_packet(std::default_random_engine& rng,
       connection_id odcid;
       const size_t odcid_len = validate_token(token, peer, odcid);
       if (odcid_len == 0) {
-        ldpp_dout(this, 20) << "token validation failed" << dendl;
+        observer.on_listener_token_validation_error(peer, token);
         co_return error_code{}; // not fatal
       }
 
@@ -268,13 +234,13 @@ auto Listener::on_packet(std::default_random_engine& rng,
                                            peer.data(), peer.size(),
                                            config)};
       if (!conn) {
-        ldpp_dout(this, 20) << "quiche_accept failed" << dendl;
+        observer.on_listener_accept_error(peer);
         co_return error_code{}; // not fatal
       }
 
       // allocate the Connection and commit its set insertion
-      connection = new Connection(cct, h3config, socket, on_new_stream,
-                                  std::move(conn), std::move(dcid));
+      connection = new ConnectionImpl(observer, h3config, socket, on_new_stream,
+                                      std::move(conn), std::move(dcid));
       insert.first = connections_by_id.insert_commit(*connection, commit_data);
 
       // accept the connection for processing. once the connection closes,
@@ -299,10 +265,8 @@ auto Listener::on_packet(std::default_random_engine& rng,
   co_return error_code{};
 }
 
-void Listener::close(error_code& ec)
+void ListenerImpl::close()
 {
-  ldpp_dout(this, 20) << "listener closing" << dendl;
-
   asio::dispatch(get_executor(), [this] {
       // cancel the connections and remove them from the set
       auto c = connections_by_id.begin();
@@ -316,24 +280,8 @@ void Listener::close(error_code& ec)
   cancel_listen.emit(asio::cancellation_type::terminal);
 
   // close the socket
-  socket.close(ec);
-}
-
-
-std::ostream& Listener::gen_prefix(std::ostream& out) const
-{
   error_code ec;
-  return out << "h3 " << socket.local_endpoint(ec) << ": ";
-}
-
-CephContext* Listener::get_cct() const
-{
-  return cct;
-}
-
-unsigned Listener::get_subsys() const
-{
-  return ceph_subsys_rgw;
+  socket.close(ec);
 }
 
 } // namespace rgw::h3

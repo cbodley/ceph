@@ -69,7 +69,7 @@
 #endif
 #include "rgw_asio_frontend.h"
 #ifdef HAVE_QUICHE
-#include "h3/frontend.h"
+#include "rgw_quiche_frontend.h"
 #endif
 #include "rgw_dmclock_scheduler_ctx.h"
 #include "rgw_lua.h"

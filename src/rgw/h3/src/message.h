@@ -27,7 +27,7 @@ using message_buffer = boost::container::static_vector<
 struct message {
   message_buffer buffer{message_buffer::max_size(),
                         boost::container::default_init};
-  ip::udp::endpoint peer; // remote address
+  boost::asio::ip::udp::endpoint peer; // remote address
 };
 
 } // namespace rgw::h3

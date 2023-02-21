@@ -14,11 +14,12 @@
 
 #pragma once
 
-#include "h3/types.h"
+#include <h3/types.h>
 
 namespace rgw::h3 {
 
 /// Generate an address validation token to be sent in a stateless retry packet.
+/// Throws std::length_error if it would exceed token.max_size().
 size_t write_token(const connection_id& dcid,
                    const ip::udp::endpoint& peer,
                    address_validation_token& token);

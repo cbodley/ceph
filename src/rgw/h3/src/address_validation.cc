@@ -13,6 +13,7 @@
  */
 
 #include <algorithm>
+#include <exception>
 #include <iterator>
 #include <string_view>
 
@@ -32,7 +33,7 @@ size_t write_token(const connection_id& dcid,
 {
   const size_t bytes = token_prefix.size() + peer.size() + dcid.size();
   if (bytes > token.max_size()) {
-    return 0;
+    throw std::length_error{"token max size exceeded"};
   }
   auto out = std::back_inserter(token);
   std::copy(token_prefix.begin(), token_prefix.end(), out);

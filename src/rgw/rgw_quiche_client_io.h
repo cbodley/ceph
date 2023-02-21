@@ -14,14 +14,11 @@
 
 #pragma once
 
-#include <boost/beast/http/fields.hpp>
 #include "common/async/yield_context.h"
+#include <h3/h3.h>
 #include "rgw_client_io.h"
-#include "connection.h"
 
 namespace rgw::h3 {
-
-namespace http = boost::beast::http;
 
 /// Implements the RestfulClient abstraction that radosgw uses to read http
 /// requests and write responses.

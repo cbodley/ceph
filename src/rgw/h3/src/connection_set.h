@@ -18,8 +18,8 @@
 
 #include <boost/intrusive/set.hpp>
 
-#include "h3/connection.h"
-#include "h3/types.h"
+#include <h3/h3.h>
+#include "connection.h"
 
 namespace rgw::h3 {
 
@@ -28,18 +28,18 @@ struct cid_compare {
     return std::lexicographical_compare(lhs.begin(), lhs.end(),
                                         rhs.begin(), rhs.end());
   }
-  bool operator()(const Connection& lhs, const Connection& rhs) const {
+  bool operator()(const ConnectionImpl& lhs, const ConnectionImpl& rhs) const {
     return (*this)(lhs.cid, rhs.cid);
   }
 };
 
 struct cid_key {
   using type = const connection_id&;
-  type operator()(const Connection& c) { return c.cid; }
+  type operator()(const ConnectionImpl& c) { return c.cid; }
 };
 
-/// A set of Connections sorted by id.
-using connection_set = boost::intrusive::set<Connection,
+/// A set of connections sorted by id.
+using connection_set = boost::intrusive::set<ConnectionImpl,
       boost::intrusive::compare<cid_compare>,
       boost::intrusive::key_of_value<cid_key>>;
 

@@ -12,71 +12,68 @@
  * Foundation.  See file COPYING.
  */
 
-#include <boost/asio/experimental/append.hpp>
-#include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/container/small_vector.hpp>
+#include <h3/observer.h>
 #include "connection.h"
 #include "error.h"
 #include "message.h"
-#include "ostream.h"
 
 namespace rgw::h3 {
 
-Connection::Connection(CephContext* cct, quiche_h3_config* h3config,
-                       socket_type& socket, stream_handler& on_new_stream,
-                       conn_ptr _conn, connection_id cid)
-    : cct(cct), h3config(h3config), ex(socket.get_executor()),
+ConnectionImpl::ConnectionImpl(Observer& observer, quiche_h3_config* h3config,
+                               udp_socket& socket, StreamHandler& on_new_stream,
+                               conn_ptr _conn, connection_id cid)
+    : observer(observer), h3config(h3config),
+      ex(asio::make_strand(socket.get_executor())),
       socket(socket), on_new_stream(on_new_stream),
-      timeout_timer(socket.get_executor()),
-      pacing_timer(socket.get_executor()),
+      timeout_timer(ex), pacing_timer(ex),
       conn(std::move(_conn)), cid(std::move(cid))
 {
 }
 
-Connection::~Connection()
+ConnectionImpl::~ConnectionImpl()
 {
-  ldpp_dout(this, 20) << "~Connection" << dendl;
+  observer.on_conn_destroy(cid);
 }
 
-auto Connection::accept() -> awaitable<error_code>
+auto ConnectionImpl::accept()
+    -> asio::awaitable<error_code, executor_type>
 {
-  ldpp_dout(this, 20) << "accepted" << dendl;
+  observer.on_conn_accept(cid);
 
   reset_timeout(); // schedule the initial timeout
 
-  auto ec = co_await writer();
-  ldpp_dout(this, 20) << "connection exiting with " << ec.message() << dendl;
-  co_return ec;
+  co_return co_await writer();
 }
 
-void Connection::reset_timeout()
+void ConnectionImpl::reset_timeout()
 {
   auto ns = std::chrono::nanoseconds{::quiche_conn_timeout_as_nanos(conn.get())};
-  ldpp_dout(this, 30) << "timeout scheduled in " << ns << dendl;
+  observer.on_conn_schedule_timeout(cid, ns);
   timeout_timer.expires_after(ns);
   if (ns.count()) {
     timeout_timer.async_wait([this] (error_code ec) { on_timeout(ec); });
   }
 }
 
-void Connection::on_timeout(error_code ec)
+void ConnectionImpl::on_timeout(error_code ec)
 {
   if (ec) {
     return;
   }
-  ldpp_dout(this, 30) << "timeout handler" << dendl;
 
   ::quiche_conn_on_timeout(conn.get());
 
   if (::quiche_conn_is_closed(conn.get())) {
     ec = on_closed();
-    ldpp_dout(this, 20) << "timer detected close, returning "
-        << ec.message() << dendl;
   }
 
   writer_wake(ec);
 }
 
-auto Connection::flush_some() -> awaitable<error_code>
+auto ConnectionImpl::flush_some()
+    -> asio::awaitable<error_code, executor_type>
 {
   // send up to 8 packets at a time with sendmmsg()
   static constexpr size_t max_mmsg = 8;
@@ -103,8 +100,7 @@ auto Connection::flush_some() -> awaitable<error_code>
         }
         break; // send the packets we've already prepared
       }
-      ldpp_dout(this, 20) << "quiche_conn_send() failed: "
-          << ec.message() << dendl;
+      observer.on_conn_send_error(cid, ec);
       co_return ec;
     }
 
@@ -138,14 +134,12 @@ auto Connection::flush_some() -> awaitable<error_code>
       const auto delay = send_at - now;
       pacing_remainder += delay;
       if (pacing_remainder >= pacing_threshold) {
-        ldpp_dout(this, 20) << "pacing delay " << pacing_remainder << dendl;
+        observer.on_conn_pacing_delay(cid, pacing_remainder);
 
         pacing_timer.expires_after(pacing_remainder);
         co_await pacing_timer.async_wait(
             asio::redirect_error(use_awaitable, ec));
         if (ec) {
-          ldpp_dout(this, 20) << "pacing timer failed with "
-              << ec.message()<< dendl;
           co_return ec;
         }
         pacing_remainder = ceph::timespan::zero();
@@ -156,14 +150,13 @@ auto Connection::flush_some() -> awaitable<error_code>
   int sent = ::sendmmsg(socket.native_handle(), headers.data(), count, 0);
   if (sent == -1) {
     ec.assign(errno, boost::system::system_category());
-    ldpp_dout(this, 1) << "sendmmsg() failed: " << ec.message() << dendl;
-  } else {
-    ldpp_dout(this, 30) << "sendmmsg() sent " << sent << " packets" << dendl;
+    observer.on_conn_sendmmsg_error(cid, ec);
   }
   co_return ec;
 }
 
-auto Connection::flush() -> awaitable<error_code>
+auto ConnectionImpl::flush()
+    -> asio::awaitable<error_code, executor_type>
 {
   error_code ec;
   while (!ec) {
@@ -172,7 +165,8 @@ auto Connection::flush() -> awaitable<error_code>
   co_return ec;
 }
 
-auto Connection::writer() -> awaitable<error_code>
+auto ConnectionImpl::writer()
+    -> asio::awaitable<error_code, executor_type>
 {
   for (;;) {
     error_code ec = co_await writer_wait();
@@ -182,14 +176,11 @@ auto Connection::writer() -> awaitable<error_code>
 
     ec = co_await flush();
     if (ec != quic_errc::done) {
-      ldpp_dout(this, 20) << "flush failed: " << ec.message() << dendl;
       co_return ec;
     }
 
     if (::quiche_conn_is_closed(conn.get())) {
       ec = on_closed();
-      ldpp_dout(this, 20) << "writer detected close, returning "
-          << ec.message() << dendl;
       co_return ec;
     }
     reset_timeout(); // reschedule the connection timeout
@@ -197,18 +188,22 @@ auto Connection::writer() -> awaitable<error_code>
   // unreachable
 }
 
-auto Connection::writer_wait() -> awaitable<error_code>
+auto ConnectionImpl::writer_wait()
+    -> asio::awaitable<error_code, executor_type>
 {
-  ceph_assert(!writer_handler); // one waiter at a time
+  if (writer_handler) {
+    throw std::runtime_error("ConnectionImpl::writer_wait() only "
+                             "supports a single writer");
+  }
 
-  use_awaitable_t token;
-  return asio::async_initiate<use_awaitable_t, writer_signature>(
-      [this] (writer_handler_type&& h) {
+  auto token = use_awaitable;
+  return asio::async_initiate<use_awaitable_t, WriterSignature>(
+      [this] (WriterHandler h) {
         writer_handler.emplace(std::move(h));
       }, token);
 }
 
-void Connection::writer_wake(error_code ec)
+void ConnectionImpl::writer_wake(error_code ec)
 {
   if (!writer_handler) {
     return;
@@ -235,8 +230,8 @@ int header_cb(uint8_t *name, size_t name_len,
   return 0;
 }
 
-error_code Connection::poll_events(ip::udp::endpoint peer,
-                                   ip::udp::endpoint self)
+error_code ConnectionImpl::poll_events(ip::udp::endpoint peer,
+                                       ip::udp::endpoint self)
 {
   for (;;) {
     quiche_h3_event* pevent = nullptr;
@@ -252,17 +247,16 @@ error_code Connection::poll_events(ip::udp::endpoint peer,
       int r = ::quiche_h3_event_for_each_header(ev.get(), header_cb, &headers);
       if (r < 0) {
         auto ec = error_code{r, h3_category()};
-        ldpp_dout(this, 20) << "stream=" << stream_id
-            << " poll_events() failed with " << ec.message() << dendl;
+        observer.on_conn_h3_poll_error(cid, stream_id, ec);
         return ec;
       }
-      ldpp_dout(this, 20) << "stream=" << stream_id << " got headers" << dendl;
 
+      // call the stream handler
       on_new_stream(boost::intrusive_ptr{this}, stream_id, std::move(headers),
                     std::move(self), std::move(peer));
     } else if (type == QUICHE_H3_EVENT_DATA) {
       if (auto r = readers.find(stream_id); r != readers.end()) {
-        auto ec = r->read_some(this, h3conn.get(), conn.get());
+        auto ec = streamio_read(*r);
         if (ec == h3_errc::done) {
           // wait for the next event
         } else if (ec) {
@@ -271,7 +265,7 @@ error_code Connection::poll_events(ip::udp::endpoint peer,
           // wake the reader
           auto& reader = *r;
           readers.erase(r);
-          reader.wake(ec);
+          streamio_wake(reader, ec);
         }
       }
     }
@@ -280,9 +274,9 @@ error_code Connection::poll_events(ip::udp::endpoint peer,
   return {};
 }
 
-error_code Connection::handle_packet(std::span<uint8_t> data,
-                                     ip::udp::endpoint peer,
-                                     ip::udp::endpoint self)
+error_code ConnectionImpl::handle_packet(std::span<uint8_t> data,
+                                         ip::udp::endpoint peer,
+                                         ip::udp::endpoint self)
 {
   error_code ec;
 
@@ -295,8 +289,7 @@ error_code Connection::handle_packet(std::span<uint8_t> data,
       conn.get(), data.data(), data.size(), &recvinfo);
   if (bytes < 0) {
     ec.assign(bytes, quic_category());
-    ldpp_dout(this, 20) << "quiche_conn_recv() failed: "
-        << ec.message() << dendl;
+    observer.on_conn_recv_error(cid, ec);
     return ec;
   }
 
@@ -315,7 +308,7 @@ error_code Connection::handle_packet(std::span<uint8_t> data,
     auto w = writers.begin();
     while (w != writers.end()) {
       // try to write some more
-      auto ec = w->write_some(this, h3conn.get(), conn.get(), w->fin);
+      auto ec = streamio_write(*w, w->fin);
       if (ec == h3_errc::done) {
         ++w; // wait for more packets
       } else if (ec) {
@@ -323,7 +316,7 @@ error_code Connection::handle_packet(std::span<uint8_t> data,
       } else if (w->data.empty()) {
         auto& writer = *w;
         w = writers.erase(w);
-        writer.wake(ec);
+        streamio_wake(writer, ec);
       } else {
         ++w; // wait for more packets
       }
@@ -335,121 +328,126 @@ error_code Connection::handle_packet(std::span<uint8_t> data,
   return error_code{};
 }
 
-auto Connection::streamio_wait(StreamIO& stream, streamio_set& blocked)
-    -> awaitable<error_code>
+auto ConnectionImpl::streamio_wait(StreamIO& stream, streamio_set& blocked)
+    -> asio::awaitable<error_code, executor_type>
 {
   blocked.push_back(stream);
   writer_wake();
 
-  return stream.async_wait();
+  if (stream.handler) {
+    throw std::runtime_error("ConnectionImpl::streamio_wait() only "
+                             "supports a single writer");
+  }
+
+  auto token = use_awaitable;
+  return asio::async_initiate<use_awaitable_t, StreamIO::Signature>(
+      [&stream] (StreamIO::Handler h) {
+        stream.handler.emplace(std::move(h));
+      }, token);
 }
 
-void Connection::streamio_reset(error_code ec)
+void ConnectionImpl::streamio_reset(error_code ec)
 {
   // cancel any readers/writers
   auto r = readers.begin();
   while (r != readers.end()) {
     auto& reader = *r;
     r = readers.erase(r);
-    reader.wake(ec);
+    streamio_wake(reader, ec);
   }
   auto w = writers.begin();
   while (w != writers.end()) {
     auto& writer = *w;
     w = writers.erase(w);
-    writer.wake(ec);
+    streamio_wake(writer, ec);
   }
 }
 
-error_code StreamIO::read_some(const DoutPrefixProvider* dpp,
-                               quiche_h3_conn* h3conn, quiche_conn* conn)
+error_code ConnectionImpl::streamio_read(StreamIO& stream)
 {
   error_code ec;
   const ssize_t bytes = ::quiche_h3_recv_body(
-        h3conn, conn, id, data.data(), data.size());
+        h3conn.get(), conn.get(), stream.id,
+        stream.data.data(), stream.data.size());
   if (bytes < 0) {
     ec.assign(static_cast<int>(bytes), h3_category());
   } else {
-    data = data.subspan(bytes);
-    ldpp_dout(dpp, 30) << "stream " << id << " read " << bytes << " bytes, "
-        << data.size() << " remain" << dendl;
+    stream.data = stream.data.subspan(bytes);
   }
   return ec;
 }
 
-error_code StreamIO::write_some(const DoutPrefixProvider* dpp,
-                                quiche_h3_conn* h3conn, quiche_conn* conn,
-                                bool fin)
+error_code ConnectionImpl::streamio_write(StreamIO& stream, bool fin)
 {
   error_code ec;
   const ssize_t bytes = ::quiche_h3_send_body(
-      h3conn, conn, id, data.data(), data.size(), fin);
+      h3conn.get(), conn.get(), stream.id,
+      stream.data.data(), stream.data.size(), fin);
   if (bytes < 0) {
     ec.assign(static_cast<int>(bytes), h3_category());
   } else {
-    data = data.subspan(bytes);
-    ldpp_dout(dpp, 30) << "stream " << id << " wrote " << bytes << " bytes, "
-        << data.size() << " remain" << dendl;
+    stream.data = stream.data.subspan(bytes);
   }
   return ec;
 }
 
-auto StreamIO::async_wait()
-    -> awaitable<error_code>
+void ConnectionImpl::streamio_wake(StreamIO& stream, error_code ec)
 {
-  ceph_assert(!wait_handler); // one waiter at a time
-
-  use_awaitable_t token;
-  return asio::async_initiate<use_awaitable_t, wait_signature>(
-      [this] (wait_handler_type&& h) {
-        wait_handler.emplace(std::move(h));
-      }, token);
-}
-
-void StreamIO::wake(error_code ec)
-{
-  ceph_assert(wait_handler);
+  if (!stream.handler) {
+    throw std::runtime_error("ConnectionImpl::streamio_wake() "
+                             "called without a waiter");
+  }
 
   // bind arguments to the handler for dispatch
-  auto c = asio::experimental::append(std::move(*wait_handler), nullptr, ec);
-  wait_handler.reset();
+  auto c = asio::experimental::append(std::move(*stream.handler), nullptr, ec);
+  stream.handler.reset();
 
   asio::post(std::move(c));
 }
 
-auto Connection::read_body(StreamIO& stream, std::span<uint8_t> data)
-    -> awaitable<std::tuple<error_code, size_t>>
+auto ConnectionImpl::read_body(StreamIO& stream, std::span<uint8_t> data)
+    -> asio::awaitable<size_t, executor_type>
 {
   stream.data = data;
 
   while (!stream.data.empty()) {
-    auto ec = stream.read_some(this, h3conn.get(), conn.get());
+    auto ec = streamio_read(stream);
     if (ec == h3_errc::done) {
-      ldpp_dout(this, 30) << "stream " << stream.id << " read_body "
-          "waiting to read " << stream.data.size() << " more bytes" << dendl;
-
+      // no bytes buffered, wait for more packets
       ec = co_await streamio_wait(stream, readers);
       if (ec) {
-        ldpp_dout(this, 20) << "stream " << stream.id
-            << " read_body canceled: " << ec.message() << dendl;
-        co_return std::make_tuple(ec, 0);
+        throw boost::system::system_error(ec);
       }
     } else if (ec) {
-      ldpp_dout(this, 20) << "stream " << stream.id
-          << " quiche_h3_recv_body() failed with " << ec.message() << dendl;
-      co_return std::make_tuple(ec, 0);
+      observer.on_stream_recv_body_error(cid, stream.id, ec);
+      throw boost::system::system_error(ec);
     }
   }
 
-  ldpp_dout(this, 30) << "stream " << stream.id
-      << " read_body read " << data.size() << " bytes" << dendl;
-  co_return std::make_tuple(error_code{}, data.size() - stream.data.size());
+  observer.on_stream_recv_body(cid, stream.id, data.size());
+  co_return data.size() - stream.data.size();
 }
 
-auto Connection::write_response(StreamIO& stream,
-                                std::span<quiche_h3_header> headers, bool fin)
-    -> awaitable<error_code>
+auto ConnectionImpl::write_response(StreamIO& stream,
+                                    const http::fields& response,
+                                    bool fin)
+    -> asio::awaitable<void, executor_type>
 {
+  static constexpr size_t static_count = 32;
+  using vector_type = boost::container::small_vector<
+      quiche_h3_header, static_count>;
+  vector_type headers;
+
+  for (const auto& f : response) {
+    auto& h = headers.emplace_back();
+    const auto name = f.name_string();
+    h.name = reinterpret_cast<const uint8_t*>(name.data());
+    h.name_len = name.size();
+    const auto value = f.value();
+    h.value = reinterpret_cast<const uint8_t*>(value.data());
+    h.value_len = value.size();
+  }
+
   for (;;) { // retry on h3_errc::done
     const int result = ::quiche_h3_send_response(
         h3conn.get(), conn.get(), stream.id,
@@ -457,36 +455,29 @@ auto Connection::write_response(StreamIO& stream,
 
     if (result < 0) {
       auto ec = error_code{result, h3_category()};
-      ldpp_dout(this, 20) << "quiche_h3_send_response() failed with "
-          << ec.message() << dendl;
-      if (ec == h3_errc::done) {
-        ldpp_dout(this, 30) << "stream " << stream.id
-            << " write_response waiting" << dendl;
+      observer.on_stream_send_response_error(cid, stream.id, ec);
 
+      if (ec == h3_errc::done) {
+        // unable to buffer more bytes, wait for flow control window and retry
         ec = co_await streamio_wait(stream, writers);
         if (ec) {
-          ldpp_dout(this, 20) << "stream " << stream.id
-              << " write_response canceled: " << ec.message() << dendl;
-          co_return ec;
+          throw boost::system::system_error(ec);
         }
-
-        ldpp_dout(this, 30) << "stream " << stream.id
-            << " write_response retrying" << dendl;
         continue;
       }
-      co_return ec;
+      throw boost::system::system_error(ec);
     }
 
-    ldpp_dout(this, 30) << "stream " << stream.id
-        << " write_response done" << dendl;
+    observer.on_stream_send_response(cid, stream.id);
     writer_wake();
-    co_return error_code{};
+    co_return;
   }
   // unreachable
 }
 
-auto Connection::write_body(StreamIO& stream, std::span<uint8_t> data, bool fin)
-    -> awaitable<std::tuple<error_code, size_t>>
+auto ConnectionImpl::write_body(StreamIO& stream, std::span<uint8_t> data,
+                                bool fin)
+    -> asio::awaitable<size_t, executor_type>
 {
   stream.data = data;
   stream.fin = fin;
@@ -495,33 +486,27 @@ auto Connection::write_body(StreamIO& stream, std::span<uint8_t> data, bool fin)
   bool fin_flag = fin;
 
   while (!stream.data.empty() || fin_flag) {
-    auto ec = stream.write_some(this, h3conn.get(), conn.get(), fin);
+    auto ec = streamio_write(stream, fin);
     if (ec == h3_errc::done) {
-      ldpp_dout(this, 30) << "stream " << stream.id << " write_body "
-          "waiting to write " << stream.data.size() << " more bytes" << dendl;
-
+      // unable to buffer more bytes, wait for flow control window
       ec = co_await streamio_wait(stream, writers);
       if (ec) {
-        ldpp_dout(this, 20) << "stream " << stream.id
-            << " write_body canceled: " << ec.message() << dendl;
-        co_return std::make_tuple(ec, 0);
+        throw boost::system::system_error(ec);
       }
     } else if (ec) {
-      ldpp_dout(this, 20) << "stream " << stream.id
-          << " quiche_h3_send_body() failed with " << ec.message() << dendl;
-      co_return std::make_tuple(ec, 0);
+      observer.on_stream_send_body_error(cid, stream.id, ec);
+      throw boost::system::system_error(ec);
     } else {
       fin_flag = false;
     }
   }
 
-  ldpp_dout(this, 30) << "stream " << stream.id
-      << " write_body wrote " << data.size() << " bytes" << dendl;
+  observer.on_stream_send_body(cid, stream.id, data.size());
   writer_wake();
-  co_return std::make_tuple(error_code{}, data.size() - stream.data.size());
+  co_return data.size() - stream.data.size();
 }
 
-error_code Connection::on_closed()
+error_code ConnectionImpl::on_closed()
 {
   bool is_app;
   uint64_t code;
@@ -531,28 +516,24 @@ error_code Connection::on_closed()
                                &reason_buf, &reason_len)) {
     auto reason = std::string_view{
       reinterpret_cast<const char*>(reason_buf), reason_len};
-    // TODO: interpret code
-    ldpp_dout(this, 20) << "peer closed the connection with code " << code
-        << " reason: " << reason << dendl;
+    observer.on_conn_close_peer(cid, reason, code, is_app);
     return make_error_code(std::errc::connection_reset);
   }
   if (::quiche_conn_local_error(conn.get(), &is_app, &code,
                                 &reason_buf, &reason_len)) {
     auto reason = std::string_view{
       reinterpret_cast<const char*>(reason_buf), reason_len};
-    ldpp_dout(this, 20) << "connection closed with code " << code
-        << " reason: " << reason << dendl;
+    observer.on_conn_close_local(cid, reason, code, is_app);
     return make_error_code(std::errc::connection_reset);
   }
   if (::quiche_conn_is_timed_out(conn.get())) {
-    ldpp_dout(this, 20) << "connection timed out" << dendl;
+    observer.on_conn_timed_out(cid);
     return make_error_code(std::errc::timed_out);
   }
-  ldpp_dout(this, 20) << "connection closed" << dendl;
   return error_code{};
 }
 
-void Connection::cancel()
+void ConnectionImpl::cancel()
 {
   auto self = boost::intrusive_ptr{this};
   asio::dispatch(get_executor(), [this, self=std::move(self)] {
@@ -569,23 +550,6 @@ void Connection::cancel()
       writer_wake(ec);
       pacing_timer.cancel();
     });
-}
-
-
-std::ostream& Connection::gen_prefix(std::ostream& out) const
-{
-  error_code ec;
-  return out << "h3 " << socket.local_endpoint(ec) << " conn " << cid << ": ";
-}
-
-CephContext* Connection::get_cct() const
-{
-  return cct;
-}
-
-unsigned Connection::get_subsys() const
-{
-  return ceph_subsys_rgw;
 }
 
 } // namespace rgw::h3

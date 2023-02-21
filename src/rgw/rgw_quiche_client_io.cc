@@ -12,11 +12,70 @@
  * Foundation.  See file COPYING.
  */
 
-#include <boost/container/small_vector.hpp>
-#include <quiche.h>
-#include "client_io.h"
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/experimental/append.hpp>
+#include "rgw_quiche_client_io.h"
 
 namespace rgw::h3 {
+
+auto async_write_response(Connection& conn, StreamIO& stream,
+                          const http::fields& response, bool fin,
+                          yield_context yield)
+{
+  using Signature = void();
+  return asio::async_initiate<yield_context, Signature>(
+      [&conn, &stream, &response, fin] (auto handler) mutable {
+        asio::co_spawn(conn.get_executor(),
+                       conn.write_response(stream, response, fin),
+          [h = std::move(handler)] (std::exception_ptr eptr) mutable {
+            if (eptr) {
+              std::rethrow_exception(std::move(eptr));
+            } else {
+              asio::dispatch(std::move(h));
+            }
+          });
+        }, yield);
+}
+
+auto async_write_body(Connection& conn, StreamIO& stream,
+                      std::span<uint8_t> data, bool fin,
+                      yield_context yield)
+{
+  using Signature = void(size_t);
+  return asio::async_initiate<yield_context, Signature>(
+      [&conn, &stream, data, fin] (auto handler) mutable {
+        asio::co_spawn(conn.get_executor(),
+                       conn.write_body(stream, data, fin),
+          [h = std::move(handler)] (std::exception_ptr eptr,
+                                    size_t bytes) mutable {
+            if (eptr) {
+              std::rethrow_exception(std::move(eptr));
+            } else {
+              asio::dispatch(asio::experimental::append(std::move(h), bytes));
+            }
+          });
+        }, yield);
+}
+
+auto async_read_body(Connection& conn, StreamIO& stream,
+                     std::span<uint8_t> data, yield_context yield)
+{
+  using Signature = void(size_t);
+  return asio::async_initiate<yield_context, Signature>(
+      [&conn, &stream, data] (auto handler) mutable {
+        asio::co_spawn(conn.get_executor(),
+                       conn.read_body(stream, data),
+          [h = std::move(handler)] (std::exception_ptr eptr,
+                                    size_t bytes) mutable {
+            if (eptr) {
+              std::rethrow_exception(std::move(eptr));
+            } else {
+              asio::dispatch(asio::experimental::append(std::move(h), bytes));
+            }
+          });
+        }, yield);
+}
+
 
 ClientIO::ClientIO(asio::io_context& context, yield_context yield,
                    Connection* conn, uint64_t stream_id, http::fields req,
@@ -114,16 +173,10 @@ size_t ClientIO::send_status(int status, const char* status_name)
 
 size_t ClientIO::send_100_continue()
 {
-  static constexpr std::string_view name = ":status";
-  static constexpr std::string_view value = "100";
-  auto header = quiche_h3_header{
-    reinterpret_cast<const uint8_t*>(name.data()), name.size(),
-    reinterpret_cast<const uint8_t*>(value.data()), value.size()
-  };
-  auto headers = std::span{&header, 1};
-
+  http::fields resp;
+  resp.insert(":status", "100");
   static constexpr bool fin = false;
-  conn->async_write_response(stream, headers, fin, yield); // throw on error
+  async_write_response(*conn, stream, resp, fin, yield); // throw on error
   return 0;
 }
 
@@ -145,30 +198,15 @@ size_t ClientIO::send_content_length(uint64_t len)
 
 size_t ClientIO::complete_header()
 {
-  static constexpr size_t static_count = 32;
-  using vector_type = boost::container::small_vector<
-      quiche_h3_header, static_count>;
-  vector_type headers;
-
-  for (const auto& f : response) {
-    auto& h = headers.emplace_back();
-    const auto name = f.name_string();
-    h.name = reinterpret_cast<const uint8_t*>(name.data());
-    h.name_len = name.size();
-    const auto value = f.value();
-    h.value = reinterpret_cast<const uint8_t*>(value.data());
-    h.value_len = value.size();
-  }
-
   static constexpr bool fin = false;
-  conn->async_write_response(stream, headers, fin, yield); // throw on error
+  async_write_response(*conn, stream, response, fin, yield); // throw on error
   return 0;
 }
 
 size_t ClientIO::recv_body(char* buf, size_t len)
 {
   auto data = std::span{reinterpret_cast<uint8_t*>(buf), len};
-  return conn->async_read_body(stream, data, yield); // throw on error
+  return async_read_body(*conn, stream, data, yield); // throw on error
 }
 
 size_t ClientIO::send_body(const char* buf, size_t len)
@@ -176,14 +214,14 @@ size_t ClientIO::send_body(const char* buf, size_t len)
   char* tmp = const_cast<char*>(buf); // for quiche_h3_send_body(uint8_t *body)
   auto data = std::span{reinterpret_cast<uint8_t*>(tmp), len};
   static constexpr bool fin = false;
-  return conn->async_write_body(stream, data, fin, yield); // throw on error
+  return async_write_body(*conn, stream, data, fin, yield); // throw on error
 }
 
 size_t ClientIO::complete_request()
 {
   static constexpr std::span<uint8_t> empty{};
   static constexpr bool fin = true;
-  return conn->async_write_body(stream, empty, fin, yield); // throw on error
+  return async_write_body(*conn, stream, empty, fin, yield); // throw on error
 }
 
 } // namespace rgw::h3

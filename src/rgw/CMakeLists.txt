@@ -375,12 +375,14 @@ if (WITH_RADOSGW_KMIP)
 endif()
 if (WITH_RADOSGW_QUICHE)
   list(APPEND rgw_a_srcs
-      h3/address_validation.cc
-      h3/client_io.cc
-      h3/connection.cc
-      h3/error.cc
-      h3/frontend.cc
-      h3/listener.cc)
+      rgw_quiche_client_io.cc
+      rgw_quiche_frontend.cc
+      h3/src/address_validation.cc
+      h3/src/config.cc
+      h3/src/connection.cc
+      h3/src/error.cc
+      h3/src/lib.cc
+      h3/src/listener.cc)
 endif()
 
 gperf_generate(${CMAKE_SOURCE_DIR}/src/rgw/rgw_iam_policy_keywords.gperf
@@ -424,6 +426,7 @@ if(WITH_CURL_OPENSSL)
 endif()
 if (WITH_RADOSGW_QUICHE)
   target_link_libraries(rgw_a PUBLIC Quiche::Quiche)
+  target_include_directories(rgw_a PRIVATE "h3/include")
   target_compile_definitions(rgw_a PUBLIC HAVE_QUICHE)
 endif()
 
