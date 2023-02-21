@@ -54,6 +54,7 @@ namespace TOPNSPC::crypto {
       private:
 	EVP_MD_CTX *mpContext;
 	const EVP_MD *mpType;
+        EVP_MD *mpType_FIPS = nullptr;
       public:
 	OpenSSLDigest (const EVP_MD *_type);
 	~OpenSSLDigest ();
@@ -88,8 +89,7 @@ namespace TOPNSPC::crypto {
     };
 
 
-  // boringssl doesn't have HMAC_CTX_get_md()
-# if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(OPENSSL_IS_BORINGSSL)
+# if OPENSSL_VERSION_NUMBER < 0x10100000L
   class HMAC {
   private:
     HMAC_CTX mContext;
