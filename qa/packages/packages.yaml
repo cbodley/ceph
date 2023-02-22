@@ -4,7 +4,6 @@ ceph:
   - ceph
   - cephadm
   - ceph-mds
-  - ceph-mgr
   - ceph-common
   - ceph-fuse
   - ceph-test
@@ -22,7 +21,6 @@ ceph:
   - ceph-common-dbg
   - ceph-fuse-dbg
   - ceph-mds-dbg
-  - ceph-mgr-dbg
   - ceph-mon-dbg
   - ceph-osd-dbg
   - ceph-test-dbg
@@ -42,11 +40,6 @@ ceph:
   - ceph-base
   - cephadm
   - ceph-immutable-object-cache
-  - ceph-mgr
-  - ceph-mgr-dashboard
-  - ceph-mgr-diskprediction-local
-  - ceph-mgr-rook
-  - ceph-mgr-cephadm
   - ceph-fuse
   - ceph-volume
   - librados-devel
@@ -67,7 +60,6 @@ ceph:
   - ceph-radosgw-debuginfo
   - ceph-test-debuginfo
   - ceph-base-debuginfo
-  - ceph-mgr-debuginfo
   - ceph-mds-debuginfo
   - ceph-mon-debuginfo
   - ceph-osd-debuginfo
