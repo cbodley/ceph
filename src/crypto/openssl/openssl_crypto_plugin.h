@@ -27,8 +27,7 @@ public:
   {}
   int factory(CryptoAccelRef *cs,
               std::ostream *ss,
-              const size_t chunk_size,
-	      boost::asio::io_context& context) override {
+              const size_t chunk_size) override {
     if (cryptoaccel == nullptr)
       cryptoaccel = CryptoAccelRef(new OpenSSLCryptoAccel);
 

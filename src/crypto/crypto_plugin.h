@@ -33,7 +33,6 @@ public:
   {}
   virtual int factory(CryptoAccelRef *cs,
                       std::ostream *ss,
-                      const size_t chunk_size,
-		      boost::asio::io_context& context) = 0;
+                      const size_t chunk_size) = 0;
 };
 #endif

@@ -47,7 +47,7 @@ class QccCrypto {
   public:
     CpaCySymCipherDirection qcc_op_type;
 
-    QccCrypto(boost::asio::io_context& context)  {};
+    QccCrypto()  {};
     ~QccCrypto() {};
 
     bool init(const size_t chunk_size);
