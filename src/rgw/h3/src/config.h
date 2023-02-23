@@ -15,8 +15,9 @@
 #pragma once
 
 #include <memory>
-
+#include <boost/intrusive_ptr.hpp>
 #include <h3/h3.h>
+#include "ssl.h"
 
 struct quiche_config;
 struct quiche_h3_config;
@@ -31,15 +32,26 @@ using h3_config_ptr = std::unique_ptr<quiche_h3_config, h3_config_deleter>;
 
 
 class ConfigImpl : public Config {
+  boost::intrusive_ptr<SSL_CTX> ssl_context;
   config_ptr config;
   h3_config_ptr h3_config;
  public:
-  explicit ConfigImpl(config_ptr config, h3_config_ptr h3_config) noexcept
-    : config(std::move(config)), h3_config(std::move(h3_config))
+  explicit ConfigImpl(boost::intrusive_ptr<SSL_CTX> ssl_context,
+                      config_ptr config, h3_config_ptr h3_config) noexcept
+    : ssl_context(std::move(ssl_context)),
+      config(std::move(config)), h3_config(std::move(h3_config))
   {}
 
+  SSL_CTX* get_ssl_context() const { return ssl_context.get(); }
   quiche_config* get_config() const { return config.get(); }
   quiche_h3_config* get_h3_config() const { return h3_config.get(); }
 };
 
 } // namespace rgw::h3
+
+extern "C" {
+
+auto create_h3_config(const rgw::h3::Options& options)
+    -> std::unique_ptr<rgw::h3::Config>;
+
+} // extern "C"

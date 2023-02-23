@@ -18,10 +18,12 @@
 #include <span>
 
 #include <boost/asio/detached.hpp>
+#include <boost/asio/ssl.hpp>
 #include <quiche.h>
 
 #include <h3/h3.h>
 #include "connection_set.h"
+#include "ssl.h"
 
 namespace rgw::h3 {
 
@@ -32,8 +34,9 @@ struct message;
 class ListenerImpl : public Listener {
  public:
   /// Construct a listener on the given socket.
-  explicit ListenerImpl(Observer& observer, executor_type ex, Config& cfg,
-                        udp_socket socket, StreamHandler& on_new_stream);
+  explicit ListenerImpl(Observer& observer, ConfigImpl& config,
+                        executor_type ex, udp_socket socket,
+                        StreamHandler& on_new_stream);
 
   executor_type get_executor() const override { return ex; }
 
@@ -52,6 +55,7 @@ class ListenerImpl : public Listener {
 
  private:
   Observer& observer;
+  boost::intrusive_ptr<SSL_CTX> ssl_context;
   quiche_config* config;
   quiche_h3_config* h3config;
   executor_type ex;
@@ -72,3 +76,15 @@ class ListenerImpl : public Listener {
 };
 
 } // namespace rgw::h3
+
+extern "C" {
+
+/// Create a Listener on the given udp socket.
+auto create_h3_listener(rgw::h3::Observer& observer,
+                        rgw::h3::Config& config,
+                        rgw::h3::Listener::executor_type ex,
+                        rgw::h3::udp_socket socket,
+                        rgw::h3::StreamHandler& on_new_stream)
+    -> std::unique_ptr<rgw::h3::Listener>;
+
+} // extern "C"

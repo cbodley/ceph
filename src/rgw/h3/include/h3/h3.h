@@ -20,6 +20,8 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
+#include <variant>
 
 #include <boost/asio/async_result.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -35,8 +37,21 @@ namespace rgw::h3 {
 
 class Observer;
 
-/// Configuration options.
+/// An in-memory buffer for use as an ssl certificate or private key.
+using pem_data = std::span<const char>;
+
+/// A null-terminated path to an ssl certificate or private key file.
+using pem_path = std::string;
+
+/// An ssl certificate or private key to load in PEM format.
+using pem_file = std::variant<std::monostate, pem_data, pem_path>;
+
+/// Configuration options for create_h3_config().
 struct Options {
+  pem_file ssl_certificate;
+  pem_file ssl_private_key;
+  const char* ssl_ciphers = nullptr;
+
   std::chrono::milliseconds conn_idle_timeout{5000};
   size_t conn_max_streams_bidi = 100;
   size_t conn_max_streams_uni = 10;
@@ -44,8 +59,6 @@ struct Options {
   size_t stream_max_data_bidi_local = 1'000'000;
   size_t stream_max_data_bidi_remote = 1'000'000;
   size_t stream_max_data_uni = 1'000'000;
-  const char* ssl_certificate_path = nullptr;
-  const char* ssl_private_key_path = nullptr;
   void (*log_callback)(const char*, void*) = nullptr;
   void* log_arg = nullptr;
 };
@@ -56,7 +69,7 @@ class Config {
   virtual ~Config() {}
 };
 
-/// Abstract listener interface.
+/// Abstract listener interface that manages a udp socket.
 class Listener {
  public:
   virtual ~Listener() {}
@@ -141,7 +154,7 @@ using create_config_fn = std::unique_ptr<Config> (*)(const Options&);
 
 /// Function pointer type for the create_h3_listener() entrypoint.
 using create_listener_fn = std::unique_ptr<Listener> (*)(
-    Config& config, Observer& observer, Listener::executor_type ex,
-    StreamHandler& on_new_stream, udp_socket socket);
+    Observer& observer, Config& config, Listener::executor_type ex,
+    udp_socket socket, StreamHandler& on_new_stream);
 
 } // namespace rgw::h3

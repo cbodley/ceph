@@ -27,10 +27,11 @@
 
 namespace rgw::h3 {
 
-ListenerImpl::ListenerImpl(Observer& observer, executor_type ex, Config& cfg,
-                           udp_socket socket, StreamHandler& on_new_stream)
-    : observer(observer), config(static_cast<ConfigImpl&>(cfg).get_config()),
-      h3config(static_cast<ConfigImpl&>(cfg).get_h3_config()),
+ListenerImpl::ListenerImpl(Observer& observer, ConfigImpl& cfg,
+                           executor_type ex, udp_socket socket,
+                           StreamHandler& on_new_stream)
+    : observer(observer), ssl_context(cfg.get_ssl_context()),
+      config(cfg.get_config()), h3config(cfg.get_h3_config()),
       ex(ex), socket(std::move(socket)),
       on_new_stream(on_new_stream)
 {
@@ -228,11 +229,15 @@ auto ListenerImpl::on_packet(std::default_random_engine& rng,
         co_return error_code{}; // not fatal
       }
 
-      auto conn = conn_ptr{::quiche_accept(dcid.data(), dcid.size(),
-                                           odcid.data(), odcid.size(),
-                                           self.data(), self.size(),
-                                           peer.data(), peer.size(),
-                                           config)};
+      auto ssl = ::SSL_new(ssl_context.get());
+      constexpr bool is_server = true;
+
+      auto conn = conn_ptr{::quiche_conn_new_with_tls(
+              dcid.data(), dcid.size(),
+              odcid.data(), odcid.size(),
+              self.data(), self.size(),
+              peer.data(), peer.size(),
+              config, ssl, is_server)};
       if (!conn) {
         observer.on_listener_accept_error(peer);
         co_return error_code{}; // not fatal
@@ -285,3 +290,21 @@ void ListenerImpl::close()
 }
 
 } // namespace rgw::h3
+
+
+extern "C" {
+
+/// Create a Listener on the given udp socket.
+auto create_h3_listener(rgw::h3::Observer& observer,
+                        rgw::h3::Config& config,
+                        rgw::h3::Listener::executor_type ex,
+                        rgw::h3::udp_socket socket,
+                        rgw::h3::StreamHandler& on_new_stream)
+    -> std::unique_ptr<rgw::h3::Listener>
+{
+  auto& cfg = static_cast<rgw::h3::ConfigImpl&>(config);
+  return std::make_unique<rgw::h3::ListenerImpl>(
+      observer, cfg, ex, std::move(socket), on_new_stream);
+}
+
+} // extern "C"

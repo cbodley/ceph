@@ -457,8 +457,8 @@ int Frontend::init()
   // TODO: quiche has no interfaces for loading certs/keys from memory, so
   // can't support the mon config keys. use asio::ssl wrappers like the
   // beast frontend, and pass its ssl context into quiche_conn_new_with_tls()
-  opts.ssl_certificate_path = cert->c_str();
-  opts.ssl_private_key_path = key->c_str();
+  opts.ssl_certificate = cert->c_str();
+  opts.ssl_private_key = key->c_str();
 
   try {
     config = create_config(opts);
@@ -503,8 +503,8 @@ int Frontend::init()
     // construct the Listener and start accepting connections
     endpoints.emplace_back(*this, socket.local_endpoint());
     endpoints.back().listener = create_listener(
-        *config, endpoints.back().observer, asio::make_strand(context),
-        on_new_stream, std::move(socket));
+        endpoints.back().observer, *config, asio::make_strand(context),
+        std::move(socket), on_new_stream);
     endpoints.back().listener->async_listen();
   }
   return 0;
