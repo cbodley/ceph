@@ -9,6 +9,8 @@
 #include "common/errno.h"
 #include <atomic>
 #include <utility>
+#include <future>
+#include <system_error>
 
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context
@@ -32,7 +34,7 @@ static void symDpCallback(CpaCySymDpOpData *pOpData,
   if (nullptr != pOpData->pCallbackTag)
   {
     if (static_cast<QatCrypto*>(pOpData->pCallbackTag)->complete()) {
-      static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion_handler(boost::system::error_code{});
+      static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion_handler(std::error_code{});
     }
   }
 }
@@ -308,8 +310,13 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
   CpaStatus status = CPA_STATUS_SUCCESS;
   int avail_inst = -1;
 
-  yield_context yield = y.get_yield_context();
-  avail_inst = async_get_instance(yield);
+  if (y) {
+    yield_context yield = y.get_yield_context();
+    avail_inst = async_get_instance(yield);
+  } else {
+    auto result = async_get_instance(boost::asio::use_future);
+    avail_inst = result.get();
+  }
 
   dout(1) << "Using dp_batch inst " << avail_inst << dendl;
 
@@ -448,21 +455,18 @@ template <typename CompletionToken>
 auto QatCrypto::async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token) {
   CpaStatus status = CPA_STATUS_SUCCESS;
   using boost::asio::async_completion;
-  using Signature = void(boost::system::error_code);
+  using Signature = void(std::error_code);
   async_completion<CompletionToken, Signature> init(token);
   auto ex = boost::asio::get_associated_executor(init.completion_handler);
-  completion_handler = [this, ex, handler = init.completion_handler](boost::system::error_code ec){
+  completion_handler = [this, ex, handler = init.completion_handler](std::error_code ec) {
     boost::asio::post(ex, std::bind(handler, ec));
   };
 
   status = cpaCySymDpEnqueueOpBatch(pOpDataVec.size(), &pOpDataVec[0], CPA_TRUE);
 
   if (status != CPA_STATUS_SUCCESS) {
-    auto ec = boost::system::error_code{status, boost::system::system_category()};
-
-    boost::asio::dispatch(context, [this, &ec](){
-      completion_handler(ec);
-    });
+    auto ec = std::error_code{status, std::generic_category()};
+    completion_handler(ec);
   }
   return init.result.get();
 }
@@ -479,7 +483,7 @@ bool QccCrypto::symPerformOp(int avail_inst,
   Cpa32U one_batch_size = chunk_size * MAX_NUM_SYM_REQ_BATCH;
   Cpa32U iv_index = 0;
   for (Cpa32U off = 0; off < size; off += one_batch_size) {
-    QatCrypto helper(y.get_io_context(), y.get_yield_context(), this);
+    QatCrypto helper(this);
     std::vector<CpaCySymDpOpData*> pOpDataVec;
     for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
       CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data[i];
@@ -515,13 +519,20 @@ bool QccCrypto::symPerformOp(int avail_inst,
       }
     }
 
-    boost::system::error_code ec;
-    yield_context yield = y.get_yield_context();
+    std::error_code ec;
     ceph_assert(!helper.completion_handler);
 
-    do {
-      helper.async_perform_op(avail_inst, pOpDataVec, yield[ec]);
-    } while (!ec && ec.value() == CPA_STATUS_RETRY);
+    if (y) {
+      yield_context yield = y.get_yield_context();
+      do {
+        ec = helper.async_perform_op(avail_inst, pOpDataVec, yield);
+      } while (!ec && ec.value() == CPA_STATUS_RETRY);
+    } else {
+      do {
+        auto result = helper.async_perform_op(avail_inst, pOpDataVec, boost::asio::use_future);
+        ec = result.get();
+      } while (!ec && ec.value() == CPA_STATUS_RETRY);
+    }
 
     if (likely(CPA_STATUS_SUCCESS == status)) {
       for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {

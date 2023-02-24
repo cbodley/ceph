@@ -192,12 +192,10 @@ class QccCrypto {
 };
 
 class QatCrypto {
-  boost::asio::io_context& context;
-  yield_context yield;
   QccCrypto *crypto;
 
  public:
-  std::function<void(boost::system::error_code)> completion_handler;
+  std::function<void(std::error_code)> completion_handler;
   std::atomic<std::size_t> count;
   std::mutex mutex;
   bool complete() {
@@ -210,10 +208,7 @@ class QatCrypto {
     count++;
   }
 
-  QatCrypto (boost::asio::io_context& context,
-             yield_context yield,
-             QccCrypto *crypto
-             ) : context(context), yield(yield), crypto(crypto){}
+  QatCrypto (QccCrypto *crypto) : crypto(crypto){}
   QatCrypto (const QatCrypto &qat) = delete;
   QatCrypto (QatCrypto &&qat) = delete;
   void operator=(const QatCrypto &qat) = delete;
