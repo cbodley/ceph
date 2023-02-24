@@ -19,3 +19,6 @@ target_include_directories(rgw_h3_quiche_headers INTERFACE "include")
 target_include_directories(rgw_h3_quiche_headers INTERFACE "../..")
 
 add_subdirectory(src)
+
+enable_testing()
+add_subdirectory(test)

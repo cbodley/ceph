@@ -1,8 +1,6 @@
 #include "config.h"
 #include <gtest/gtest.h>
 
-#include "certificate.h"
-
 namespace rgw::h3 {
 
 static constexpr std::string_view cert = R"(
