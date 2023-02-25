@@ -42,6 +42,11 @@ add_executable(unittest_rgw_compression
 add_ceph_unittest(unittest_rgw_compression)
 target_link_libraries(unittest_rgw_compression ${rgw_libs})
 
+# unitttest_rgw_curl_client
+add_executable(unittest_rgw_curl_client test_rgw_curl_client.cc)
+add_ceph_unittest(unittest_rgw_curl_client)
+target_link_libraries(unittest_rgw_curl_client ${rgw_libs})
+
 # unitttest_http_manager
 add_executable(unittest_http_manager test_http_manager.cc)
 add_ceph_unittest(unittest_http_manager)
