@@ -11,6 +11,7 @@
 #include <utility>
 #include <future>
 #include <system_error>
+#include <chrono>
 
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context
@@ -44,6 +45,7 @@ static std::mutex qcc_eng_mutex;
 static std::atomic<bool> init_called = { false };
 
 #define NON_INSTANCE -1
+#define RETRY_MAX_NUM 100
 
 template <typename CompletionToken>
 auto QccCrypto::async_get_instance(CompletionToken&& token) {
@@ -94,13 +96,27 @@ void QccCrypto::cleanup() {
 }
 
 void QccCrypto::poll_instances(void) {
+  CpaStatus stat = CPA_STATUS_SUCCESS;
+  size_t retry_num = RETRY_MAX_NUM;
   while (!thread_stop) {
+    int free_instance_num = 0;
     for (int iter = 0; iter < qcc_inst->num_instances; iter++) {
       if (qcc_inst->is_polled[iter] == CPA_TRUE) {
-        icp_sal_CyPollDpInstance(qcc_inst->cy_inst_handles[iter], 0);
+        stat = icp_sal_CyPollDpInstance(qcc_inst->cy_inst_handles[iter], 0);
+        if (stat != CPA_STATUS_SUCCESS) {
+          free_instance_num++;
+        }
       }
     }
-    std::this_thread::yield();
+    if (free_instance_num == qcc_inst->num_instances) {
+      retry_num--;
+    } else {
+      retry_num = RETRY_MAX_NUM;
+    }
+    if (0 == retry_num) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      retry_num = RETRY_MAX_NUM;
+    }
   }
 }
 
