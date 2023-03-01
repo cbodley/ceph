@@ -43,7 +43,7 @@ static std::mutex qcc_alloc_mutex;
 static std::mutex qcc_eng_mutex;
 static std::atomic<bool> init_called = { false };
 
-
+#define NON_INSTANCE -1
 
 template <typename CompletionToken>
 auto QccCrypto::async_get_instance(CompletionToken&& token) {
@@ -52,6 +52,7 @@ auto QccCrypto::async_get_instance(CompletionToken&& token) {
   async_completion<CompletionToken, Signature> init(token);
 
   auto ex = boost::asio::get_associated_executor(init.completion_handler);
+  static size_t times = g_ceph_context->_conf->plugin_crypto_qat_times_wait;
 
   boost::asio::post(my_context, [this, ex, handler = std::move(init.completion_handler)]()mutable{
     auto handler1 = std::move(handler);
@@ -59,10 +60,15 @@ auto QccCrypto::async_get_instance(CompletionToken&& token) {
       int avail_inst = open_instances.front();
       open_instances.pop();
       boost::asio::post(ex, std::bind(handler1, avail_inst));
-    } else {
+    } else if (instance_completions.size() < qcc_inst->num_instances * times) {
+      // keep a few objects to wait QAT instance to make sure qat full utilization as much as possible,
+      // that is, QAT don't need to wait for new objects to ensure
+      // that QAT will not be in a free state as much as possible
       instance_completions.push([this, ex, handler2 = std::move(handler1)](int inst)mutable{
         boost::asio::post(ex, std::bind(handler2, inst));
       });
+    } else {
+      boost::asio::post(ex, std::bind(handler1, NON_INSTANCE));
     }
   });
   return init.result.get();
@@ -308,7 +314,7 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
     return is_init;
   }
   CpaStatus status = CPA_STATUS_SUCCESS;
-  int avail_inst = -1;
+  int avail_inst = NON_INSTANCE;
 
   if (y) {
     yield_context yield = y.get_yield_context();
@@ -316,6 +322,10 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
   } else {
     auto result = async_get_instance(boost::asio::use_future);
     avail_inst = result.get();
+  }
+
+  if (avail_inst == NON_INSTANCE) {
+    return false;
   }
 
   dout(1) << "Using dp_batch inst " << avail_inst << dendl;

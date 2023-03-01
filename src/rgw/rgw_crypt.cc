@@ -454,9 +454,9 @@ public:
       if (!crypto_accel)
         failed_to_get_crypto = true;
     }
-    bool result = true;
+    bool result = false;
     static std::string accelerator = cct->_conf->plugin_crypto_accelerator;
-    if (accelerator == "crypto_qat" && crypto_accel != nullptr && y && size >= QAT_MIN_SIZE) {
+    if (accelerator == "crypto_qat" && crypto_accel != nullptr && size >= QAT_MIN_SIZE) {
       // now, batch mode is only for QAT plugin
       size_t iv_num = size / CHUNK_SIZE;
       if (size % CHUNK_SIZE) ++iv_num;
@@ -470,12 +470,15 @@ public:
         result = crypto_accel->cbc_decrypt_batch(out, in, size, iv, key, y);
       }
       delete[] iv;
-    } else {
+    }
+    if (result == false) {
+      // If QAT don't have free instance, we can fall back to this
+      result = true;
       unsigned char iv[AES_256_IVSIZE];
       for (size_t offset = 0; result && (offset < size); offset += CHUNK_SIZE) {
         size_t process_size = offset + CHUNK_SIZE <= size ? CHUNK_SIZE : size - offset;
         prepare_iv(iv, stream_offset + offset);
-        if (crypto_accel != nullptr) {
+        if (crypto_accel != nullptr && accelerator != "crypto_qat") {
           if (encrypt) {
             result = crypto_accel->cbc_encrypt(out + offset, in + offset,
                                               process_size, iv, key, y);

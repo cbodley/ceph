@@ -773,6 +773,12 @@ options:
   desc: Crypto accelerator library to use
   default: crypto_isal
   with_legacy: true
+- name: plugin_crypto_qat_times_wait
+  type: int
+  level: advanced
+  desc: QAT crypto accelerator library to use. To make sure full of utilization of QAT as much as possible, we plan to wait for free instance, and limit the number of objects waiting for free instance to N times the number of instances.
+  default: 2
+  with_legacy: true
 - name: openssl_engine_opts
   type: str
   level: advanced
