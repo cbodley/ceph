@@ -54,7 +54,7 @@ auto QccCrypto::async_get_instance(CompletionToken&& token) {
   async_completion<CompletionToken, Signature> init(token);
 
   auto ex = boost::asio::get_associated_executor(init.completion_handler);
-  static size_t times = g_ceph_context->_conf->plugin_crypto_qat_times_wait;
+  static size_t max_queue_size = max_requests - qcc_inst->num_instances;
 
   boost::asio::post(my_context, [this, ex, handler = std::move(init.completion_handler)]()mutable{
     auto handler1 = std::move(handler);
@@ -62,7 +62,7 @@ auto QccCrypto::async_get_instance(CompletionToken&& token) {
       int avail_inst = open_instances.front();
       open_instances.pop();
       boost::asio::post(ex, std::bind(handler1, avail_inst));
-    } else if (instance_completions.size() < qcc_inst->num_instances * times) {
+    } else if (instance_completions.size() < max_queue_size) {
       // keep a few objects to wait QAT instance to make sure qat full utilization as much as possible,
       // that is, QAT don't need to wait for new objects to ensure
       // that QAT will not be in a free state as much as possible
@@ -123,11 +123,12 @@ void QccCrypto::poll_instances(void) {
 /*
  * We initialize QAT instance and everything that is common for all ops
 */
-bool QccCrypto::init(const size_t chunk_size) {
+bool QccCrypto::init(const size_t chunk_size, const size_t max_requests) {
 
   std::lock_guard<std::mutex> l(qcc_eng_mutex);
   CpaStatus stat = CPA_STATUS_SUCCESS;
   this->chunk_size = chunk_size;
+  this->max_requests = max_requests;
 
   if (init_called) {
     dout(10) << "Init sequence already called. Skipping duplicate call" << dendl;
@@ -318,7 +319,7 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
 {
   if (!init_called) {
     dout(10) << "QAT not intialized yet. Initializing now..." << dendl;
-    if (!QccCrypto::init(chunk_size)) {
+    if (!QccCrypto::init(chunk_size, max_requests)) {
       derr << "QAT init failed" << dendl;
       return false;
     }

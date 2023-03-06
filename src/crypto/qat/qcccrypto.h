@@ -32,6 +32,7 @@ extern "C" {
 class QccCrypto {
     friend class QatCrypto;
     size_t chunk_size;
+    size_t max_requests;
 
     boost::asio::io_context my_context;
     std::thread qat_context_thread;
@@ -50,7 +51,7 @@ class QccCrypto {
     QccCrypto()  {};
     ~QccCrypto() {};
 
-    bool init(const size_t chunk_size);
+    bool init(const size_t chunk_size, const size_t max_requests);
     bool destroy();
     bool perform_op_batch(unsigned char* out, const unsigned char* in, size_t size,
                           Cpa8U *iv,

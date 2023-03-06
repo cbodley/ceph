@@ -33,6 +33,7 @@ public:
   {}
   virtual int factory(CryptoAccelRef *cs,
                       std::ostream *ss,
-                      const size_t chunk_size) = 0;
+                      const size_t chunk_size,
+                      const size_t max_requests) = 0;
 };
 #endif

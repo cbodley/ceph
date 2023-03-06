@@ -288,7 +288,7 @@ mec_option::empty };
 }
 
 
-CryptoAccelRef get_crypto_accel(const DoutPrefixProvider* dpp, CephContext *cct, const size_t chunk_size)
+CryptoAccelRef get_crypto_accel(const DoutPrefixProvider* dpp, CephContext *cct, const size_t chunk_size, const size_t max_requests)
 {
   CryptoAccelRef ca_impl = nullptr;
   stringstream ss;
@@ -300,7 +300,7 @@ CryptoAccelRef get_crypto_accel(const DoutPrefixProvider* dpp, CephContext *cct,
     ldpp_dout(dpp, -1) << __func__ << " cannot load crypto accelerator of type " << crypto_accel_type << dendl;
     return nullptr;
   }
-  int err = factory->factory(&ca_impl, &ss, chunk_size);
+  int err = factory->factory(&ca_impl, &ss, chunk_size, max_requests);
   if (err) {
     ldpp_dout(dpp, -1) << __func__ << " factory return error " << err <<
         " with description: " << ss.str() << dendl;
@@ -450,7 +450,8 @@ public:
     CryptoAccelRef crypto_accel;
     if (! failed_to_get_crypto.load())
     {
-      crypto_accel = get_crypto_accel(this->dpp, cct, CHUNK_SIZE);
+      static size_t max_requests = g_ceph_context->_conf->rgw_thread_pool_size;
+      crypto_accel = get_crypto_accel(this->dpp, cct, CHUNK_SIZE, max_requests);
       if (!crypto_accel)
         failed_to_get_crypto = true;
     }
