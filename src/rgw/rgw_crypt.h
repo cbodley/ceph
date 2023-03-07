@@ -100,6 +100,7 @@ class RGWGetObj_BlockDecrypt : public RGWGetObj_Filter {
   off_t end; /**< stream offset of last byte that is requested */
   bufferlist cache; /**< stores extra data that could not (yet) be processed by BlockCrypt */
   size_t block_size; /**< snapshot of \ref BlockCrypt.get_block_size() */
+  optional_yield y;
 
   int process(bufferlist& cipher, size_t part_ofs, size_t size);
 
@@ -109,7 +110,8 @@ public:
   RGWGetObj_BlockDecrypt(const DoutPrefixProvider *dpp,
                          CephContext* cct,
                          RGWGetObj_Filter* next,
-                         std::unique_ptr<BlockCrypt> crypt);
+                         std::unique_ptr<BlockCrypt> crypt,
+                         optional_yield y);
   virtual ~RGWGetObj_BlockDecrypt();
 
   virtual int fixup_range(off_t& bl_ofs,
@@ -131,13 +133,15 @@ class RGWPutObj_BlockEncrypt : public rgw::putobj::Pipe
                                           for operations when enough data is accumulated */
   bufferlist cache; /**< stores extra data that could not (yet) be processed by BlockCrypt */
   const size_t block_size; /**< snapshot of \ref BlockCrypt.get_block_size() */
+  optional_yield y;
 public:
   RGWPutObj_BlockEncrypt(const DoutPrefixProvider *dpp,
                          CephContext* cct,
                          rgw::sal::DataProcessor *next,
-                         std::unique_ptr<BlockCrypt> crypt);
+                         std::unique_ptr<BlockCrypt> crypt,
+                         optional_yield y);
 
-  int process(bufferlist&& data, uint64_t logical_offset, optional_yield y) override;
+  int process(bufferlist&& data, uint64_t logical_offset) override;
 }; /* RGWPutObj_BlockEncrypt */
 
 

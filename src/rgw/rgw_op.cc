@@ -4164,7 +4164,7 @@ void RGWPutObj::execute(optional_yield y)
     /* update torrrent */
     torrent.update(data);
 
-    op_ret = filter->process(std::move(data), ofs, y);
+    op_ret = filter->process(std::move(data), ofs);
     if (op_ret < 0) {
       ldpp_dout(this, 20) << "processor->process() returned ret="
           << op_ret << dendl;
@@ -4176,7 +4176,7 @@ void RGWPutObj::execute(optional_yield y)
   tracepoint(rgw_op, after_data_transfer, s->req_id.c_str(), ofs);
 
   // flush any data in filters
-  op_ret = filter->process({}, ofs, y);
+  op_ret = filter->process({}, ofs);
   if (op_ret < 0) {
     return;
   }
@@ -4488,7 +4488,7 @@ void RGWPostObj::execute(optional_yield y)
       }
 
       hash.Update((const unsigned char *)data.c_str(), data.length());
-      op_ret = filter->process(std::move(data), ofs, y);
+      op_ret = filter->process(std::move(data), ofs);
       if (op_ret < 0) {
         return;
       }
@@ -4502,7 +4502,7 @@ void RGWPostObj::execute(optional_yield y)
     } while (again);
 
     // flush
-    op_ret = filter->process({}, ofs, y);
+    op_ret = filter->process({}, ofs);
     if (op_ret < 0) {
       return;
     }
@@ -7601,7 +7601,7 @@ int RGWBulkUploadOp::handle_file(const std::string_view path,
       return op_ret;
     } else if (len > 0) {
       hash.Update((const unsigned char *)data.c_str(), data.length());
-      op_ret = filter->process(std::move(data), ofs, y);
+      op_ret = filter->process(std::move(data), ofs);
       if (op_ret < 0) {
         ldpp_dout(this, 20) << "filter->process() returned ret=" << op_ret << dendl;
         return op_ret;
@@ -7613,7 +7613,7 @@ int RGWBulkUploadOp::handle_file(const std::string_view path,
   } while (len > 0);
 
   // flush
-  op_ret = filter->process({}, ofs, y);
+  op_ret = filter->process({}, ofs);
   if (op_ret < 0) {
     return op_ret;
   }

@@ -660,7 +660,8 @@ bool AES_256_ECB_encrypt(const DoutPrefixProvider* dpp,
 RGWGetObj_BlockDecrypt::RGWGetObj_BlockDecrypt(const DoutPrefixProvider *dpp,
                                                CephContext* cct,
                                                RGWGetObj_Filter* next,
-                                               std::unique_ptr<BlockCrypt> crypt)
+                                               std::unique_ptr<BlockCrypt> crypt,
+                                               optional_yield y)
     :
     RGWGetObj_Filter(next),
     dpp(dpp),
@@ -669,7 +670,8 @@ RGWGetObj_BlockDecrypt::RGWGetObj_BlockDecrypt(const DoutPrefixProvider *dpp,
     enc_begin_skip(0),
     ofs(0),
     end(0),
-    cache()
+    cache(),
+    y(y)
 {
   block_size = this->crypt->get_block_size();
 }
@@ -751,7 +753,7 @@ int RGWGetObj_BlockDecrypt::fixup_range(off_t& bl_ofs, off_t& bl_end) {
 int RGWGetObj_BlockDecrypt::process(bufferlist& in, size_t part_ofs, size_t size)
 {
   bufferlist data;
-  if (!crypt->decrypt(in, 0, size, data, part_ofs, null_yield)) {
+  if (!crypt->decrypt(in, 0, size, data, part_ofs, y)) {
     return -ERR_INTERNAL_ERROR;
   }
   off_t send_size = size - enc_begin_skip;
@@ -824,16 +826,18 @@ int RGWGetObj_BlockDecrypt::flush() {
 RGWPutObj_BlockEncrypt::RGWPutObj_BlockEncrypt(const DoutPrefixProvider *dpp,
                                                CephContext* cct,
                                                rgw::sal::DataProcessor *next,
-                                               std::unique_ptr<BlockCrypt> crypt)
+                                               std::unique_ptr<BlockCrypt> crypt,
+                                               optional_yield y)
   : Pipe(next),
     dpp(dpp),
     cct(cct),
     crypt(std::move(crypt)),
-    block_size(this->crypt->get_block_size())
+    block_size(this->crypt->get_block_size()),
+    y(y)
 {
 }
 
-int RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset, optional_yield y)
+int RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset)
 {
   ldpp_dout(this->dpp, 25) << "Encrypt " << data.length() << " bytes" << dendl;
 
@@ -854,7 +858,7 @@ int RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset, 
     if (!crypt->encrypt(in, 0, proc_size, out, logical_offset, y)) {
       return -ERR_INTERNAL_ERROR;
     }
-    int r = Pipe::process(std::move(out), logical_offset, y);
+    int r = Pipe::process(std::move(out), logical_offset);
     logical_offset += proc_size;
     if (r < 0)
       return r;
@@ -862,7 +866,7 @@ int RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset, 
 
   if (flush) {
     /*replicate 0-sized handle_data*/
-    return Pipe::process({}, logical_offset, y);
+    return Pipe::process({}, logical_offset);
   }
   return 0;
 }
