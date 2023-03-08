@@ -13,6 +13,8 @@
 #include <system_error>
 #include <chrono>
 
+#include "boost/container/static_vector.hpp"
+
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
@@ -34,9 +36,7 @@ static void symDpCallback(CpaCySymDpOpData *pOpData,
 {
   if (nullptr != pOpData->pCallbackTag)
   {
-    if (static_cast<QatCrypto*>(pOpData->pCallbackTag)->complete()) {
-      static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion_handler(std::error_code{});
-    }
+    static_cast<QatCrypto*>(pOpData->pCallbackTag)->complete();
   }
 }
 
@@ -54,19 +54,18 @@ auto QccCrypto::async_get_instance(CompletionToken&& token) {
   async_completion<CompletionToken, Signature> init(token);
 
   auto ex = boost::asio::get_associated_executor(init.completion_handler);
-  static size_t max_queue_size = max_requests - qcc_inst->num_instances;
 
   boost::asio::post(my_context, [this, ex, handler = std::move(init.completion_handler)]()mutable{
     auto handler1 = std::move(handler);
     if (!open_instances.empty()) {
       int avail_inst = open_instances.front();
-      open_instances.pop();
+      open_instances.pop_front();
       boost::asio::post(ex, std::bind(handler1, avail_inst));
     } else if (instance_completions.size() < max_queue_size) {
       // keep a few objects to wait QAT instance to make sure qat full utilization as much as possible,
       // that is, QAT don't need to wait for new objects to ensure
       // that QAT will not be in a free state as much as possible
-      instance_completions.push([this, ex, handler2 = std::move(handler1)](int inst)mutable{
+      instance_completions.push_back([this, ex, handler2 = std::move(handler1)](int inst)mutable{
         boost::asio::post(ex, std::bind(handler2, inst));
       });
     } else {
@@ -80,9 +79,9 @@ void QccCrypto::QccFreeInstance(int entry) {
   boost::asio::post(my_context, [this, entry]()mutable{
     if (!instance_completions.empty()) {
       instance_completions.front()(entry);
-      instance_completions.pop();
+      instance_completions.pop_front();
     } else {
-      open_instances.push(entry);
+      open_instances.push_back(entry);
     }
   });
 }
@@ -188,6 +187,9 @@ bool QccCrypto::init(const size_t chunk_size, const size_t max_requests) {
     return false;
   }
   dout(1) << "Get instances num: " << qcc_inst->num_instances << dendl;
+  max_queue_size = max_requests - qcc_inst->num_instances;
+  instance_completions.set_capacity(max_queue_size);
+  open_instances.set_capacity(qcc_inst->num_instances);
 
   int iter = 0;
   //Start Instances
@@ -230,7 +232,7 @@ bool QccCrypto::init(const size_t chunk_size, const size_t max_requests) {
     stat = cpaCySetAddressTranslation(qcc_inst->cy_inst_handles[iter],
                                        qaeVirtToPhysNUMA);
     if (stat == CPA_STATUS_SUCCESS) {
-      open_instances.push(iter);
+      open_instances.push_back(iter);
       qcc_op_mem[iter].is_mem_alloc = false;
 
       stat = cpaCySymDpRegCbFunc(qcc_inst->cy_inst_handles[iter], symDpCallback);
@@ -479,21 +481,21 @@ CpaStatus QccCrypto::initSession(CpaInstanceHandle cyInstHandle,
 }
 
 template <typename CompletionToken>
-auto QatCrypto::async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token) {
+auto QatCrypto::async_perform_op(int avail_inst, std::span<CpaCySymDpOpData*> pOpDataVec, CompletionToken&& token) {
   CpaStatus status = CPA_STATUS_SUCCESS;
   using boost::asio::async_completion;
-  using Signature = void(std::error_code);
+  using Signature = void(CpaStatus);
   async_completion<CompletionToken, Signature> init(token);
   auto ex = boost::asio::get_associated_executor(init.completion_handler);
-  completion_handler = [this, ex, handler = init.completion_handler](std::error_code ec) {
-    boost::asio::post(ex, std::bind(handler, ec));
+  completion_handler = [this, ex, handler = init.completion_handler](CpaStatus stat) {
+    boost::asio::post(ex, std::bind(handler, stat));
   };
 
-  status = cpaCySymDpEnqueueOpBatch(pOpDataVec.size(), &pOpDataVec[0], CPA_TRUE);
+  count = pOpDataVec.size();
+  status = cpaCySymDpEnqueueOpBatch(pOpDataVec.size(), pOpDataVec.data(), CPA_TRUE);
 
   if (status != CPA_STATUS_SUCCESS) {
-    auto ec = std::error_code{status, std::generic_category()};
-    completion_handler(ec);
+    completion_handler(status);
   }
   return init.result.get();
 }
@@ -510,55 +512,49 @@ bool QccCrypto::symPerformOp(int avail_inst,
   Cpa32U one_batch_size = chunk_size * MAX_NUM_SYM_REQ_BATCH;
   Cpa32U iv_index = 0;
   for (Cpa32U off = 0; off < size; off += one_batch_size) {
-    QatCrypto helper(this);
-    std::vector<CpaCySymDpOpData*> pOpDataVec;
+    QatCrypto helper;
+    boost::container::static_vector<CpaCySymDpOpData*, MAX_NUM_SYM_REQ_BATCH> pOpDataVec;
     for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
       CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data[i];
       Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
       Cpa8U *pIvBuffer = qcc_op_mem[avail_inst].iv_buff[i];
       Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;
-      if (CPA_STATUS_SUCCESS == status) {
-        // copy source into buffer
-        memcpy(pSrcBuffer, pSrc + offset, process_size);
-        // copy IV into buffer
-        memcpy(pIvBuffer, &pIv[iv_index * ivLen], ivLen);
-        iv_index++;
+      // copy source into buffer
+      memcpy(pSrcBuffer, pSrc + offset, process_size);
+      // copy IV into buffer
+      memcpy(pIvBuffer, &pIv[iv_index * ivLen], ivLen);
+      iv_index++;
 
-        helper.count++;
+      //pOpData assignment
+      pOpData->thisPhys = qaeVirtToPhysNUMA(pOpData);
+      pOpData->instanceHandle = qcc_inst->cy_inst_handles[avail_inst];
+      pOpData->sessionCtx = sessionCtx;
+      pOpData->pCallbackTag = &helper;
+      pOpData->cryptoStartSrcOffsetInBytes = 0;
+      pOpData->messageLenToCipherInBytes = process_size;
+      pOpData->iv = qaeVirtToPhysNUMA(pIvBuffer);
+      pOpData->pIv = pIvBuffer;
+      pOpData->ivLenInBytes = ivLen;
+      pOpData->srcBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
+      pOpData->srcBufferLen = process_size;
+      pOpData->dstBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
+      pOpData->dstBufferLen = process_size;
 
-        //pOpData assignment
-        pOpData->thisPhys = qaeVirtToPhysNUMA(pOpData);
-        pOpData->instanceHandle = qcc_inst->cy_inst_handles[avail_inst];
-        pOpData->sessionCtx = sessionCtx;
-        pOpData->pCallbackTag = &helper;
-        pOpData->cryptoStartSrcOffsetInBytes = 0;
-        pOpData->messageLenToCipherInBytes = process_size;
-        pOpData->iv = qaeVirtToPhysNUMA(pIvBuffer);
-        pOpData->pIv = pIvBuffer;
-        pOpData->ivLenInBytes = ivLen;
-        pOpData->srcBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
-        pOpData->srcBufferLen = process_size;
-        pOpData->dstBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
-        pOpData->dstBufferLen = process_size;
-
-        pOpDataVec.push_back(pOpData);
-
-      }
+      pOpDataVec.push_back(pOpData);
     }
 
-    std::error_code ec;
     ceph_assert(!helper.completion_handler);
 
     if (y) {
       yield_context yield = y.get_yield_context();
       do {
-        ec = helper.async_perform_op(avail_inst, pOpDataVec, yield);
-      } while (!ec && ec.value() == CPA_STATUS_RETRY);
+        status = helper.async_perform_op(avail_inst, std::span<CpaCySymDpOpData*>(pOpDataVec), yield);
+      } while (status == CPA_STATUS_RETRY);
     } else {
       do {
-        auto result = helper.async_perform_op(avail_inst, pOpDataVec, boost::asio::use_future);
-        ec = result.get();
-      } while (!ec && ec.value() == CPA_STATUS_RETRY);
+        auto result = helper.async_perform_op(avail_inst, std::span<CpaCySymDpOpData*>(pOpDataVec), boost::asio::use_future);
+        status = result.get();
+      } while (status == CPA_STATUS_RETRY);
     }
 
     if (likely(CPA_STATUS_SUCCESS == status)) {
@@ -567,6 +563,9 @@ bool QccCrypto::symPerformOp(int avail_inst,
         Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;
         memcpy(pDst + offset, pSrcBuffer, process_size);
       }
+    } else {
+      dout(1) << "async_perform_op failed with status = " << status << dendl;
+      break;
     }
   }
 
@@ -575,5 +574,5 @@ bool QccCrypto::symPerformOp(int avail_inst,
     memset(qcc_op_mem[avail_inst].src_buff[i], 0, chunk_size);
     memset(qcc_op_mem[avail_inst].iv_buff[i], 0, ivLen);
   }
-  return (status == CPA_STATUS_SUCCESS);
+  return (CPA_STATUS_SUCCESS == status);
 }

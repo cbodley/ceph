@@ -11,12 +11,12 @@
 #include <queue>
 #include <memory>
 #include "common/async/yield_context.h"
-#include "common/async/completion.h"
-#include "include/rados/librados_fwd.hpp"
 #include <memory>
 #include "common/ceph_mutex.h"
 #include <vector>
 #include <functional>
+#include <span>
+#include "boost/circular_buffer.hpp"
 extern "C" {
 #include "cpa.h"
 #include "cpa_cy_sym_dp.h"
@@ -31,8 +31,9 @@ extern "C" {
 
 class QccCrypto {
     friend class QatCrypto;
-    size_t chunk_size;
-    size_t max_requests;
+    size_t chunk_size{0};
+    size_t max_requests{0};
+    size_t max_queue_size{0};
 
     boost::asio::io_context my_context;
     std::thread qat_context_thread;
@@ -40,7 +41,7 @@ class QccCrypto {
     using work_guard_type = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
     std::unique_ptr<work_guard_type> work_guard;
 
-    std::queue<std::function<void(int)>> instance_completions;
+    boost::circular_buffer<std::function<void(int)>> instance_completions;
 
     template <typename CompletionToken>
     auto async_get_instance(CompletionToken&& token);
@@ -109,7 +110,7 @@ class QccCrypto {
     /*
      * Handle queue with free instances to handle op
      */
-    std::queue<int> open_instances;
+    boost::circular_buffer<int> open_instances;
     void QccFreeInstance(int entry);
     std::thread qat_poll_thread;
     bool thread_stop{false};
@@ -193,29 +194,28 @@ class QccCrypto {
 };
 
 class QatCrypto {
-  QccCrypto *crypto;
-
  public:
-  std::function<void(std::error_code)> completion_handler;
+  std::function<void(CpaStatus stat)> completion_handler;
   std::atomic<std::size_t> count;
   std::mutex mutex;
-  bool complete() {
-    std::scoped_lock lock{mutex};
-    count--;
-    return (count == 0);
+  void complete() {
+    if (--count == 0) {
+      completion_handler(CPA_STATUS_SUCCESS);
+    }
+    return ;
   }
 
   void add_one() {
     count++;
   }
 
-  QatCrypto (QccCrypto *crypto) : crypto(crypto){}
+  QatCrypto () : count(0) {}
   QatCrypto (const QatCrypto &qat) = delete;
   QatCrypto (QatCrypto &&qat) = delete;
   void operator=(const QatCrypto &qat) = delete;
   void operator=(QatCrypto &&qat) = delete;
 
   template <typename CompletionToken>
-  auto async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token);
+  auto async_perform_op(int avail_inst, std::span<CpaCySymDpOpData*> pOpDataVec, CompletionToken&& token);
 };
 #endif //QCCCRYPTO_H
