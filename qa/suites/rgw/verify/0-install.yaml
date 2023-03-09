@@ -4,6 +4,9 @@ tasks:
       extra_system_packages:
         deb: ['s3cmd']
         rpm: ['s3cmd']
+- exec:
+    mgr.x:
+      - find /usr/share/ceph/mgr/__pypackages__/lib/python3/site-packages
 - ceph:
 - openssl_keys:
 - rgw:
