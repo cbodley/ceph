@@ -20,7 +20,6 @@
 #include "common/ceph_mutex.h"
 #include "common/async/completion.h"
 #include "common/async/yield_context.h"
-#include "services/svc_rados.h"
 #include "rgw_aio.h"
 
 namespace rgw {
@@ -68,7 +67,7 @@ class BlockingAioThrottle final : public Aio, private Throttle {
 
   virtual ~BlockingAioThrottle() override {};
 
-  AioResultList get(const RGWSI_RADOS::Obj& obj, OpFunc&& f,
+  AioResultList get(rgw_raw_obj obj, OpFunc&& f,
                     uint64_t cost, uint64_t id) override final;
 
   void put(AioResult& r) override final;
@@ -104,7 +103,7 @@ class YieldingAioThrottle final : public Aio, private Throttle {
 
   virtual ~YieldingAioThrottle() override {};
 
-  AioResultList get(const RGWSI_RADOS::Obj& obj, OpFunc&& f,
+  AioResultList get(rgw_raw_obj obj, OpFunc&& f,
                     uint64_t cost, uint64_t id) override final;
 
   void put(AioResult& r) override final;
