@@ -17,6 +17,7 @@
 #include <functional>
 #include <span>
 #include "boost/circular_buffer.hpp"
+#include "boost/asio/thread_pool.hpp"
 extern "C" {
 #include "cpa.h"
 #include "cpa_cy_sym_dp.h"
@@ -33,13 +34,8 @@ class QccCrypto {
     friend class QatCrypto;
     size_t chunk_size{0};
     size_t max_requests{0};
-    size_t max_queue_size{0};
 
-    boost::asio::io_context my_context;
-    std::thread qat_context_thread;
-    void my_context_run();
-    using work_guard_type = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
-    std::unique_ptr<work_guard_type> work_guard;
+    boost::asio::thread_pool my_pool{1};
 
     boost::circular_buffer<std::function<void(int)>> instance_completions;
 
@@ -50,7 +46,7 @@ class QccCrypto {
     CpaCySymCipherDirection qcc_op_type;
 
     QccCrypto()  {};
-    ~QccCrypto() {};
+    ~QccCrypto() { destroy(); };
 
     bool init(const size_t chunk_size, const size_t max_requests);
     bool destroy();
@@ -194,19 +190,15 @@ class QccCrypto {
 };
 
 class QatCrypto {
- public:
+ private:
   std::function<void(CpaStatus stat)> completion_handler;
   std::atomic<std::size_t> count;
-  std::mutex mutex;
+ public:
   void complete() {
     if (--count == 0) {
       completion_handler(CPA_STATUS_SUCCESS);
     }
     return ;
-  }
-
-  void add_one() {
-    count++;
   }
 
   QatCrypto () : count(0) {}

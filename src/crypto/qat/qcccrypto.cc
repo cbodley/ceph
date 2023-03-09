@@ -55,13 +55,13 @@ auto QccCrypto::async_get_instance(CompletionToken&& token) {
 
   auto ex = boost::asio::get_associated_executor(init.completion_handler);
 
-  boost::asio::post(my_context, [this, ex, handler = std::move(init.completion_handler)]()mutable{
+  boost::asio::post(my_pool, [this, ex, handler = std::move(init.completion_handler)]()mutable{
     auto handler1 = std::move(handler);
     if (!open_instances.empty()) {
       int avail_inst = open_instances.front();
       open_instances.pop_front();
       boost::asio::post(ex, std::bind(handler1, avail_inst));
-    } else if (instance_completions.size() < max_queue_size) {
+    } else if (!instance_completions.full()) {
       // keep a few objects to wait QAT instance to make sure qat full utilization as much as possible,
       // that is, QAT don't need to wait for new objects to ensure
       // that QAT will not be in a free state as much as possible
@@ -76,7 +76,7 @@ auto QccCrypto::async_get_instance(CompletionToken&& token) {
 }
 
 void QccCrypto::QccFreeInstance(int entry) {
-  boost::asio::post(my_context, [this, entry]()mutable{
+  boost::asio::post(my_pool, [this, entry]()mutable{
     if (!instance_completions.empty()) {
       instance_completions.front()(entry);
       instance_completions.pop_front();
@@ -187,8 +187,9 @@ bool QccCrypto::init(const size_t chunk_size, const size_t max_requests) {
     return false;
   }
   dout(1) << "Get instances num: " << qcc_inst->num_instances << dendl;
-  max_queue_size = max_requests - qcc_inst->num_instances;
-  instance_completions.set_capacity(max_queue_size);
+  if (max_requests > qcc_inst->num_instances) {
+    instance_completions.set_capacity(max_requests - qcc_inst->num_instances);
+  }
   open_instances.set_capacity(qcc_inst->num_instances);
 
   int iter = 0;
@@ -248,16 +249,10 @@ bool QccCrypto::init(const size_t chunk_size, const size_t max_requests) {
   }
 
   qat_poll_thread = make_named_thread("qat_poll", &QccCrypto::poll_instances, this);
-  
-  work_guard = std::make_unique<work_guard_type>(my_context.get_executor());
-  qat_context_thread = make_named_thread("qat_context", &QccCrypto::my_context_run, this);
+
   is_init = true;
   dout(10) << "Init complete" << dendl;
   return true;
-}
-
-void QccCrypto::my_context_run() {
-  my_context.run();
 }
 
 bool QccCrypto::destroy() {
@@ -270,10 +265,7 @@ bool QccCrypto::destroy() {
   if (qat_poll_thread.joinable()) {
     qat_poll_thread.join();
   }
-  my_context.stop();
-  if (qat_context_thread.joinable()) {
-    qat_context_thread.join();
-  }
+  my_pool.join();
 
   dout(10) << "Destroying QAT crypto & related memory" << dendl;
   int iter = 0;
@@ -347,7 +339,7 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
     return false;
   }
 
-  dout(1) << "Using dp_batch inst " << avail_inst << dendl;
+  dout(15) << "Using dp_batch inst " << avail_inst << dendl;
 
   auto sg = make_scope_guard([this, avail_inst] {
       //free up the instance irrespective of the op status
@@ -542,8 +534,6 @@ bool QccCrypto::symPerformOp(int avail_inst,
 
       pOpDataVec.push_back(pOpData);
     }
-
-    ceph_assert(!helper.completion_handler);
 
     if (y) {
       yield_context yield = y.get_yield_context();
