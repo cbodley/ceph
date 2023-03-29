@@ -579,10 +579,14 @@ public:
   template<boost::asio::completion_token_for<LookupPoolSig> CompletionToken>
   auto lookup_pool(std::string name,
 		   CompletionToken&& token) {
-    return boost::asio::async_initiate<CompletionToken, LookupPoolSig>(
+    // maintain work on the default executor
+    auto consigned = boost::asio::consign(
+        std::forward<CompletionToken>(token),
+        boost::asio::make_work_guard(get_executor()));
+    return boost::asio::async_initiate<decltype(consigned), LookupPoolSig>(
       [name = std::move(name), this](LookupPoolComp handler) mutable {
 	lookup_pool(std::move(name), std::move(handler));
-      }, token);
+      }, consigned);
   }
 
   std::optional<uint64_t> get_pool_alignment(int64_t pool_id);
