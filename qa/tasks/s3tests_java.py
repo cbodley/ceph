@@ -302,7 +302,7 @@ class S3tests_java(Task):
                     '{tdir}/s3-tests-java'.format(tdir=testdir),
                     run.Raw('&&'),
                     '/opt/gradle/gradle/bin/gradle', 'clean', 'test',
-                    '--rerun-tasks', '--no-build-cache',
+                    '--rerun-tasks', '--no-build-cache', '--stacktrace'
                     ]
             extra_args = []
             suppress_groups = False
