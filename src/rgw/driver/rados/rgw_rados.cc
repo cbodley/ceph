@@ -1363,10 +1363,10 @@ int RGWRados::init_complete(const DoutPrefixProvider *dpp, optional_yield y)
 int RGWRados::init_svc(bool raw, const DoutPrefixProvider *dpp)
 {
   if (raw) {
-    return svc.init_raw(cct, use_cache, get_rados_handle(), null_yield, dpp);
+    return svc.init_raw(cct, driver, use_cache, get_rados_handle(), null_yield, dpp);
   }
 
-  return svc.init(cct, use_cache, run_sync_thread, get_rados_handle(),
+  return svc.init(cct, driver, use_cache, run_sync_thread, get_rados_handle(),
 		  null_yield, dpp);
 }
 
@@ -1384,6 +1384,12 @@ int RGWRados::init_begin(const DoutPrefixProvider *dpp)
   int ret = init_rados();
   if (ret < 0) {
     ldpp_dout(dpp, 0) << "ERROR: failed to init rados (ret=" << cpp_strerror(-ret) << ")" << dendl;
+    return ret;
+  }
+
+  ret = driver->init_neorados(dpp);
+  if (ret < 0) {
+    ldpp_dout(dpp, 0) << "ERROR: failed to initialize neorados (ret=" << cpp_strerror(-ret) << ")" << dendl;
     return ret;
   }
 
