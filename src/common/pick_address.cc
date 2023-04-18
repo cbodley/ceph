@@ -17,6 +17,7 @@
 #include <bitset>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <net/if.h>
 #include <string>
 #include <string.h>
 #include <vector>
