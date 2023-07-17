@@ -671,7 +671,7 @@
    Memcheck:Cond
    ...
    fun:EVP_DecryptFinal_ex
-   fun:_ZN4ceph6crypto6onwire25AES128GCM_OnWireRxHandler34authenticated_decrypt_update_finalEONS_6buffer7v*4listEj
+   fun:_ZN4ceph6crypto6onwire25AES128GCM_OnWireRxHandler34authenticated_decrypt_update_finalE?NS_6buffer7v*4listE*
    ...
 }
 
