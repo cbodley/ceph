@@ -19,6 +19,8 @@
 #include <sys/stat.h>
 #include <sys/xattr.h>
 #include <unistd.h>
+#include <boost/asio/random_access_file.hpp>
+#include <boost/asio/system_executor.hpp> // XXX
 #include "include/scope_guard.h"
 
 #define dout_subsys ceph_subsys_rgw
@@ -1956,9 +1958,27 @@ const std::string POSIXObject::get_temp_fname()
   return temp_fname;
 }
 
+static size_t read_some_at(boost::asio::random_access_file& file,
+                           uint64_t offset,
+                           const boost::asio::mutable_buffer& buffer,
+                           optional_yield y,
+                           boost::system::error_code& ec)
+{
+  if (y) {
+    auto& yield = y.get_yield_context();
+    return file.async_read_some_at(offset, buffer, yield[ec]);
+  } else {
+    return file.read_some_at(offset, buffer, ec);
+  }
+}
+
 int POSIXObject::POSIXReadOp::iterate(const DoutPrefixProvider* dpp, int64_t ofs,
 					int64_t end, RGWGetDataCB* cb, optional_yield y)
 {
+  // TODO: use global io_context from https://github.com/ceph/ceph/pull/52496
+  auto ex = boost::asio::system_executor();
+  auto file = boost::asio::random_access_file{ex, source->obj_fd};
+
   int64_t left;
   int64_t cur_ofs = ofs;
 
@@ -1967,27 +1987,36 @@ int POSIXObject::POSIXReadOp::iterate(const DoutPrefixProvider* dpp, int64_t ofs
   else
     left = end - ofs + 1;
 
+  const int64_t chunk_size = dpp->get_cct()->_conf->rgw_max_chunk_size;
+  // preallocate a buffer, up to the chunk size
+  buffer::ptr p = buffer::create(std::min(left, chunk_size));
+  auto buf = boost::asio::mutable_buffer{p.c_str(), p.length()};
+
   while (left > 0) {
-    bufferlist bl;
-    int len = source->read(cur_ofs, left, bl, dpp, y);
-    if (len < 0) {
-	ldpp_dout(dpp, 0) << " ERROR: could not read " << source->get_name() <<
-	  " ofs: " << cur_ofs << " error: " << cpp_strerror(len) << dendl;
-	return len;
-    } else if (len == 0) {
+    /* Read some */
+    boost::system::error_code ec;
+    const size_t bytes = read_some_at(file, cur_ofs, buf, y, ec);
+
+    if (ec == boost::asio::error::eof) {
       /* Done */
       break;
+    } else if (ec) {
+      ldpp_dout(dpp, 0) << " ERROR: could not read " << source->get_name() <<
+          " ofs: " << cur_ofs << " error: " << ec.message() << dendl;
+      return ceph::from_error_code(ec);
     }
 
-    /* Read some */
-    int ret = cb->handle_data(bl, 0, len);
+    // feed the data back to the client (through any intervening filters)
+    bufferlist bl;
+    bl.append(p, 0, bytes);
+    int ret = cb->handle_data(bl, 0, bytes);
     if (ret < 0) {
 	ldpp_dout(dpp, 0) << " ERROR: callback failed on " << source->get_name() << dendl;
 	return ret;
     }
 
-    left -= len;
-    cur_ofs += len;
+    left -= bytes;
+    cur_ofs += bytes;
   }
 
   /* Doesn't seem to be anything needed from params */
