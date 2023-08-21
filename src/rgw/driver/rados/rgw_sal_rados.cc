@@ -407,13 +407,7 @@ int RadosBucket::remove_bucket(const DoutPrefixProvider* dpp,
 			       req_info* req_info,
 			       optional_yield y)
 {
-  int ret;
-
-  // Refresh info
-  ret = load_bucket(dpp, y);
-  if (ret < 0) {
-    return ret;
-  }
+  int ret = 0;
 
   ListParams params;
   params.list_versions = true;
@@ -505,7 +499,6 @@ int RadosBucket::remove_bucket_bypass_gc(int concurrent_max, bool
 					 optional_yield y, const
 					 DoutPrefixProvider *dpp)
 {
-  int ret;
   map<RGWObjCategory, RGWStorageStats> stats;
   map<string, bool> common_prefixes;
   RGWObjectCtx obj_ctx(store);
@@ -513,12 +506,8 @@ int RadosBucket::remove_bucket_bypass_gc(int concurrent_max, bool
 
   string bucket_ver, master_ver;
 
-  ret = load_bucket(dpp, y);
-  if (ret < 0)
-    return ret;
-
   const auto& index = info.get_current_index();
-  ret = read_stats(dpp, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, NULL);
+  int ret = read_stats(dpp, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, NULL);
   if (ret < 0)
     return ret;
 
