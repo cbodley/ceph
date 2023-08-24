@@ -82,6 +82,44 @@ TEST_F(ConnectionFixture, HMSet) {
   worker->join();
 }
 
+TEST_F(ConnectionFixture, HGETALL) {
+  request req;
+  response<std::string,
+           std::map<std::string, std::string> > resp;
+
+  req.push("HMSET", "key", "data", "value");
+  req.push("HGETALL", "key");
+
+  conn->async_exec(req, resp, [&](auto ec, auto) {
+    ASSERT_EQ((bool)ec, 0);
+    EXPECT_EQ(std::get<0>(resp).value(), "OK");
+    EXPECT_EQ(std::get<1>(resp).value().size(), 1);
+
+    conn->cancel();
+  });
+
+  *work = std::nullopt;
+  worker->join();
+}
+
+TEST_F(ConnectionFixture, FLUSHALL) {
+  request req;
+  response<std::string, boost::redis::ignore_t> resp;
+
+  req.push("HMSET", "key", "data", "value");
+  req.push("FLUSHALL");
+
+  conn->async_exec(req, resp, [&](auto ec, auto) {
+    ASSERT_EQ((bool)ec, 0);
+    EXPECT_EQ(std::get<0>(resp).value(), "OK");
+
+    conn->cancel();
+  });
+
+  *work = std::nullopt;
+  worker->join();
+}
+
 int main(int argc, char *argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
