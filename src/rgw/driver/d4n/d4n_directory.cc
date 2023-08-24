@@ -5,7 +5,7 @@
 namespace rgw { namespace d4n {
 
 template <typename T>
-auto redis_exec(connection* conn, boost::system::error_code& ec,
+void redis_exec(connection* conn, boost::system::error_code& ec,
                 const boost::redis::request& req,
                 boost::redis::response<T>& resp, optional_yield y)
 {
@@ -15,8 +15,6 @@ auto redis_exec(connection* conn, boost::system::error_code& ec,
   } else {
     conn->async_exec(req, resp, ceph::async::use_blocked[ec]);
   }
-
-  return conn->cancel();
 }
 
 int ObjectDirectory::find_client(cpp_redis::client* client) {
