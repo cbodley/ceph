@@ -5,7 +5,10 @@
 namespace rgw { namespace d4n {
 
 template <typename T>
-auto redis_exec(connection* conn, boost::system::error_code ec, boost::redis::request req, boost::redis::response<T>& resp, optional_yield y) {
+auto redis_exec(connection* conn, boost::system::error_code& ec,
+                const boost::redis::request& req,
+                boost::redis::response<T>& resp, optional_yield y)
+{
   if (y) {
     auto yield = y.get_yield_context();
     conn->async_exec(req, resp, yield[ec]);
