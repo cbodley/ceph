@@ -1,5 +1,6 @@
 tasks:
 - s3tests:
     client.0:
-      force-branch: ceph-pacific
+      force-branch: wip-63004-pacific
+      git_remote: https://github.com/cbodley/
       rgw_server: client.0
