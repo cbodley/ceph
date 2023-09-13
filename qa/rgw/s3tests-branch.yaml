@@ -1,4 +1,4 @@
 overrides:
   s3tests:
-    force-branch: ceph-reef
-    # git_remote: https://github.com/ceph/
+    force-branch: http-options-presigned-reef
+    git_remote: https://github.com/cbodley/
