@@ -12,6 +12,7 @@ tasks:
       dns-s3website-name: s3-website.
 - s3tests:
     client.0:
-      force-branch: ceph-quincy
+      force-branch: wip-63004-quincy
+      git_remote: https://github.com/cbodley/
       rgw_server: client.0
       rgw_website_server: client.1
