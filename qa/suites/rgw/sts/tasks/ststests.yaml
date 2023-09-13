@@ -3,7 +3,8 @@ tasks:
     client.0:
       sts_tests: True
       extra_attrs: ["test_of_sts"]
-      force-branch: ceph-quincy
+      force-branch: http-options-presigned-quincy
+      git_remote: https://github.com/cbodley/
       rgw_server: client.0
 overrides:
   ceph:
