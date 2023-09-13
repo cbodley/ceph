@@ -28,3 +28,5 @@ overrides:
 #        valgrind: [--tool=memcheck, --max-threads=1024] # http://tracker.ceph.com/issues/25214
   s3tests:
     calling-format: subdomain
+    force-branch: http-options-presigned-pacific
+    git_remote: https://github.com/cbodley/

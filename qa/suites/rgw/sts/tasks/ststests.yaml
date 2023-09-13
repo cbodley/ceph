@@ -3,7 +3,8 @@ tasks:
     client.0:
       sts_tests: True
       extra_attrs: ["test_of_sts"]
-      force-branch: ceph-pacific
+      force-branch: http-options-presigned-pacific
+      git_remote: https://github.com/cbodley/
       rgw_server: client.0
 overrides:
   ceph:
