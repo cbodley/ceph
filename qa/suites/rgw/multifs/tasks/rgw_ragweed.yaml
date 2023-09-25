@@ -5,11 +5,13 @@ tasks:
 - tox: [client.0]
 - ragweed:
     client.0:
-      default-branch: ceph-master
+      ragweed_repo: https://github.com/cfsnyder/
+      default-branch: bucket_check_format_update
       rgw_server: client.0
       stages: prepare
 - ragweed:
     client.0:
-      default-branch: ceph-master
+      ragweed_repo: https://github.com/cfsnyder/
+      default-branch: bucket_check_format_update
       rgw_server: client.0
       stages: check
