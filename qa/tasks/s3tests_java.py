@@ -301,7 +301,7 @@ class S3tests_java(Task):
             args = ['cd',
                     '{tdir}/s3-tests-java'.format(tdir=testdir),
                     run.Raw('&&'),
-                    '/opt/gradle/gradle/bin/gradle', 'clean', 'test',
+                    '/opt/gradle/gradle/bin/gradle', 'clean', 'test', '--debug',
                     '--rerun-tasks', '--no-build-cache',
                     ]
             extra_args = []
