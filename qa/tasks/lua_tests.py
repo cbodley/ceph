@@ -25,12 +25,6 @@ def download(ctx, config):
     repo = ctx.config.get('suite_repo')
     log.info('Using branch %s from %s for lua tests', branch, repo)
     for (client, client_config) in config.items():
-        ctx.cluster.only(client).run(
-            args=['sudo', 'dnf', 'config-manager', '--set-enabled', 'crb'],
-            )
-        ctx.cluster.only(client).run(
-            args=['sudo', 'dnf', '-y', 'install', 'lua-devel'],
-            )
 
         ctx.cluster.only(client).run(
             args=['git', 'clone', '-b', branch, repo, '{tdir}/ceph'.format(tdir=testdir)],

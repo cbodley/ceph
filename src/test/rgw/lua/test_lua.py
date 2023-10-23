@@ -2,23 +2,15 @@ import logging
 import json
 import tempfile
 import random
-import threading
-import subprocess
 import socket
 import time
+import threading
+import subprocess
 import os
+import stat
 import string
-import boto
-from botocore.exceptions import ClientError
-from http import server as http_server
-from random import randint
-import hashlib
 from nose.plugins.attrib import attr
 import boto3
-import datetime
-from dateutil import parser
-
-from boto.s3.connection import S3Connection
 
 from . import(
     get_config_host,
@@ -27,12 +19,8 @@ from . import(
     get_secret_key
     )
 
-from .api import delete_all_objects, \
-    admin
-
 from nose import SkipTest
 from nose.tools import assert_not_equal, assert_equal, assert_in
-import boto.s3.tagging
 
 # configure logging for the tests module
 log = logging.getLogger(__name__)
@@ -41,18 +29,36 @@ log = logging.getLogger(__name__)
 num_buckets = 0
 run_prefix=''.join(random.choice(string.ascii_lowercase) for _ in range(6))
 
+test_path = os.path.normpath(os.path.dirname(os.path.realpath(__file__))) + '/../'
+
+def bash(cmd, **kwargs):
+    log.debug('running command: %s', ' '.join(cmd))
+    kwargs['stdout'] = subprocess.PIPE
+    process = subprocess.Popen(cmd, **kwargs)
+    s = process.communicate()[0].decode('utf-8')
+    return (s, process.returncode)
+
+
+def admin(args, **kwargs):
+    """ radosgw-admin command """
+    cmd = [test_path + 'test-rgw-call.sh', 'call_rgw_admin', 'noname'] + args
+    return bash(cmd, **kwargs)
+
+
+def delete_all_objects(conn, bucket_name):
+    objects = []
+    for key in conn.list_objects(Bucket=bucket_name)['Contents']:
+        objects.append({'Key': key['Key']})
+    # delete objects from the bucket
+    response = conn.delete_objects(Bucket=bucket_name,
+            Delete={'Objects': objects})
+
+
 def gen_bucket_name():
     global num_buckets
 
     num_buckets += 1
     return run_prefix + '-' + str(num_buckets)
-
-
-def set_contents_from_string(key, content):
-    try:
-        key.set_contents_from_string(content)
-    except Exception as e:
-        print('Error: ' + str(e))
 
 
 def get_ip():
@@ -73,43 +79,19 @@ def get_ip_http():
 def connection():
     hostname = get_config_host()
     port_no = get_config_port()
-    vstart_access_key = get_access_key()
-    vstart_secret_key = get_secret_key()
+    access_key = get_access_key()
+    secret_key = get_secret_key()
+    if port_no == 443 or port_no == 8443:
+        scheme = 'https://'
+    else:
+        scheme = 'http://'
 
-    conn = S3Connection(aws_access_key_id=vstart_access_key,
-                  aws_secret_access_key=vstart_secret_key,
-                      is_secure=False, port=port_no, host=hostname, 
-                      calling_format='boto.s3.connection.OrdinaryCallingFormat')
+    client = boto3.client('s3',
+            endpoint_url=scheme+hostname+':'+str(port_no),
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key)
 
-    return conn
-
-
-def connection2():
-    hostname = get_config_host()
-    port_no = 8001
-    vstart_access_key = get_access_key()
-    vstart_secret_key = get_secret_key()
-
-    conn = S3Connection(aws_access_key_id=vstart_access_key,
-                  aws_secret_access_key=vstart_secret_key,
-                      is_secure=False, port=port_no, host=hostname, 
-                      calling_format='boto.s3.connection.OrdinaryCallingFormat')
-
-    return conn
-
-
-def connection3():
-    hostname = get_config_host()
-    port_no = get_config_port()
-    vstart_access_key = get_access_key()
-    vstart_secret_key = get_secret_key()
-
-    conn = boto3.client(service_name="s3",
-            aws_access_key_id=vstart_access_key,
-            aws_secret_access_key=vstart_secret_key,
-            endpoint_url="http://"+hostname+":"+str(port_no))
-
-    return conn
+    return client
 
 
 def another_user(tenant=None):
@@ -122,11 +104,19 @@ def another_user(tenant=None):
         _, result = admin(['user', 'create', '--uid', uid, '--access-key', access_key, '--secret-key', secret_key, '--display-name', '"Super Man"'])  
 
     assert_equal(result, 0)
-    conn = S3Connection(aws_access_key_id=access_key,
-                  aws_secret_access_key=secret_key,
-                      is_secure=False, port=get_config_port(), host=get_config_host(), 
-                      calling_format='boto.s3.connection.OrdinaryCallingFormat')
-    return conn
+    hostname = get_config_host()
+    port_no = get_config_port()
+    if port_no == 443 or port_no == 8443:
+        scheme = 'https://'
+    else:
+        scheme = 'http://'
+
+    client = boto3.client('s3',
+            endpoint_url=scheme+hostname+':'+str(port_no),
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key)
+
+    return client
 
 
 def put_script(script, context, tenant=None):
@@ -174,6 +164,9 @@ class UnixSocket:
         # create and bind the Unix socket server
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(self.socket_path)
+
+        # give permissions for anyone to write to it
+        os.chmod(self.socket_path, stat.S_IWOTH)
 
         # listen for incoming connections
         server.listen(1)
@@ -285,7 +278,7 @@ end
     result = put_script(script, context)
     assert_equal(result[1], 0)
 	
-    conn = connection3()
+    conn = connection()
     bucket_name = gen_bucket_name()
     conn.create_bucket(Bucket=bucket_name)
     key = "hello"
@@ -333,26 +326,23 @@ RGWDebugLog("op was: "..Request.RGWOp)
     conn = connection()
     bucket_name = gen_bucket_name()
     # create bucket
-    bucket = conn.create_bucket(bucket_name)
-    # create objects in the bucket (async)
+    bucket = conn.create_bucket(Bucket=bucket_name)
+    # create objects in the bucket
     number_of_objects = 5
-    client_threads = []
-    start_time = time.time()
     for i in range(number_of_objects):
-        key = bucket.new_key(str(i))
-        content = str(os.urandom(1024*1024))
-        thr = threading.Thread(target = set_contents_from_string, args=(key, content,))
-        thr.start()
-        client_threads.append(thr)
-    [thr.join() for thr in client_threads]
+        content = str(os.urandom(1024*1024)).encode("ascii")
+        key = str(i)
+        conn.put_object(Body=content, Bucket=bucket_name, Key=key)
 
     for i in range(number_of_objects):
-        key = bucket.new_key(str(i))
-        bucket.copy_key('copyof'+key.name, bucket.name, key.name)
+        key = str(i)
+        conn.copy_object(Bucket=bucket_name,
+                Key='copyof'+key, 
+                CopySource=bucket_name+'/'+key)
 
     # cleanup
     delete_all_objects(conn, bucket_name)
-    conn.delete_bucket(bucket_name)
+    conn.delete_bucket(Bucket=bucket_name)
     contexts = ['prerequest', 'postrequest', 'getdata', 'putdata']
     for context in contexts:
         result = admin(['script', 'rm', '--context', context])
@@ -399,22 +389,17 @@ RGWDebugLog("payload size of chunk of: " .. full_name .. " is: " .. #Data)
     conn = connection()
     bucket_name = gen_bucket_name()
     # create bucket
-    bucket = conn.create_bucket(bucket_name)
+    bucket = conn.create_bucket(Bucket=bucket_name)
     # create objects in the bucket (async)
     number_of_objects = 5
-    client_threads = []
-    start_time = time.time()
     for i in range(number_of_objects):
-        key = bucket.new_key(str(i))
-        content = str(os.urandom(1024*1024*16))
-        thr = threading.Thread(target = set_contents_from_string, args=(key, content,))
-        thr.start()
-        client_threads.append(thr)
-    [thr.join() for thr in client_threads]
+        content = str(os.urandom(1024*1024*16)).encode("ascii")
+        key = str(i)
+        conn.put_object(Body=content, Bucket=bucket_name, Key=key)
 
     # cleanup
     delete_all_objects(conn, bucket_name)
-    conn.delete_bucket(bucket_name)
+    conn.delete_bucket(Bucket=bucket_name)
     contexts = ['prerequest', 'postrequest', 'background', 'getdata', 'putdata']
     for context in contexts:
         result = admin(['script', 'rm', '--context', context])
@@ -442,7 +427,6 @@ if Request.RGWOp == "get_obj" then
         error_code = Request.Response.HTTPStatus,
         object_size = Request.Object.Size,
         trans_id = Request.TransactionId}}
-
     assert(s:connect("{}"))
     s:send(json.encode(msg).."\\n")
     s:close()
@@ -462,23 +446,18 @@ end
     try:
         conn = connection()
         # create bucket
-        bucket = conn.create_bucket(bucket_name)
+        bucket = conn.create_bucket(Bucket=bucket_name)
         # create objects in the bucket (async)
         number_of_objects = 5
-        client_threads = []
-        start_time = time.time()
         keys = []
         for i in range(number_of_objects):
-            key = bucket.new_key(str(i))
-            keys.append(str(i))
-            content = str(os.urandom(1024*1024))
-            thr = threading.Thread(target = set_contents_from_string, args=(key, content,))
-            thr.start()
-            client_threads.append(thr)
-        [thr.join() for thr in client_threads]
+            content = str(os.urandom(1024*1024)).encode("ascii")
+            key = str(i)
+            conn.put_object(Body=content, Bucket=bucket_name, Key=key)
+            keys.append(key)
 
-        for key in bucket.list():
-            conn.get_bucket(bucket_name).get_key(key.name)
+        for key in conn.list_objects(Bucket=bucket_name)['Contents']:
+            conn.get_object(Bucket=bucket_name, Key=key['Key'])
 
         time.sleep(5)
         event_keys = []
@@ -491,7 +470,7 @@ end
     finally:
         socket_server.shutdown()
         delete_all_objects(conn, bucket_name)
-        conn.delete_bucket(bucket_name)
+        conn.delete_bucket(Bucket=bucket_name)
         contexts = ['prerequest', 'postrequest', 'background', 'getdata', 'putdata']
         for context in contexts:
             result = admin(['script', 'rm', '--context', context])

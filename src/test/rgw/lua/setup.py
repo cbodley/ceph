@@ -8,12 +8,11 @@ setup(
 
     author='Yuval Lifshitz',
     author_email='ylifshit@ibm.com',
-    description='Lua scripting ests',
+    description='Lua scripting tests',
     license='MIT',
     keywords='lua testing',
 
     install_requires=[
-        'boto >=2.0b4',
         'boto3 >=1.0.0'
         ],
     )
