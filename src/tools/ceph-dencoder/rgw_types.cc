@@ -25,6 +25,26 @@ using namespace std;
 
 #include "denc_plugin.h"
 
+void rgw_owner_wrapper::dump(Formatter* f) const
+{
+  encode_json("owner", *this, f);
+}
+
+void rgw_owner_wrapper::decode_json(JSONObj* obj)
+{
+  JSONDecoder::decode_json("owner", *this, obj);
+}
+
+void rgw_owner_wrapper::generate_test_instances(std::list<rgw_owner_wrapper*>& o)
+{
+  // user
+  o.push_back(new rgw_owner_wrapper{rgw_user{"tenant", "userid"}});
+  // role
+  o.push_back(new rgw_owner_wrapper{rgw_user{"tenant", "roleid", "oidc"}});
+  // account id
+  o.push_back(new rgw_owner_wrapper{rgw_account_id{"RGW12345678901234567"}});
+}
+
 DENC_API void register_dencoders(DencoderPlugin* plugin)
 {
 #include "rgw_types.h"

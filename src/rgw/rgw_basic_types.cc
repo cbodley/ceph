@@ -7,6 +7,7 @@
 
 #include "cls/user/cls_user_types.h"
 
+#include "rgw_account.h"
 #include "rgw_basic_types.h"
 #include "rgw_bucket.h"
 #include "rgw_xml.h"
@@ -188,4 +189,65 @@ void encode_json_impl(const char* name, const rgw_account_id& id, Formatter* f)
 void decode_json_obj(rgw_account_id& id, JSONObj* obj)
 {
   decode_json_obj(static_cast<std::string&>(id), obj);
+}
+
+// rgw_owner variant
+rgw_owner parse_owner(const std::string& str)
+{
+  if (rgw::account::validate_id(str)) {
+    return rgw_account_id{str};
+  } else {
+    return rgw_user{str};
+  }
+}
+
+std::string to_string(const rgw_owner& o)
+{
+  struct visitor {
+    std::string operator()(const rgw_account_id& a) { return a; }
+    std::string operator()(const rgw_user& u) { return u.to_str(); }
+  };
+  return std::visit(visitor{}, o);
+}
+
+std::ostream& operator<<(std::ostream& out, const rgw_owner& o)
+{
+  struct visitor {
+    std::ostream& out;
+    std::ostream& operator()(const rgw_account_id& a) { return out << a; }
+    std::ostream& operator()(const rgw_user& u) { return out << u; }
+  };
+  return std::visit(visitor{out}, o);
+}
+
+void encode_json_impl(const char *name, const rgw_owner& o, ceph::Formatter *f)
+{
+  if (auto* user = std::get_if<rgw_user>(&o); user) {
+    // encode user as string for backward compat
+    encode_json(name, *user, f);
+  } else {
+    // nest other types in an object section
+    f->open_object_section(name);
+    if (auto* account = std::get_if<rgw_account_id>(&o); account) {
+      encode_json("account_id", *account, f);
+    } else {
+      ceph_abort_msgf("missing json encode of rgw_owner variant %hhu",
+                      o.index());
+    }
+    f->close_section();
+  }
+}
+
+void decode_json_obj(rgw_owner& o, JSONObj *obj)
+{
+  if (!obj->is_object()) {
+    // decode string as rgw_user
+    decode_json_obj(o.emplace<rgw_user>(), obj);
+  } else if (JSONObj* account = obj->find_obj("account_id"); account) {
+    // decode nested "account_id" string
+    decode_json_obj(o.emplace<rgw_account_id>(), account);
+  } else {
+    // newer radosgw encoded a variant we don't understand
+    throw JSONDecoder::err("unrecognized rgw_owner variant");
+  }
 }
