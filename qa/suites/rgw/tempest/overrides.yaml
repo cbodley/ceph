@@ -5,3 +5,4 @@ overrides:
         setuser: ceph
         setgroup: ceph
         debug rgw: 20
+        debug ms: 1
