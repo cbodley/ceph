@@ -27,7 +27,6 @@ import httplib2
 
 #import pdb
 
-import tasks.vstart_runner
 from tasks.rgw import RGWEndpoint
 from tasks.util.rgw import rgwadmin as tasks_util_rgw_rgwadmin
 from tasks.util.rgw import get_user_summary, get_user_successful_ops
@@ -1107,7 +1106,7 @@ def task(ctx, config):
     (err, out) = rgwadmin(ctx, client, ['zonegroup', 'get'], check_status=True)
 
 from teuthology.config import config
-from teuthology.orchestra import cluster
+from teuthology.orchestra import cluster, remote
 
 import argparse;
 
@@ -1124,7 +1123,7 @@ def main():
     else:
         port = 80
 
-    client0 = tasks.vstart_runner.LocalRemote()
+    client0 = remote.Remote(host)
     ctx = config
     ctx.cluster=cluster.Cluster(remotes=[(client0,
         [ 'ceph.client.rgw.%s' % (port),  ]),])
