@@ -72,6 +72,11 @@
   cannot repair the dates of existing object locks. Such objects can be identified
   with a HeadObject request based on the x-amz-object-lock-retain-until-date
   response header.
+CephFS: Disallow delegating preallocated inode ranges to clients. Config
+  `mds_client_delegate_inos_pct` defaults to 0 which disables async dirops
+  in the kclient.
+* S3 Get/HeadObject now support query parameter `partNumber` to read a specific
+  part of a completed multipart upload.
 
 >=18.0.0
 
