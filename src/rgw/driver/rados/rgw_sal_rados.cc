@@ -42,6 +42,7 @@
 #include "rgw_service.h"
 #include "rgw_lc.h"
 #include "rgw_lc_tier.h"
+#include "rgw_mdlog.h"
 #include "rgw_rest_admin.h"
 #include "rgw_rest_bucket.h"
 #include "rgw_rest_metadata.h"
@@ -51,6 +52,7 @@
 #include "rgw_rest_realm.h"
 #include "rgw_rest_user.h"
 #include "services/svc_sys_obj.h"
+#include "services/svc_mdlog.h"
 #include "services/svc_meta.h"
 #include "services/svc_meta_be_sobj.h"
 #include "services/svc_cls.h"
@@ -64,6 +66,7 @@
 #include "services/svc_sys_obj_cache.h"
 #include "cls/rgw/cls_rgw_client.h"
 
+#include "account.h"
 #include "rgw_pubsub.h"
 
 #define dout_subsys ceph_subsys_rgw
@@ -983,7 +986,11 @@ int RadosStore::load_account_by_id(const DoutPrefixProvider* dpp,
                                    Attrs& attrs,
                                    RGWObjVersionTracker& objv)
 {
-  return -ENOTSUP;
+  ceph::real_time mtime; // ignored
+  return rgwrados::account::read(
+      dpp, y, *svc()->sysobj,
+      svc()->zone->get_zone_params(),
+      id, info, attrs, mtime, objv);
 }
 
 int RadosStore::load_account_by_name(const DoutPrefixProvider* dpp,
@@ -994,7 +1001,10 @@ int RadosStore::load_account_by_name(const DoutPrefixProvider* dpp,
                                      Attrs& attrs,
                                      RGWObjVersionTracker& objv)
 {
-  return -ENOTSUP;
+  return rgwrados::account::read_by_name(
+      dpp, y, *svc()->sysobj,
+      svc()->zone->get_zone_params(),
+      tenant, name, info, attrs, objv);
 }
 
 int RadosStore::load_account_by_email(const DoutPrefixProvider* dpp,
@@ -1004,7 +1014,28 @@ int RadosStore::load_account_by_email(const DoutPrefixProvider* dpp,
                                       Attrs& attrs,
                                       RGWObjVersionTracker& objv)
 {
-  return -ENOTSUP;
+  return rgwrados::account::read_by_email(
+      dpp, y, *svc()->sysobj,
+      svc()->zone->get_zone_params(),
+      email, info, attrs, objv);
+}
+
+static int write_mdlog_entry(const DoutPrefixProvider* dpp, optional_yield y,
+                             RGWSI_MDLog& mdlog_svc,
+                             const std::string& section,
+                             const std::string& key,
+                             const RGWObjVersionTracker& objv)
+{
+  RGWMetadataLogData entry;
+  entry.read_version = objv.read_version;
+  entry.write_version = objv.write_version;
+  entry.status = MDLOG_STATUS_COMPLETE;
+
+  bufferlist bl;
+  encode(entry, bl);
+
+  const std::string hash_key = fmt::format("{}:{}", section, key);
+  return mdlog_svc.add_entry(dpp, hash_key, section, key, bl, y);
 }
 
 int RadosStore::store_account(const DoutPrefixProvider* dpp,
@@ -1014,7 +1045,15 @@ int RadosStore::store_account(const DoutPrefixProvider* dpp,
                               const Attrs& attrs,
                               RGWObjVersionTracker& objv)
 {
-  return -ENOTSUP;
+  ceph::real_time mtime = ceph::real_clock::now();
+  int r = rgwrados::account::write(
+      dpp, y, *svc()->sysobj, svc()->zone->get_zone_params(),
+      info, old_info, attrs, mtime, exclusive, objv);
+  if (r < 0) {
+    return r;
+  }
+
+  return write_mdlog_entry(dpp, y, *svc()->mdlog, "account", info.id, objv);
 }
 
 int RadosStore::delete_account(const DoutPrefixProvider* dpp,
@@ -1022,7 +1061,15 @@ int RadosStore::delete_account(const DoutPrefixProvider* dpp,
                                const RGWAccountInfo& info,
                                RGWObjVersionTracker& objv)
 {
-  return -ENOTSUP;
+  int r = rgwrados::account::remove(
+      dpp, y, *svc()->sysobj,
+      svc()->zone->get_zone_params(),
+      info, objv);
+  if (r < 0) {
+    return r;
+  }
+
+  return write_mdlog_entry(dpp, y, *svc()->mdlog, "account", info.id, objv);
 }
 
 int RadosStore::load_account_stats(const DoutPrefixProvider* dpp,
