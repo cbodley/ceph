@@ -155,6 +155,7 @@ set(librgw_common_srcs
   driver/d4n/d4n_directory.cc
   driver/d4n/d4n_policy.cc
   driver/d4n/rgw_sal_d4n.cc
+  driver/rados/account.cc
   driver/rados/cls_fifo_legacy.cc
   driver/rados/rgw_bucket.cc
   driver/rados/rgw_bucket_sync.cc
