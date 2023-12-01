@@ -1373,7 +1373,7 @@ int RGWRados::init_svc(bool raw, const DoutPrefixProvider *dpp)
 
 int RGWRados::init_ctl(const DoutPrefixProvider *dpp)
 {
-  return ctl.init(&svc, driver, dpp);
+  return ctl.init(&svc, driver, *get_rados_handle(), dpp);
 }
 
 /** 
