@@ -394,7 +394,6 @@ int RGWCtlDef::init(RGWServices& svc, rgw::sal::Driver* driver, const DoutPrefix
                                 svc.bucket,
                                 svc.bucket_sync,
                                 svc.bi, svc.user));
-  otp.reset(new RGWOTPCtl(svc.zone, svc.otp));
 
   RGWBucketMetadataHandlerBase *bucket_meta_handler = static_cast<RGWBucketMetadataHandlerBase *>(meta.bucket.get());
   RGWBucketInstanceMetadataHandlerBase *bi_meta_handler = static_cast<RGWBucketInstanceMetadataHandlerBase *>(meta.bucket_instance.get());
@@ -418,8 +417,6 @@ int RGWCtlDef::init(RGWServices& svc, rgw::sal::Driver* driver, const DoutPrefix
                (RGWBucketInstanceMetadataHandler *)bi_meta_handler,
 	       svc.datalog_rados,
                dpp);
-
-  otp->init((RGWOTPMetadataHandler *)meta.otp.get());
 
   return 0;
 }
@@ -446,7 +443,6 @@ int RGWCtl::init(RGWServices *_svc, rgw::sal::Driver* driver, const DoutPrefixPr
 
   user = _ctl.user.get();
   bucket = _ctl.bucket.get();
-  otp = _ctl.otp.get();
 
   r = meta.user->attach(meta.mgr);
   if (r < 0) {
