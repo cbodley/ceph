@@ -187,6 +187,7 @@ struct RGWCtlDef {
     std::unique_ptr<RGWMetadataHandler> user;
     std::unique_ptr<RGWMetadataHandler> otp;
     std::unique_ptr<RGWMetadataHandler> role;
+    std::unique_ptr<RGWMetadataHandler> account;
 
     _meta();
     ~_meta();
