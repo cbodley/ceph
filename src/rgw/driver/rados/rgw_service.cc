@@ -89,7 +89,7 @@ int RGWServices_Def::init(CephContext *cct,
   bi_rados->init(zone.get(), rados, bilog_rados.get(), datalog_rados.get());
   bilog_rados->init(bi_rados.get());
   bucket_sobj->init(zone.get(), sysobj.get(), sysobj_cache.get(),
-                    bi_rados.get(), meta.get(), mdlog.get(), meta_be_sobj.get(),
+                    bi_rados.get(), meta.get(), mdlog.get(),
                     sync_modules.get(), bucket_sync_sobj.get());
   bucket_sync_sobj->init(zone.get(),
                          sysobj.get(),
@@ -369,21 +369,17 @@ int RGWCtlDef::init(RGWServices& svc, rgw::sal::Driver* driver, const DoutPrefix
   auto sync_module = svc.sync_modules->get_sync_module();
   if (sync_module) {
     meta.bucket = sync_module->alloc_bucket_meta_handler(svc.bucket, bucket.get());
-    meta.bucket_instance.reset(sync_module->alloc_bucket_instance_meta_handler(driver));
+    meta.bucket_instance = sync_module->alloc_bucket_instance_meta_handler(
+        driver, svc.zone, svc.bucket, svc.bi);
   } else {
     meta.bucket = create_bucket_metadata_handler(svc.bucket, bucket.get());
-    meta.bucket_instance.reset(RGWBucketInstanceMetaHandlerAllocator::alloc(driver));
+    meta.bucket_instance = create_bucket_instance_metadata_handler(
+        driver, svc.zone, svc.bucket, svc.bi);
   }
 
   meta.otp = rgwrados::otp::create_metadata_handler(
       *svc.sysobj, *svc.cls, *svc.mdlog, svc.zone->get_zone_params());
   meta.role = std::make_unique<rgw::sal::RGWRoleMetadataHandler>(driver, svc.role);
-
-  user.reset(new RGWUserCtl(svc.zone, svc.user, (RGWUserMetadataHandler *)meta.user.get()));
-
-  RGWBucketInstanceMetadataHandlerBase *bi_meta_handler = static_cast<RGWBucketInstanceMetadataHandlerBase *>(meta.bucket_instance.get());
-
-  bi_meta_handler->init(svc.zone, svc.bucket, svc.bi);
 
   meta.topic_cache = std::make_unique<RGWChainedCacheImpl<rgwrados::topic::cache_entry>>();
   meta.topic_cache->init(svc.cache);
@@ -392,11 +388,9 @@ int RGWCtlDef::init(RGWServices& svc, rgw::sal::Driver* driver, const DoutPrefix
       *svc.sysobj, *svc.cache, *svc.mdlog, svc.zone->get_zone_params(),
       *meta.topic_cache);
 
+  user.reset(new RGWUserCtl(svc.zone, svc.user, (RGWUserMetadataHandler *)meta.user.get()));
   user->init(bucket.get());
-  bucket->init(user.get(),
-               (RGWBucketInstanceMetadataHandler *)bi_meta_handler,
-	       svc.datalog_rados,
-               dpp);
+  bucket->init(user.get(), svc.datalog_rados, dpp);
 
   return 0;
 }
