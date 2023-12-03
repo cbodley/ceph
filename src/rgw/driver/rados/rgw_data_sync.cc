@@ -3101,8 +3101,10 @@ public:
   RGWDataSyncModule *get_data_handler() override {
     return &data_handler;
   }
-  RGWMetadataHandler *alloc_bucket_meta_handler() override {
-    return RGWArchiveBucketMetaHandlerAllocator::alloc();
+  auto alloc_bucket_meta_handler(RGWSI_Bucket* svc_bucket,
+                                 RGWBucketCtl* ctl_bucket)
+      -> std::unique_ptr<RGWMetadataHandler> override {
+    return create_archive_bucket_metadata_handler(svc_bucket, ctl_bucket);
   }
   RGWBucketInstanceMetadataHandlerBase *alloc_bucket_instance_meta_handler(rgw::sal::Driver* driver) override {
     return RGWArchiveBucketInstanceMetaHandlerAllocator::alloc(driver);

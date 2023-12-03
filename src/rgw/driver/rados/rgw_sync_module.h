@@ -43,6 +43,8 @@ public:
 class RGWRESTMgr;
 class RGWMetadataHandler;
 class RGWBucketInstanceMetadataHandlerBase;
+class RGWSI_Bucket;
+class RGWBucketCtl;
 
 class RGWSyncModuleInstance {
 public:
@@ -55,7 +57,9 @@ public:
   virtual bool supports_user_writes() {
     return false;
   }
-  virtual RGWMetadataHandler *alloc_bucket_meta_handler();
+  virtual auto alloc_bucket_meta_handler(RGWSI_Bucket* svc_bucket,
+                                         RGWBucketCtl* ctl_bucket)
+      -> std::unique_ptr<RGWMetadataHandler>;
   virtual RGWBucketInstanceMetadataHandlerBase *alloc_bucket_instance_meta_handler(rgw::sal::Driver* driver);
 
   // indication whether the sync module start with full sync (default behavior)

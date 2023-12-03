@@ -89,7 +89,7 @@ int RGWServices_Def::init(CephContext *cct,
   bi_rados->init(zone.get(), rados, bilog_rados.get(), datalog_rados.get());
   bilog_rados->init(bi_rados.get());
   bucket_sobj->init(zone.get(), sysobj.get(), sysobj_cache.get(),
-                    bi_rados.get(), meta.get(), meta_be_sobj.get(),
+                    bi_rados.get(), meta.get(), mdlog.get(), meta_be_sobj.get(),
                     sync_modules.get(), bucket_sync_sobj.get());
   bucket_sync_sobj->init(zone.get(),
                          sysobj.get(),
@@ -361,12 +361,17 @@ int RGWCtlDef::init(RGWServices& svc, rgw::sal::Driver* driver, const DoutPrefix
 
   meta.user.reset(RGWUserMetaHandlerAllocator::alloc(svc.user));
 
+  bucket.reset(new RGWBucketCtl(svc.zone,
+                                svc.bucket,
+                                svc.bucket_sync,
+                                svc.bi, svc.user));
+
   auto sync_module = svc.sync_modules->get_sync_module();
   if (sync_module) {
-    meta.bucket.reset(sync_module->alloc_bucket_meta_handler());
+    meta.bucket = sync_module->alloc_bucket_meta_handler(svc.bucket, bucket.get());
     meta.bucket_instance.reset(sync_module->alloc_bucket_instance_meta_handler(driver));
   } else {
-    meta.bucket.reset(RGWBucketMetaHandlerAllocator::alloc());
+    meta.bucket = create_bucket_metadata_handler(svc.bucket, bucket.get());
     meta.bucket_instance.reset(RGWBucketInstanceMetaHandlerAllocator::alloc(driver));
   }
 
@@ -375,15 +380,9 @@ int RGWCtlDef::init(RGWServices& svc, rgw::sal::Driver* driver, const DoutPrefix
   meta.role = std::make_unique<rgw::sal::RGWRoleMetadataHandler>(driver, svc.role);
 
   user.reset(new RGWUserCtl(svc.zone, svc.user, (RGWUserMetadataHandler *)meta.user.get()));
-  bucket.reset(new RGWBucketCtl(svc.zone,
-                                svc.bucket,
-                                svc.bucket_sync,
-                                svc.bi, svc.user));
 
-  RGWBucketMetadataHandlerBase *bucket_meta_handler = static_cast<RGWBucketMetadataHandlerBase *>(meta.bucket.get());
   RGWBucketInstanceMetadataHandlerBase *bi_meta_handler = static_cast<RGWBucketInstanceMetadataHandlerBase *>(meta.bucket_instance.get());
 
-  bucket_meta_handler->init(svc.bucket, bucket.get());
   bi_meta_handler->init(svc.zone, svc.bucket, svc.bi);
 
   meta.topic_cache = std::make_unique<RGWChainedCacheImpl<rgwrados::topic::cache_entry>>();
@@ -395,7 +394,6 @@ int RGWCtlDef::init(RGWServices& svc, rgw::sal::Driver* driver, const DoutPrefix
 
   user->init(bucket.get());
   bucket->init(user.get(),
-               (RGWBucketMetadataHandler *)bucket_meta_handler,
                (RGWBucketInstanceMetadataHandler *)bi_meta_handler,
 	       svc.datalog_rados,
                dpp);

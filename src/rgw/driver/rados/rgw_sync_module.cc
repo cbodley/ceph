@@ -16,9 +16,11 @@
 
 #define dout_subsys ceph_subsys_rgw
 
-RGWMetadataHandler *RGWSyncModuleInstance::alloc_bucket_meta_handler()
+auto RGWSyncModuleInstance::alloc_bucket_meta_handler(RGWSI_Bucket* svc_bucket,
+                                                      RGWBucketCtl* ctl_bucket)
+    -> std::unique_ptr<RGWMetadataHandler>
 {
-  return RGWBucketMetaHandlerAllocator::alloc();
+  return create_bucket_metadata_handler(svc_bucket, ctl_bucket);
 }
 
 RGWBucketInstanceMetadataHandlerBase* RGWSyncModuleInstance::alloc_bucket_instance_meta_handler(rgw::sal::Driver* driver)
