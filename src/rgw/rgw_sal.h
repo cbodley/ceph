@@ -45,6 +45,8 @@ struct rgw_pubsub_topics;
 struct rgw_pubsub_bucket_topics;
 class RGWZonePlacementInfo;
 struct rgw_pubsub_topic;
+struct RGWRoleInfo;
+
 
 using RGWBucketListNameFilter = std::function<bool (const std::string&)>;
 
