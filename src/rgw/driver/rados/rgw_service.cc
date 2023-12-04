@@ -23,7 +23,6 @@
 #include "services/svc_sys_obj_cache.h"
 #include "services/svc_sys_obj_core.h"
 #include "services/svc_user_rados.h"
-#include "services/svc_role_rados.h"
 
 #include "common/errno.h"
 
@@ -74,7 +73,6 @@ int RGWServices_Def::init(CephContext *cct,
   sysobj = std::make_unique<RGWSI_SysObj>(cct);
   sysobj_core = std::make_unique<RGWSI_SysObj_Core>(cct);
   user_rados = std::make_unique<RGWSI_User_RADOS>(cct);
-  role_rados = std::make_unique<RGWSI_Role_RADOS>(cct);
   async_processor = std::make_unique<RGWAsyncRadosProcessor>(
     cct, cct->_conf->rgw_num_async_rados_threads);
 
@@ -115,7 +113,7 @@ int RGWServices_Def::init(CephContext *cct,
   }
   user_rados->init(rados, zone.get(), mdlog.get(),
                    sysobj.get(), sysobj_cache.get(), meta.get());
-  role_rados->init(zone.get(), meta.get(), meta_be_sobj.get(), sysobj.get());
+
   can_shutdown = true;
 
   int r = finisher->start(y, dpp);
@@ -234,12 +232,6 @@ int RGWServices_Def::init(CephContext *cct,
       ldpp_dout(dpp, 0) << "ERROR: failed to start user_rados service (" << cpp_strerror(-r) << dendl;
       return r;
     }
-
-    r = role_rados->start(y, dpp);
-    if (r < 0) {
-      ldout(cct, 0) << "ERROR: failed to start role_rados service (" << cpp_strerror(-r) << dendl;
-      return r;
-    }
   }
 
   /* cache or core services will be started by sysobj */
@@ -257,7 +249,6 @@ void RGWServices_Def::shutdown()
     return;
   }
 
-  role_rados->shutdown();
   datalog_rados.reset();
   user_rados->shutdown();
   sync_modules->shutdown();
@@ -322,7 +313,6 @@ int RGWServices::do_init(CephContext *_cct, bool have_cache, bool raw,
   cache = _svc.sysobj_cache.get();
   core = _svc.sysobj_core.get();
   user = _svc.user_rados.get();
-  role = _svc.role_rados.get();
   async_processor = _svc.async_processor.get();
 
   return 0;
