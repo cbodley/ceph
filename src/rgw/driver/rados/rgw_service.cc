@@ -33,9 +33,9 @@
 #include "rgw_metadata.h"
 #include "rgw_otp.h"
 #include "rgw_user.h"
-#include "rgw_role.h"
 #include "rgw_pubsub.h"
 #include "topic.h"
+#include "role.h"
 
 #define dout_subsys ceph_subsys_rgw
 
@@ -379,7 +379,8 @@ int RGWCtlDef::init(RGWServices& svc, rgw::sal::Driver* driver, const DoutPrefix
 
   meta.otp = rgwrados::otp::create_metadata_handler(
       *svc.sysobj, *svc.cls, *svc.mdlog, svc.zone->get_zone_params());
-  meta.role = create_role_metadata_handler(*driver, *svc.sysobj);
+  meta.role = rgwrados::role::create_metadata_handler(
+      *svc.sysobj, *svc.mdlog, svc.zone->get_zone_params());
 
   meta.topic_cache = std::make_unique<RGWChainedCacheImpl<rgwrados::topic::cache_entry>>();
   meta.topic_cache->init(svc.cache);

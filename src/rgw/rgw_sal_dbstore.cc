@@ -1428,9 +1428,12 @@ namespace rgw::sal {
 
   int DBStore::get_roles(const DoutPrefixProvider *dpp,
       optional_yield y,
-      const std::string& path_prefix,
       const std::string& tenant,
-      vector<std::unique_ptr<RGWRole>>& roles)
+      const std::string& marker,
+      int max_items,
+      const std::string& path_prefix,
+      std::vector<RGWRoleInfo>& roles,
+      std::string& next_marker)
   {
     return 0;
   }
