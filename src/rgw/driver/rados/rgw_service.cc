@@ -379,7 +379,7 @@ int RGWCtlDef::init(RGWServices& svc, rgw::sal::Driver* driver, const DoutPrefix
 
   meta.otp = rgwrados::otp::create_metadata_handler(
       *svc.sysobj, *svc.cls, *svc.mdlog, svc.zone->get_zone_params());
-  meta.role = create_role_metadata_handler(driver, svc.role);
+  meta.role = create_role_metadata_handler(*driver, *svc.sysobj);
 
   meta.topic_cache = std::make_unique<RGWChainedCacheImpl<rgwrados::topic::cache_entry>>();
   meta.topic_cache->init(svc.cache);
