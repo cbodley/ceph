@@ -17,11 +17,11 @@
 
 #pragma once
 
-#include "svc_meta_be.h"
-
+#include <memory>
 #include "rgw_service.h"
 #include "rgw_sal_fwd.h"
 
+class RGWMetadataLister;
 class RGWUserBuckets;
 
 class RGWSI_User : public RGWServiceInstance
@@ -38,9 +38,11 @@ public:
     return rgw_user(key);
   }
 
-  virtual RGWSI_MetaBackend_Handler *get_be_handler() = 0;
-
   /* base svc_user interfaces */
+
+  virtual int create_lister(const DoutPrefixProvider* dpp,
+                            const std::string& marker,
+                            std::unique_ptr<RGWMetadataLister>& lister) = 0;
 
   virtual int read_user_info(const rgw_user& user,
                              RGWUserInfo *info,
