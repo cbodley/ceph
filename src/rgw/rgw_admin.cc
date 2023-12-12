@@ -10719,10 +10719,17 @@ next:
       cerr << "ERROR: could not get topics: " << cpp_strerror(-ret) << std::endl;
       return -ret;
     }
+    std::optional<rgw_owner> owner;
+
     if (!rgw::sal::User::empty(user)) {
+      owner = user->get_id();
+    } else if (!account_id.empty()) {
+      owner = rgw_account_id{account_id};
+    }
+    if (owner) {
       for (auto it = result.topics.cbegin(); it != result.topics.cend();) {
         const auto& topic = it->second;
-        if (user->get_id() != topic.user) {
+        if (*owner != topic.owner) {
           result.topics.erase(it++);
         } else {
           ++it;

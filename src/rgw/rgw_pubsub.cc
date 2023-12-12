@@ -332,7 +332,7 @@ void rgw_pubsub_s3_event::dump(Formatter *f) const {
 
 void rgw_pubsub_topic::dump(Formatter *f) const
 {
-  encode_json("user", user, f);
+  encode_json("user", owner, f);
   encode_json("name", name, f);
   encode_json("dest", dest, f);
   encode_json("arn", arn, f);
@@ -342,7 +342,7 @@ void rgw_pubsub_topic::dump(Formatter *f) const
 
 void rgw_pubsub_topic::dump_xml(Formatter *f) const
 {
-  encode_xml("User", user, f);
+  encode_xml("User", to_string(owner), f);
   encode_xml("Name", name, f);
   encode_xml("EndPoint", dest, f);
   encode_xml("TopicArn", arn, f);
@@ -360,9 +360,7 @@ void encode_xml_key_value_entry(const std::string& key, const std::string& value
 void rgw_pubsub_topic::dump_xml_as_attributes(Formatter *f) const
 {
   f->open_array_section("Attributes");
-  std::string str_user;
-  user.to_str(str_user);
-  encode_xml_key_value_entry("User", str_user, f);
+  encode_xml_key_value_entry("User", to_string(owner), f);
   encode_xml_key_value_entry("Name", name, f);
   encode_xml_key_value_entry("EndPoint", dest.to_json_str(), f);
   encode_xml_key_value_entry("TopicArn", arn, f);
@@ -698,7 +696,7 @@ int RGWPubSub::create_topic(const DoutPrefixProvider* dpp,
                             const std::string& name,
                             const rgw_pubsub_dest& dest, const std::string& arn,
                             const std::string& opaque_data,
-                            const rgw_user& user,
+                            const rgw_owner& owner,
                             const std::string& policy_text,
                             optional_yield y) const {
   RGWObjVersionTracker objv_tracker;
@@ -712,7 +710,7 @@ int RGWPubSub::create_topic(const DoutPrefixProvider* dpp,
   }
  
   rgw_pubsub_topic& new_topic = topics.topics[name];
-  new_topic.user = user;
+  new_topic.owner = owner;
   new_topic.name = name;
   new_topic.dest = dest;
   new_topic.arn = arn;
