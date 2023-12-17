@@ -591,14 +591,22 @@ int RadosBucket::unlink(const DoutPrefixProvider* dpp, const rgw_owner& owner, o
 
 int RadosBucket::chown(const DoutPrefixProvider* dpp, const rgw_owner& new_owner, optional_yield y)
 {
-  std::string obj_marker;
   // unlink from the owner, but don't update the entrypoint until link()
   int r = this->unlink(dpp, info.owner, y, false);
   if (r < 0) {
     return r;
   }
 
-  return this->link(dpp, new_owner, y);
+  r = this->link(dpp, new_owner, y);
+  if (r < 0) {
+    return r;
+  }
+
+  // write updated owner to bucket instance metadata
+  info.owner = new_owner;
+
+  constexpr bool exclusive = false;
+  return put_info(dpp, exclusive, ceph::real_clock::now(), y);
 }
 
 int RadosBucket::put_info(const DoutPrefixProvider* dpp, bool exclusive, ceph::real_time _mtime, optional_yield y)
