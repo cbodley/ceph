@@ -2970,6 +2970,7 @@ void RGWAccessKey::dump(Formatter *f) const
   encode_json("secret_key", key, f);
   encode_json("subuser", subuser, f);
   encode_json("active", active, f);
+  encode_json("create_date", create_date, f);
 }
 
 void RGWAccessKey::dump_plain(Formatter *f) const
@@ -2991,6 +2992,7 @@ void RGWAccessKey::dump(Formatter *f, const string& user, bool swift) const
   }
   encode_json("secret_key", key, f);
   encode_json("active", active, f);
+  encode_json("create_date", create_date, f);
 }
 
 void RGWAccessKey::decode_json(JSONObj *obj) {
@@ -3005,6 +3007,7 @@ void RGWAccessKey::decode_json(JSONObj *obj) {
     }
   }
   JSONDecoder::decode_json("active", active, obj);
+  JSONDecoder::decode_json("create_date", create_date, obj);
 }
 
 void RGWAccessKey::decode_json(JSONObj *obj, bool swift) {
@@ -3022,6 +3025,7 @@ void RGWAccessKey::decode_json(JSONObj *obj, bool swift) {
   }
   JSONDecoder::decode_json("secret_key", key, obj, true);
   JSONDecoder::decode_json("active", active, obj);
+  JSONDecoder::decode_json("create_date", create_date, obj);
 }
 
 
