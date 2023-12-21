@@ -9,7 +9,9 @@
 #include "rgw_xml.h"
 #include "rgw_arn.h"
 #include "rgw_pubsub_push.h"
+#include "rgw_bucket.h"
 #include "common/errno.h"
+#include "svc_topic_rados.h"
 #include <regex>
 #include <algorithm>
 
@@ -339,6 +341,7 @@ void rgw_pubsub_topic::dump(Formatter *f) const
   encode_json("arn", arn, f);
   encode_json("opaqueData", opaque_data, f);
   encode_json("policy", policy_text, f);
+  encode_json("subscribed_buckets", subscribed_buckets, f);
 }
 
 void rgw_pubsub_topic::dump_xml(Formatter *f) const
@@ -349,6 +352,9 @@ void rgw_pubsub_topic::dump_xml(Formatter *f) const
   encode_xml("TopicArn", arn, f);
   encode_xml("OpaqueData", opaque_data, f);
   encode_xml("Policy", policy_text, f);
+  std::vector<std::string> v(subscribed_buckets.begin(),
+                             subscribed_buckets.end());
+  encode_xml("Subscribed_Buckets", v, f);
 }
 
 void encode_xml_key_value_entry(const std::string& key, const std::string& value, Formatter *f) {
@@ -369,6 +375,10 @@ void rgw_pubsub_topic::dump_xml_as_attributes(Formatter *f) const
   encode_xml_key_value_entry("TopicArn", arn, f);
   encode_xml_key_value_entry("OpaqueData", opaque_data, f);
   encode_xml_key_value_entry("Policy", policy_text, f);
+  std::ostringstream stream;
+  std::copy(subscribed_buckets.begin(), subscribed_buckets.end(),
+            std::ostream_iterator<std::string>(stream, ","));
+  encode_xml_key_value_entry("subscribed_buckets", stream.str(), f);
   f->close_section(); // Attributes
 }
 
@@ -520,15 +530,21 @@ int RGWPubSub::read_topics(const DoutPrefixProvider *dpp, rgw_pubsub_topics& res
                 << "ERROR: lists_keys_next(): " << cpp_strerror(-ret) << dendl;
             break;
       }
-      for (auto& topic_name : topics) {
-            rgw_pubsub_topic topic;
-            int ret = get_topic(dpp, topic_name, topic, y);
-            if (ret < 0) {
-              ldpp_dout(dpp, 1) << "ERROR: failed to read topic '" << topic_name
-                                << "' info: ret=" << ret << dendl;
-              continue;
-            }
-            result.topics[topic_name] = std::move(topic);
+      for (auto& topic_entry : topics) {
+        std::string topic_name;
+        std::string topic_tenant;
+        parse_topic_entry(topic_entry, &topic_tenant, &topic_name);
+        if (tenant != topic_tenant) {
+          continue;
+        }
+        rgw_pubsub_topic topic;
+        const auto op_ret =
+            get_topic(dpp, topic_name, topic, y, /*fetch_bucket_mapping=*/true);
+        if (op_ret < 0) {
+          ret = op_ret;
+          continue;
+        }
+        result.topics[topic_name] = std::move(topic);
       }
     } while (truncated);
     driver->meta_list_keys_complete(handle);
@@ -577,15 +593,27 @@ int RGWPubSub::Bucket::write_topics(const DoutPrefixProvider *dpp, const rgw_pub
   return 0;
 }
 
-int RGWPubSub::get_topic(const DoutPrefixProvider *dpp, const std::string& name, rgw_pubsub_topic& result, optional_yield y) const
-{
+int RGWPubSub::get_topic(const DoutPrefixProvider* dpp,
+                         const std::string& name,
+                         rgw_pubsub_topic& result,
+                         optional_yield y,
+                         bool fetch_bucket_mapping) const {
   if (driver->get_zone()->get_zonegroup().supports_feature(
           rgw::zone_features::notification_v2)) {
-    const int ret =
-        driver->read_topic_v2(name, tenant, result, nullptr, y, dpp);
+    int ret = driver->read_topic_v2(name, tenant, result, nullptr, y, dpp);
     if (ret < 0) {
       ldpp_dout(dpp, 1) << "failed to read topic info for name: " << name
                         << " tenant: " << tenant << ", ret=" << ret << dendl;
+      return ret;
+    }
+    if (fetch_bucket_mapping) {
+      ret = driver->get_bucket_topic_mapping(result, result.subscribed_buckets,
+                                             y, dpp);
+      if (ret < 0) {
+        ldpp_dout(dpp, 1)
+            << "failed to fetch bucket topic mapping info for topic: " << name
+            << " tenant: " << tenant << ", ret=" << ret << dendl;
+      }
     }
     return ret;
   }
@@ -642,19 +670,82 @@ std::optional<rgw_pubsub_topic_filter> find_unique_topic(
   return std::nullopt;
 }
 
-int delete_all_notifications(const DoutPrefixProvider* dpp,
-                             const rgw_pubsub_bucket_topics& bucket_topics,
-                             std::map<std::string, bufferlist>& attrs,
-                             rgw::sal::Bucket* bucket,
-                             rgw::sal::Driver* driver,
-                             optional_yield y) {
+int store_bucket_attrs_and_update_mapping(
+    const DoutPrefixProvider* dpp,
+    rgw::sal::Driver* driver,
+    rgw::sal::Bucket* bucket,
+    rgw_pubsub_bucket_topics& bucket_topics,
+    const rgw_pubsub_topic& topic,
+    optional_yield y) {
+  rgw::sal::Attrs& attrs = bucket->get_attrs();
+  if (!bucket_topics.topics.empty()) {
+    bufferlist bl;
+    bucket_topics.encode(bl);
+    attrs[RGW_ATTR_BUCKET_NOTIFICATION] = std::move(bl);
+  } else {
+    auto it = attrs.find(RGW_ATTR_BUCKET_NOTIFICATION);
+    if (it != attrs.end()) {
+      attrs.erase(it);
+    }
+  }
+  auto ret = bucket->merge_and_store_attrs(dpp, attrs, y);
+  if (ret < 0) {
+    ldpp_dout(dpp, 1)
+        << "Failed to store RGW_ATTR_BUCKET_NOTIFICATION on bucket="
+        << bucket->get_name() << " returned err= " << ret << dendl;
+    return ret;
+  }
+  if (bucket_topics.topics.empty()) {
+    // remove the bucket name from  the topic-bucket omap
+    auto op_ret = driver->update_bucket_topic_mapping(
+        topic,
+        rgw_make_bucket_entry_name(bucket->get_tenant(), bucket->get_name()),
+        /*add_mapping=*/false, y, dpp);
+    if (op_ret < 0) {
+      // TODO: should the error be reported, as attrs are already deleted.
+      // ret = op_ret;
+    }
+  }
+  return ret;
+}
+
+int remove_topics_from_bucket_attrs(const DoutPrefixProvider* dpp,
+                                    rgw::sal::Driver* driver,
+                                    rgw::sal::Bucket* bucket,
+                                    const rgw_pubsub_topic& topic,
+                                    optional_yield y) {
+  rgw_pubsub_bucket_topics bucket_topics;
+  auto ret = get_bucket_notifications(dpp, bucket, bucket_topics);
+  if (ret < 0) {
+    return ret;
+  }
+  // remove the topics from |bucket_topics| that is stored as attr on bucket.
+  for (auto it = bucket_topics.topics.cbegin();
+       it != bucket_topics.topics.cend();) {
+    if (topic.name == it->second.topic.name) {
+      bucket_topics.topics.erase(it++);
+      if (bucket_topics.topics.empty()) {
+        break;
+      }
+    } else {
+      ++it;
+    }
+  }
+  return store_bucket_attrs_and_update_mapping(dpp, driver, bucket,
+                                               bucket_topics, topic, y);
+}
+
+int delete_notification_attrs(const DoutPrefixProvider* dpp,
+                              rgw::sal::Bucket* bucket,
+                              optional_yield y) {
+  auto& attrs = bucket->get_attrs();
   auto iter = attrs.find(RGW_ATTR_BUCKET_NOTIFICATION);
   if (iter == attrs.end()) {
     return 0;
   }
   // delete all notifications of on a bucket
   attrs.erase(iter);
-  const auto ret = bucket->merge_and_store_attrs(dpp, attrs, y);
+  auto ret = bucket->merge_and_store_attrs(dpp, attrs, y);
   if (ret < 0) {
     ldpp_dout(dpp, 1)
         << "Failed to remove RGW_ATTR_BUCKET_NOTIFICATION attr on bucket="
@@ -677,11 +768,31 @@ int remove_notification_v2(const DoutPrefixProvider* dpp,
   if (bucket_topics.topics.empty()) {
     return 0;
   }
-  rgw::sal::Attrs& attrs = bucket->get_attrs();
+  // delete all notifications
   if (notification_id.empty()) {
-    return delete_all_notifications(dpp, bucket_topics, attrs, bucket, driver,
-                                    y);
+    ret = delete_notification_attrs(dpp, bucket, y);
+    if (ret < 0) {
+      return ret;
+    }
+    // remove the bucket name from  the topic-bucket omap for each topic
+    // subscribed.
+    std::unordered_set<std::string> topics_mapping_to_remove;
+    for (const auto& [_, topic_filter] : bucket_topics.topics) {
+      if (!topics_mapping_to_remove.insert(topic_filter.topic.name).second) {
+        continue;  // already removed.
+      }
+      int op_ret = driver->update_bucket_topic_mapping(
+          topic_filter.topic,
+          rgw_make_bucket_entry_name(bucket->get_tenant(), bucket->get_name()),
+          /*add_mapping=*/false, y, dpp);
+      if (op_ret < 0) {
+        // TODO: should the error be reported, as attrs are already deleted.
+        // ret = op_ret;
+      }
+    }
+    return ret;
   }
+
   // delete a specific notification
   const auto unique_topic = find_unique_topic(bucket_topics, notification_id);
   if (!unique_topic) {
@@ -692,48 +803,16 @@ int remove_notification_v2(const DoutPrefixProvider* dpp,
   }
   const auto& topic_name = unique_topic->topic.name;
   bucket_topics.topics.erase(topic_to_unique(topic_name, notification_id));
-  bufferlist bl;
-  bucket_topics.encode(bl);
-  attrs[RGW_ATTR_BUCKET_NOTIFICATION] = std::move(bl);
-  ret = bucket->merge_and_store_attrs(dpp, attrs, y);
-  if (ret < 0) {
-    ldpp_dout(dpp, 1)
-        << "Failed to store RGW_ATTR_BUCKET_NOTIFICATION on bucket="
-        << bucket->get_name() << " returned err= " << ret << dendl;
-  }
-  return ret;
-}
-
-int RGWPubSub::Bucket::get_notification_by_id(const DoutPrefixProvider *dpp, const std::string& notification_id,
-                                              rgw_pubsub_topic_filter& result, optional_yield y) const {
-  rgw_pubsub_bucket_topics bucket_topics;
-  const int ret = read_topics(dpp, bucket_topics, nullptr, y);
-  if (ret < 0) {
-    ldpp_dout(dpp, 1) << "ERROR: failed to read bucket_topics info: ret=" << ret << dendl;
-    return ret;
-  }
-
-  auto iter = find_unique_topic(bucket_topics, notification_id);
-  if (!iter) {
-    ldpp_dout(dpp, 1) << "ERROR: notification was not found" << dendl;
-    return -ENOENT;
-  }
-
-  result = std::move(*iter);
-  return 0;
-}
-
-
-int RGWPubSub::Bucket::create_notification(const DoutPrefixProvider *dpp, const std::string& topic_name, 
-    const rgw::notify::EventTypeList& events, optional_yield y) const {
-  return create_notification(dpp, topic_name, events, std::nullopt, "", y);
+  return store_bucket_attrs_and_update_mapping(
+      dpp, driver, bucket, bucket_topics, unique_topic->topic, y);
 }
 
 int RGWPubSub::Bucket::create_notification(const DoutPrefixProvider *dpp, const std::string& topic_name, 
     const rgw::notify::EventTypeList& events, OptionalFilter s3_filter, const std::string& notif_name, optional_yield y) const {
   rgw_pubsub_topic topic_info;
 
-  int ret = ps.get_topic(dpp, topic_name, topic_info, y);
+  int ret = ps.get_topic(dpp, topic_name, topic_info, y,
+                         /*fetch_bucket_mapping=*/false);
   if (ret < 0) {
     ldpp_dout(dpp, 1) << "ERROR: failed to read topic '" << topic_name << "' info: ret=" << ret << dendl;
     return ret;
@@ -920,7 +999,7 @@ int RGWPubSub::remove_topic_v2(const DoutPrefixProvider* dpp,
                                optional_yield y) const {
   RGWObjVersionTracker objv_tracker;
   rgw_pubsub_topic topic;
-  int ret = get_topic(dpp, name, topic, y);
+  int ret = get_topic(dpp, name, topic, y, /*fetch_bucket_mapping=*/true);
   if (ret < 0 && ret != -ENOENT) {
     return ret;
   } else if (ret == -ENOENT) {
@@ -934,7 +1013,23 @@ int RGWPubSub::remove_topic_v2(const DoutPrefixProvider* dpp,
   if (ret < 0) {
     ldpp_dout(dpp, 1) << "ERROR: failed to remove topic info: ret=" << ret
                       << dendl;
+    return ret;
   }
+  for (const auto& bucket_str : topic.subscribed_buckets) {
+    rgw_bucket b;
+    rgw_bucket_parse_bucket_key(nullptr, bucket_str, &b, nullptr);
+    std::unique_ptr<rgw::sal::Bucket> bucket;
+    ret = driver->load_bucket(dpp, b, &bucket, y);
+    if (ret != 0) {
+      continue;
+    }
+    auto op_ret =
+        remove_topics_from_bucket_attrs(dpp, driver, bucket.get(), topic, y);
+    if (op_ret < 0) {
+      ret = op_ret;
+    }
+  }
+  ret = driver->delete_bucket_topic_mapping(topic, y, dpp);
   return ret;
 }
 

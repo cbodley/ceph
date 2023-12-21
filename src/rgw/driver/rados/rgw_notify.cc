@@ -475,7 +475,9 @@ private:
           RGWPubSub ps(&rados_store, tenant_name);
 
           rgw_pubsub_topic topic;
-          auto ret_of_get_topic = ps.get_topic(this, queue_name, topic, optional_yield(io_context, yield));
+          auto ret_of_get_topic = ps.get_topic(
+              this, queue_name, topic, optional_yield(io_context, yield),
+              /*fetch_bucket_mapping=*/false);
           if (ret_of_get_topic < 0) {
             // we can't migrate entries without topic info
             ldpp_dout(this, 1) << "ERROR: failed to fetch topic: " << queue_name << " error: "
@@ -1035,7 +1037,8 @@ static inline bool notification_match(reservation_t& res,
     // notification.
     rgw_pubsub_topic result;
     const RGWPubSub ps(res.store, res.user_tenant);
-    auto ret = ps.get_topic(res.dpp, topic_cfg.name, result, res.yield);
+    auto ret = ps.get_topic(res.dpp, topic_cfg.name, result, res.yield,
+                            /*fetch_bucket_mapping=*/false);
     if (ret < 0) {
       ldpp_dout(res.dpp, 1)
           << "INFO: failed to load topic: " << topic_cfg.name
