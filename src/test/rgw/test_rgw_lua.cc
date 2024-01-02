@@ -75,7 +75,7 @@ public:
     return;
   }
 
-  bool is_identity(const flat_set<Principal>& ids) const override {
+  bool is_identity(const Principal& p) const override {
     return false;
   }
 };
