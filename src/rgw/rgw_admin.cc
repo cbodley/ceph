@@ -10523,23 +10523,29 @@ next:
 
   if (opt_cmd == OPT::PUBSUB_TOPIC_LIST) {
     RGWPubSub ps(driver, tenant);
-    rgw_pubsub_topics result;
-    int ret = ps.get_topics(dpp(), result, null_yield);
-    if (ret < 0 && ret != -ENOENT) {
-      cerr << "ERROR: could not get topics: " << cpp_strerror(-ret) << std::endl;
-      return -ret;
-    }
-    if (!rgw::sal::User::empty(user)) {
-      for (auto it = result.topics.cbegin(); it != result.topics.cend();) {
-        const auto& topic = it->second;
-        if (user->get_id() != topic.user) {
-          result.topics.erase(it++);
-        } else {
-          ++it;
+    std::string next_token;
+    formatter->open_array_section("result");
+    do {
+      rgw_pubsub_topics result;
+      int ret = ps.get_topics(dpp(), next_token, max_entries,
+                              result, next_token, null_yield);
+      if (ret < 0 && ret != -ENOENT) {
+        cerr << "ERROR: could not get topics: " << cpp_strerror(-ret) << std::endl;
+        return -ret;
+      }
+      if (!rgw::sal::User::empty(user)) {
+        for (auto it = result.topics.cbegin(); it != result.topics.cend();) {
+          const auto& topic = it->second;
+          if (user->get_id() != topic.user) {
+            result.topics.erase(it++);
+          } else {
+            ++it;
+          }
         }
       }
-    }
-    encode_json("result", result, formatter.get());
+      result.dump(formatter.get());
+    } while (!next_token.empty());
+    formatter->close_section(); // result
     formatter->flush(cout);
   }
 

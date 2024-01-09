@@ -509,47 +509,63 @@ RGWPubSub::RGWPubSub(rgw::sal::Driver* _driver, const std::string& _tenant)
   : driver(_driver), tenant(_tenant)
 {}
 
-int RGWPubSub::read_topics(const DoutPrefixProvider *dpp, rgw_pubsub_topics& result, 
-    RGWObjVersionTracker *objv_tracker, optional_yield y) const
+int RGWPubSub::get_topics(const DoutPrefixProvider* dpp,
+                          const std::string& start_marker, int max_items,
+                          rgw_pubsub_topics& result, std::string& next_marker,
+                          optional_yield y) const
 {
-  if (driver->get_zone()->get_zonegroup().supports_feature(
+  if (!driver->get_zone()->get_zonegroup().supports_feature(
           rgw::zone_features::notification_v2)) {
-    void* handle = NULL;
-    auto ret =
-        driver->meta_list_keys_init(dpp, "topic", std::string(), &handle);
-    if (ret < 0) {
-      return ret;
-    }
-    bool truncated;
-    int max = 1000;
-    do {
-      std::list<std::string> topics;
-      ret = driver->meta_list_keys_next(dpp, handle, max, topics, &truncated);
-      if (ret < 0) {
-            ldpp_dout(dpp, 1)
-                << "ERROR: lists_keys_next(): " << cpp_strerror(-ret) << dendl;
-            break;
-      }
-      for (auto& topic_entry : topics) {
-        std::string topic_name;
-        std::string topic_tenant;
-        parse_topic_entry(topic_entry, &topic_tenant, &topic_name);
-        if (tenant != topic_tenant) {
-          continue;
-        }
-        rgw_pubsub_topic topic;
-        const auto op_ret =
-            get_topic(dpp, topic_name, topic, y, /*fetch_bucket_mapping=*/true);
-        if (op_ret < 0) {
-          ret = op_ret;
-          continue;
-        }
-        result.topics[topic_name] = std::move(topic);
-      }
-    } while (truncated);
-    driver->meta_list_keys_complete(handle);
+    // v1 returns all topics, ignoring marker/max_items
+    return read_topics_v1(dpp, result, nullptr, y);
+  }
+
+  // TODO: prefix filter on 'tenant:'
+  void* handle = NULL;
+  int ret = driver->meta_list_keys_init(dpp, "topic", start_marker, &handle);
+  if (ret < 0) {
     return ret;
   }
+  auto g = make_scope_guard(
+      [this, handle] { driver->meta_list_keys_complete(handle); });
+
+  if (max_items > 1000) {
+    max_items = 1000;
+  }
+  std::list<std::string> topics;
+  bool truncated = false;
+  ret = driver->meta_list_keys_next(dpp, handle, max_items, topics, &truncated);
+  if (ret < 0) {
+    ldpp_dout(dpp, 1)
+        << "ERROR: lists_keys_next(): " << cpp_strerror(-ret) << dendl;
+    return ret;
+  }
+  for (auto& topic_entry : topics) {
+    std::string topic_name;
+    std::string topic_tenant;
+    parse_topic_entry(topic_entry, &topic_tenant, &topic_name);
+    if (tenant != topic_tenant) {
+      continue;
+    }
+    rgw_pubsub_topic topic;
+    constexpr bool fetch_bucket_mapping = false;
+    int r = get_topic(dpp, topic_name, topic, y, fetch_bucket_mapping);
+    if (r < 0) {
+      continue;
+    }
+    result.topics[topic_name] = std::move(topic);
+  }
+  if (truncated && !topics.empty()) {
+    next_marker = *topics.rbegin();
+  } else {
+    next_marker.clear();
+  }
+  return ret;
+}
+
+int RGWPubSub::read_topics_v1(const DoutPrefixProvider *dpp, rgw_pubsub_topics& result,
+                              RGWObjVersionTracker *objv_tracker, optional_yield y) const
+{
   const int ret = driver->read_topics(tenant, result, objv_tracker, y, dpp);
   if (ret < 0) {
     ldpp_dout(dpp, 10) << "WARNING: failed to read topics info: ret=" << ret << dendl;
@@ -558,8 +574,8 @@ int RGWPubSub::read_topics(const DoutPrefixProvider *dpp, rgw_pubsub_topics& res
   return 0;
 }
 
-int RGWPubSub::write_topics(const DoutPrefixProvider *dpp, const rgw_pubsub_topics& topics,
-				     RGWObjVersionTracker *objv_tracker, optional_yield y) const
+int RGWPubSub::write_topics_v1(const DoutPrefixProvider *dpp, const rgw_pubsub_topics& topics,
+                               RGWObjVersionTracker *objv_tracker, optional_yield y) const
 {
   const int ret = driver->write_topics(tenant, topics, objv_tracker, y, dpp);
   if (ret < 0 && ret != -ENOENT) {
@@ -618,7 +634,7 @@ int RGWPubSub::get_topic(const DoutPrefixProvider* dpp,
     return ret;
   }
   rgw_pubsub_topics topics;
-  const int ret = read_topics(dpp, topics, nullptr, y);
+  const int ret = read_topics_v1(dpp, topics, nullptr, y);
   if (ret < 0) {
     ldpp_dout(dpp, 1) << "ERROR: failed to read topics info: ret=" << ret << dendl;
     return ret;
@@ -970,7 +986,7 @@ int RGWPubSub::create_topic(const DoutPrefixProvider* dpp,
   RGWObjVersionTracker objv_tracker;
   rgw_pubsub_topics topics;
 
-  int ret = read_topics(dpp, topics, &objv_tracker, y);
+  int ret = read_topics_v1(dpp, topics, &objv_tracker, y);
   if (ret < 0 && ret != -ENOENT) {
     // its not an error if not topics exist, we create one
     ldpp_dout(dpp, 1) << "ERROR: failed to read topics info: ret=" << ret << dendl;
@@ -985,7 +1001,7 @@ int RGWPubSub::create_topic(const DoutPrefixProvider* dpp,
   new_topic.opaque_data = opaque_data;
   new_topic.policy_text = policy_text;
 
-  ret = write_topics(dpp, topics, &objv_tracker, y);
+  ret = write_topics_v1(dpp, topics, &objv_tracker, y);
   if (ret < 0) {
     ldpp_dout(dpp, 1) << "ERROR: failed to write topics info: ret=" << ret << dendl;
     return ret;
@@ -1042,7 +1058,7 @@ int RGWPubSub::remove_topic(const DoutPrefixProvider *dpp, const std::string& na
   RGWObjVersionTracker objv_tracker;
   rgw_pubsub_topics topics;
 
-  int ret = read_topics(dpp, topics, &objv_tracker, y);
+  int ret = read_topics_v1(dpp, topics, &objv_tracker, y);
   if (ret < 0 && ret != -ENOENT) {
     ldpp_dout(dpp, 1) << "ERROR: failed to read topics info: ret=" << ret << dendl;
     return ret;
@@ -1054,7 +1070,7 @@ int RGWPubSub::remove_topic(const DoutPrefixProvider *dpp, const std::string& na
 
   topics.topics.erase(name);
 
-  ret = write_topics(dpp, topics, &objv_tracker, y);
+  ret = write_topics_v1(dpp, topics, &objv_tracker, y);
   if (ret < 0) {
     ldpp_dout(dpp, 1) << "ERROR: failed to remove topics info: ret=" << ret << dendl;
     return ret;
