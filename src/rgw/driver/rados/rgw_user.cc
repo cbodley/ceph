@@ -11,7 +11,6 @@
 #include "rgw_quota.h"
 
 #include "services/svc_user.h"
-#include "services/svc_meta.h"
 
 #define dout_subsys ceph_subsys_rgw
 

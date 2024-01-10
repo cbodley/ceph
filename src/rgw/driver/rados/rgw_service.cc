@@ -11,9 +11,6 @@
 #include "services/svc_cls.h"
 #include "services/svc_config_key_rados.h"
 #include "services/svc_mdlog.h"
-#include "services/svc_meta.h"
-#include "services/svc_meta_be.h"
-#include "services/svc_meta_be_sobj.h"
 #include "services/svc_notify.h"
 #include "services/svc_zone.h"
 #include "services/svc_zone_utils.h"
@@ -63,8 +60,6 @@ int RGWServices_Def::init(CephContext *cct,
   config_key_rados = std::make_unique<RGWSI_ConfigKey_RADOS>(cct);
   datalog_rados = std::make_unique<RGWDataChangesLog>(cct);
   mdlog = std::make_unique<RGWSI_MDLog>(cct, run_sync);
-  meta = std::make_unique<RGWSI_Meta>(cct);
-  meta_be_sobj = std::make_unique<RGWSI_MetaBackend_SObj>(cct);
   notify = std::make_unique<RGWSI_Notify>(cct);
   zone = std::make_unique<RGWSI_Zone>(cct);
   zone_utils = std::make_unique<RGWSI_ZoneUtils>(cct);
@@ -80,14 +75,12 @@ int RGWServices_Def::init(CephContext *cct,
     sysobj_cache = std::make_unique<RGWSI_SysObj_Cache>(dpp, cct);
   }
 
-  vector<RGWSI_MetaBackend *> meta_bes{meta_be_sobj.get()};
-
   async_processor->start();
   finisher->init();
   bi_rados->init(zone.get(), rados, bilog_rados.get(), datalog_rados.get());
   bilog_rados->init(bi_rados.get());
   bucket_sobj->init(zone.get(), sysobj.get(), sysobj_cache.get(),
-                    bi_rados.get(), meta.get(), mdlog.get(),
+                    bi_rados.get(), mdlog.get(),
                     sync_modules.get(), bucket_sync_sobj.get());
   bucket_sync_sobj->init(zone.get(),
                          sysobj.get(),
@@ -97,8 +90,6 @@ int RGWServices_Def::init(CephContext *cct,
   config_key_rados->init(rados);
   mdlog->init(rados, zone.get(), sysobj.get(), cls.get(),
 	      async_processor.get());
-  meta->init(sysobj.get(), mdlog.get(), meta_bes);
-  meta_be_sobj->init(sysobj.get(), mdlog.get());
   notify->init(zone.get(), rados, finisher.get());
   zone->init(sysobj.get(), rados, sync_modules.get(), bucket_sync_sobj.get());
   zone_utils->init(rados, zone.get());
@@ -112,7 +103,7 @@ int RGWServices_Def::init(CephContext *cct,
     sysobj->init(rados, sysobj_core.get());
   }
   user_rados->init(rados, zone.get(), mdlog.get(),
-                   sysobj.get(), sysobj_cache.get(), meta.get());
+                   sysobj.get(), sysobj_cache.get());
 
   can_shutdown = true;
 
@@ -203,18 +194,6 @@ int RGWServices_Def::init(CephContext *cct,
   }
 
   if (!raw) {
-    r = meta_be_sobj->start(y, dpp);
-    if (r < 0) {
-      ldpp_dout(dpp, 0) << "ERROR: failed to start meta_be_sobj service (" << cpp_strerror(-r) << dendl;
-      return r;
-    }
-
-    r = meta->start(y, dpp);
-    if (r < 0) {
-      ldpp_dout(dpp, 0) << "ERROR: failed to start meta service (" << cpp_strerror(-r) << dendl;
-      return r;
-    }
-
     r = bucket_sobj->start(y, dpp);
     if (r < 0) {
       ldpp_dout(dpp, 0) << "ERROR: failed to start bucket service (" << cpp_strerror(-r) << dendl;
@@ -253,8 +232,6 @@ void RGWServices_Def::shutdown()
   user_rados->shutdown();
   sync_modules->shutdown();
   notify->shutdown();
-  meta_be_sobj->shutdown();
-  meta->shutdown();
   mdlog->shutdown();
   config_key_rados->shutdown();
   cls->shutdown();
@@ -302,8 +279,6 @@ int RGWServices::do_init(CephContext *_cct, bool have_cache, bool raw,
   config_key = config_key_rados;
   datalog_rados = _svc.datalog_rados.get();
   mdlog = _svc.mdlog.get();
-  meta = _svc.meta.get();
-  meta_be_sobj = _svc.meta_be_sobj.get();
   notify = _svc.notify.get();
   zone = _svc.zone.get();
   zone_utils = _svc.zone_utils.get();
@@ -347,7 +322,7 @@ RGWCtlDef::_meta::~_meta() {}
 
 int RGWCtlDef::init(RGWServices& svc, rgw::sal::Driver* driver, const DoutPrefixProvider *dpp)
 {
-  meta.mgr.reset(new RGWMetadataManager(svc.meta));
+  meta.mgr.reset(new RGWMetadataManager());
 
   meta.user = create_user_metadata_handler(svc.user);
 
