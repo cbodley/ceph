@@ -76,7 +76,6 @@ class RGWSI_User_RADOS;
 class RGWDataChangesLog;
 class RGWSI_Role_RADOS;
 class RGWAsyncRadosProcessor;
-class RGWSI_Topic_RADOS;
 
 struct RGWServices_Def
 {
@@ -108,7 +107,6 @@ struct RGWServices_Def
   std::unique_ptr<RGWSI_Role_RADOS> role_rados;
   std::unique_ptr<RGWAsyncRadosProcessor> async_processor;
 
-  std::unique_ptr<RGWSI_Topic_RADOS> topic_rados;
   RGWServices_Def();
   ~RGWServices_Def();
 
@@ -153,7 +151,6 @@ struct RGWServices
   RGWSI_User *user{nullptr};
   RGWSI_Role_RADOS *role{nullptr};
   RGWAsyncRadosProcessor* async_processor;
-  RGWSI_Topic_RADOS* topic{nullptr};
 
   int do_init(CephContext *cct, bool have_cache, bool raw_storage,
 	      bool run_sync, librados::Rados* rados, optional_yield y,

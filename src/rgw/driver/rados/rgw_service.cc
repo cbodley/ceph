@@ -26,7 +26,6 @@
 #include "services/svc_sys_obj_core.h"
 #include "services/svc_user_rados.h"
 #include "services/svc_role_rados.h"
-#include "services/svc_topic_rados.h"
 
 #include "common/errno.h"
 
@@ -82,7 +81,6 @@ int RGWServices_Def::init(CephContext *cct,
   role_rados = std::make_unique<RGWSI_Role_RADOS>(cct);
   async_processor = std::make_unique<RGWAsyncRadosProcessor>(
     cct, cct->_conf->rgw_num_async_rados_threads);
-  topic_rados = std::make_unique<RGWSI_Topic_RADOS>(cct);
 
   if (have_cache) {
     sysobj_cache = std::make_unique<RGWSI_SysObj_Cache>(dpp, cct);
@@ -124,7 +122,6 @@ int RGWServices_Def::init(CephContext *cct,
   user_rados->init(rados, zone.get(), sysobj.get(), sysobj_cache.get(),
                    meta.get(), meta_be_sobj.get(), sync_modules.get());
   role_rados->init(zone.get(), meta.get(), meta_be_sobj.get(), sysobj.get());
-  topic_rados->init(zone.get(), meta.get(), meta_be_sobj.get(), sysobj.get());
   can_shutdown = true;
 
   int r = finisher->start(y, dpp);
@@ -255,12 +252,6 @@ int RGWServices_Def::init(CephContext *cct,
       ldout(cct, 0) << "ERROR: failed to start role_rados service (" << cpp_strerror(-r) << dendl;
       return r;
     }
-    r = topic_rados->start(y, dpp);
-    if (r < 0) {
-      ldout(cct, 0) << "ERROR: failed to start topic_rados service ("
-                    << cpp_strerror(-r) << dendl;
-      return r;
-    }
   }
 
   /* cache or core services will be started by sysobj */
@@ -278,7 +269,6 @@ void RGWServices_Def::shutdown()
     return;
   }
 
-  topic_rados->shutdown();
   role_rados->shutdown();
   datalog_rados.reset();
   user_rados->shutdown();
@@ -350,7 +340,6 @@ int RGWServices::do_init(CephContext *_cct, bool have_cache, bool raw,
   user = _svc.user_rados.get();
   role = _svc.role_rados.get();
   async_processor = _svc.async_processor.get();
-  topic = _svc.topic_rados.get();
 
   return 0;
 }
@@ -399,7 +388,6 @@ int RGWCtlDef::init(RGWServices& svc, rgw::sal::Driver* driver, const DoutPrefix
 
   meta.otp.reset(RGWOTPMetaHandlerAllocator::alloc());
   meta.role = std::make_unique<rgw::sal::RGWRoleMetadataHandler>(driver, svc.role);
-  meta.topic = std::make_unique<RGWTopicMetadataHandler>(driver, svc.topic);
 
   user.reset(new RGWUserCtl(svc.zone, svc.user, (RGWUserMetadataHandler *)meta.user.get()));
   bucket.reset(new RGWBucketCtl(svc.zone,
