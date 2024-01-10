@@ -1198,26 +1198,6 @@ int RadosStore::get_bucket_topic_mapping(const rgw_pubsub_topic& topic,
   return 0;
 }
 
-int RadosStore::delete_bucket_topic_mapping(const rgw_pubsub_topic& topic,
-                                            optional_yield y,
-                                            const DoutPrefixProvider* dpp) {
-  librados::ObjectWriteOperation op;
-  op.remove();
-  const int ret =
-      rgw_rados_operate(dpp, rados->get_notif_pool_ctx(),
-                        get_bucket_topic_mapping_oid(topic), &op, y);
-  if (ret < 0 && ret != -ENOENT) {
-    ldpp_dout(dpp, 1)
-        << "ERROR: failed removing bucket topic mapping omap for topic: "
-        << topic.name << ", ret=" << ret << dendl;
-    return ret;
-  }
-  ldpp_dout(dpp, 20)
-      << "Successfully deleted topic bucket mapping omap for topic: "
-      << topic.name << dendl;
-  return 0;
-}
-
 int RadosStore::delete_raw_obj(const DoutPrefixProvider *dpp, const rgw_raw_obj& obj, optional_yield y)
 {
   return rados->delete_raw_obj(dpp, obj, y);

@@ -345,10 +345,6 @@ class Driver {
                                          std::set<std::string>& bucket_keys,
                                          optional_yield y,
                                          const DoutPrefixProvider* dpp) = 0;
-    /** Remove the bucket-topic mapping from the backend store. */
-    virtual int delete_bucket_topic_mapping(const rgw_pubsub_topic& topic,
-                                            optional_yield y,
-                                            const DoutPrefixProvider* dpp) = 0;
     /** Get access to the lifecycle management thread */
     virtual RGWLC* get_rgwlc(void) = 0;
     /** Get access to the coroutine registry.  Used to create new coroutine managers */

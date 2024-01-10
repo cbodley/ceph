@@ -184,9 +184,6 @@ class RadosStore : public StoreDriver {
                                  std::set<std::string>& bucket_keys,
                                  optional_yield y,
                                  const DoutPrefixProvider* dpp) override;
-    int delete_bucket_topic_mapping(const rgw_pubsub_topic& topic,
-                                    optional_yield y,
-                                    const DoutPrefixProvider* dpp) override;
     virtual RGWLC* get_rgwlc(void) override { return rados->get_lc(); }
     virtual RGWCoroutinesManagerRegistry* get_cr_registry() override { return rados->get_cr_registry(); }
 

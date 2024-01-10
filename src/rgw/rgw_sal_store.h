@@ -68,11 +68,6 @@ class StoreDriver : public Driver {
                                  const DoutPrefixProvider* dpp) override {
       return -EOPNOTSUPP;
     }
-    int delete_bucket_topic_mapping(const rgw_pubsub_topic& topic,
-                                    optional_yield y,
-                                    const DoutPrefixProvider* dpp) override {
-      return -EOPNOTSUPP;
-    }
 };
 
 class StoreUser : public User {

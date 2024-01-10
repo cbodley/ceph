@@ -1072,7 +1072,6 @@ int RGWPubSub::remove_topic_v2(const DoutPrefixProvider* dpp,
       ret = op_ret;
     }
   }
-  ret = driver->delete_bucket_topic_mapping(topic, y, dpp);
   return ret;
 }
 

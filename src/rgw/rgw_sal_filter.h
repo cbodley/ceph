@@ -232,11 +232,6 @@ public:
                                const DoutPrefixProvider* dpp) override {
     return next->get_bucket_topic_mapping(topic, bucket_keys, y, dpp);
   }
-  int delete_bucket_topic_mapping(const rgw_pubsub_topic& topic,
-                                  optional_yield y,
-                                  const DoutPrefixProvider* dpp) override {
-    return next->delete_bucket_topic_mapping(topic, y, dpp);
-  }
   virtual RGWLC* get_rgwlc(void) override;
   virtual RGWCoroutinesManagerRegistry* get_cr_registry() override;
 
