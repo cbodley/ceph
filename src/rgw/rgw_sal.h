@@ -317,15 +317,15 @@ class Driver {
                               RGWObjVersionTracker* objv_tracker,
                               optional_yield y,
                               const DoutPrefixProvider* dpp) = 0;
-    /** Write topic info and (optionally) @a objv_tracker into the config */
-    virtual int write_topic_v2(const rgw_pubsub_topic& topic,
-                               RGWObjVersionTracker* objv_tracker,
+    /** Write topic info and @a objv_tracker into the config */
+    virtual int write_topic_v2(const rgw_pubsub_topic& topic, bool exclusive,
+                               RGWObjVersionTracker& objv_tracker,
                                optional_yield y,
                                const DoutPrefixProvider* dpp) = 0;
     /** Remove the topic config, optionally a specific version */
     virtual int remove_topic_v2(const std::string& topic_name,
                                 const std::string& tenant,
-                                RGWObjVersionTracker* objv_tracker,
+                                RGWObjVersionTracker& objv_tracker,
                                 optional_yield y,
                                 const DoutPrefixProvider* dpp) = 0;
     /** Update the bucket-topic mapping in the store, if |add_mapping|=true then

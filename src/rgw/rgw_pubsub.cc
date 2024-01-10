@@ -982,7 +982,9 @@ int RGWPubSub::create_topic(const DoutPrefixProvider* dpp,
                             const rgw_pubsub_topic& topic,
                             optional_yield y) const {
   RGWObjVersionTracker objv_tracker;
-  auto ret = driver->write_topic_v2(topic, &objv_tracker, y, dpp);
+  objv_tracker.generate_new_write_ver(dpp->get_cct());
+  constexpr bool exclusive = false;
+  auto ret = driver->write_topic_v2(topic, exclusive, objv_tracker, y, dpp);
   if (ret < 0) {
     ldpp_dout(dpp, 1) << "ERROR: failed to write topic info: ret=" << ret
                       << dendl;
@@ -1050,7 +1052,7 @@ int RGWPubSub::remove_topic_v2(const DoutPrefixProvider* dpp,
                        << dendl;
     return 0;
   }
-  ret = driver->remove_topic_v2(name, tenant, &objv_tracker, y, dpp);
+  ret = driver->remove_topic_v2(name, tenant, objv_tracker, y, dpp);
   if (ret < 0) {
     ldpp_dout(dpp, 1) << "ERROR: failed to remove topic info: ret=" << ret
                       << dendl;
