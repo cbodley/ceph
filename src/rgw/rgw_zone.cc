@@ -302,6 +302,7 @@ void RGWZoneParams::decode_json(JSONObj *obj)
   JSONDecoder::decode_json("realm_id", realm_id, obj);
   JSONDecoder::decode_json("notif_pool", notif_pool, obj);
   JSONDecoder::decode_json("account_pool", account_pool, obj);
+  JSONDecoder::decode_json("group_pool", group_pool, obj);
 }
 
 void RGWZoneParams::dump(Formatter *f) const
@@ -327,6 +328,7 @@ void RGWZoneParams::dump(Formatter *f) const
   encode_json("realm_id", realm_id, f);
   encode_json("notif_pool", notif_pool, f);
   encode_json("account_pool", account_pool, f);
+  encode_json("group_pool", group_pool, f);
 }
 
 int RGWZoneParams::init(const DoutPrefixProvider *dpp, 
@@ -482,6 +484,7 @@ void add_zone_pools(const RGWZoneParams& info,
   pools.insert(info.oidc_pool);
   pools.insert(info.notif_pool);
   pools.insert(info.account_pool);
+  pools.insert(info.group_pool);
 
   for (const auto& [pname, placement] : info.placement_pools) {
     pools.insert(placement.index_pool);
@@ -587,6 +590,7 @@ int RGWZoneParams::fix_pool_names(const DoutPrefixProvider *dpp, optional_yield 
   oidc_pool = fix_zone_pool_dup(pools, name, ".rgw.meta:oidc", oidc_pool);
   notif_pool = fix_zone_pool_dup(pools, name, ".rgw.log:notif", notif_pool);
   account_pool = fix_zone_pool_dup(pools, name, ".rgw.meta:accounts", account_pool);
+  group_pool = fix_zone_pool_dup(pools, name, ".rgw.meta:groups", group_pool);
 
   for(auto& iter : placement_pools) {
     iter.second.index_pool = fix_zone_pool_dup(pools, name, "." + default_bucket_index_pool_suffix,
@@ -1249,6 +1253,7 @@ int init_zone_pool_names(const DoutPrefixProvider *dpp, optional_yield y,
   info.oidc_pool = fix_zone_pool_dup(pools, info.name, ".rgw.meta:oidc", info.oidc_pool);
   info.notif_pool = fix_zone_pool_dup(pools, info.name, ".rgw.log:notif", info.notif_pool);
   info.account_pool = fix_zone_pool_dup(pools, info.name, ".rgw.meta:accounts", info.account_pool);
+  info.group_pool = fix_zone_pool_dup(pools, info.name, ".rgw.meta:groups", info.group_pool);
 
   for (auto& [pname, placement] : info.placement_pools) {
     placement.index_pool = fix_zone_pool_dup(pools, info.name, "." + default_bucket_index_pool_suffix, placement.index_pool);
