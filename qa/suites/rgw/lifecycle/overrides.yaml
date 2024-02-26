@@ -1,4 +1,7 @@
 overrides:
+  install:
+    ceph:
+      debuginfo: true
   ceph:
     conf:
       client:
