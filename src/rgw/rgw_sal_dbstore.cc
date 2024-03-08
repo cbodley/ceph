@@ -1615,7 +1615,7 @@ namespace rgw::sal {
                           ceph::real_time& last_synced,
                           ceph::real_time& last_updated)
   {
-    return -ENOTSUP;
+    return 0;
   }
   int DBStore::load_stats_async(const DoutPrefixProvider* dpp,
                                 const rgw_owner& owner,
@@ -1633,7 +1633,7 @@ namespace rgw::sal {
                                     optional_yield y,
                                     const rgw_owner& owner)
   {
-    return -ENOTSUP;
+    return 0;
   }
 
   int DBStore::load_owner_by_email(const DoutPrefixProvider* dpp,

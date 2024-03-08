@@ -50,7 +50,7 @@ int rgw_sync_all_stats(const DoutPrefixProvider *dpp,
 
   ret = driver->complete_flush_stats(dpp, y, owner);
   if (ret < 0) {
-    cerr << "ERROR: failed to complete syncing owner stats: ret=" << ret << std::endl;
+    ldpp_dout(dpp, 0) << "ERROR: failed to complete syncing owner stats: ret=" << ret << dendl;
     return ret;
   }
 
