@@ -669,6 +669,25 @@ int RadosBucket::chown(const DoutPrefixProvider* dpp, const rgw_owner& new_owner
   // write updated owner to bucket instance metadata
   info.owner = new_owner;
 
+  // update ACLOwner
+  if (auto i = attrs.find(RGW_ATTR_ACL); i != attrs.end()) {
+    try {
+      auto p = i->second.cbegin();
+
+      RGWAccessControlPolicy acl;
+      decode(acl, p);
+
+      acl.get_owner().id = new_owner;
+
+      bufferlist bl;
+      encode(acl, bl);
+
+      i->second = std::move(bl);
+    } catch (const buffer::error&) {
+      // not fatal
+    }
+  }
+
   constexpr bool exclusive = false;
   return put_info(dpp, exclusive, ceph::real_clock::now(), y);
 }
