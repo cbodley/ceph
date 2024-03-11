@@ -160,33 +160,51 @@ static int validate_provider_arn(const std::string& provider_arn,
     return -EINVAL;
   }
 
-  auto arn = rgw::ARN::parse(provider_arn, true);
-  if (!arn) {
+  // teuthology runs keycloak on localhost:8080, and rgw::ARN::parse() rejects
+  // that extra colon. aws docs say "The URL should not contain a port number."
+  // but we'll be less strict about parsing
+
+  std::string_view str = provider_arn;
+
+  constexpr std::string_view arn_prefix = "arn:";
+  if (!str.starts_with(arn_prefix)) {
     message = "Invalid value for OpenIDConnectProviderArn";
     return -EINVAL;
   }
+  str.remove_prefix(arn_prefix.size());
 
-  if (arn->partition != rgw::Partition::aws) {
+  constexpr std::string_view partition = "aws:";
+  if (!str.starts_with(partition)) {
     message = "OpenIDConnectProviderArn partition must be aws";
     return -EINVAL;
   }
-  if (arn->service != rgw::Service::iam) {
+  resource.partition = rgw::Partition::aws;
+  str.remove_prefix(partition.size());
+
+  constexpr std::string_view service = "iam::";
+  if (!str.starts_with(service)) {
     message = "OpenIDConnectProviderArn service must be iam";
     return -EINVAL;
   }
-  if (arn->account != tenant) {
+  resource.service = rgw::Service::iam;
+  str.remove_prefix(service.size());
+
+  if (!str.starts_with(tenant)) {
     message = "OpenIDConnectProviderArn account must match user tenant";
     return -EINVAL;
   }
+  resource.account = tenant;
+  str.remove_prefix(tenant.size());
 
-  static constexpr std::string_view prefix = "oidc-provider/";
-  if (!arn->resource.starts_with(prefix)) {
+  constexpr std::string_view resource_prefix = ":oidc-provider/";
+  if (!str.starts_with(resource_prefix)) {
     message = "Invalid ARN resource for OpenIDConnectProviderArn";
     return -EINVAL;
   }
-  url = arn->resource.substr(prefix.size());
+  resource.resource = str.substr(1); // trim leading :
+  str.remove_prefix(resource_prefix.size());
+  url = str;
 
-  resource = std::move(*arn);
   return 0;
 }
 
