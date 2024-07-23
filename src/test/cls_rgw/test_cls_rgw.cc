@@ -52,22 +52,18 @@ string str_int(string s, int i)
   return s;
 }
 
-void test_stats(librados::IoCtx& ioctx, const string& oid, RGWObjCategory category, uint64_t num_entries, uint64_t total_size)
+void test_stats(librados::IoCtx& ioctx, const string& oid, RGWObjCategory category,
+                uint64_t num_entries, uint64_t total_size)
 {
-  map<int, struct rgw_cls_list_ret> results;
-  map<int, string> oids;
-  oids[0] = oid;
-  ASSERT_EQ(0, CLSRGWIssueGetDirHeader(ioctx, oids, results, 8)());
+  bufferlist bl;
+  librados::ObjectReadOperation op;
+  cls_rgw_get_dir_header(op, bl);
+  ASSERT_EQ(0, ioctx.operate(oid, &op, nullptr));
 
-  uint64_t entries = 0;
-  uint64_t size = 0;
-  map<int, struct rgw_cls_list_ret>::iterator iter = results.begin();
-  for (; iter != results.end(); ++iter) {
-    entries += (iter->second).dir.header.stats[category].num_entries;
-    size += (iter->second).dir.header.stats[category].total_size;
-  }
-  ASSERT_EQ(total_size, size);
-  ASSERT_EQ(num_entries, entries);
+  rgw_bucket_dir_header header;
+  ASSERT_EQ(0, cls_rgw_get_dir_header_decode(bl, header));
+  ASSERT_EQ(total_size, header.stats[category].total_size);
+  ASSERT_EQ(num_entries, header.stats[category].num_entries);
 }
 
 void index_prepare(librados::IoCtx& ioctx, const string& oid, RGWModifyOp index_op,
@@ -1447,17 +1443,14 @@ TEST_F(cls_rgw, reshardlog_list)
 
 void reshardlog_entries(librados::IoCtx& ioctx, const std::string& oid, uint32_t num_entries)
 {
-  map<int, struct rgw_cls_list_ret> results;
-  map<int, string> oids;
-  oids[0] = oid;
-  ASSERT_EQ(0, CLSRGWIssueGetDirHeader(ioctx, oids, results, 8)());
+  bufferlist bl;
+  librados::ObjectReadOperation op;
+  cls_rgw_get_dir_header(op, bl);
+  ASSERT_EQ(0, ioctx.operate(oid, &op, nullptr));
 
-  uint32_t entries = 0;
-  map<int, struct rgw_cls_list_ret>::iterator iter = results.begin();
-  for (; iter != results.end(); ++iter) {
-    entries += (iter->second).dir.header.reshardlog_entries;
-  }
-  ASSERT_EQ(entries, num_entries);
+  rgw_bucket_dir_header header;
+  ASSERT_EQ(0, cls_rgw_get_dir_header_decode(bl, header));
+  ASSERT_EQ(num_entries, header.reshardlog_entries);
 }
 
 TEST_F(cls_rgw, reshardlog_num)
