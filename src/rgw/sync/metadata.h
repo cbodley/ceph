@@ -51,13 +51,11 @@ class LocalMetadata {
   virtual ~LocalMetadata() {}
 
   virtual auto write(std::string_view section,
-                     RGWObjVersionTracker& objv,
                      std::string_view key,
                      const bufferlist& bl)
       -> boost::asio::awaitable<void> = 0;
 
   virtual auto remove(std::string_view section,
-                      RGWObjVersionTracker& objv,
                       std::string_view key)
       -> boost::asio::awaitable<void> = 0;
 };
@@ -145,25 +143,27 @@ class LogStatus {
 
 // start global metadata sync
 auto sync(const DoutPrefixProvider* dpp, uint32_t shards,
-          RemoteLog& peer_log, LocalLog& local_log,
           RemoteMetadata& peer_meta, LocalMetadata& local_meta,
           LocalFullSyncIndex& local_index,
+          RemoteLog& peer_log, LocalLog& local_log,
           Status& status, LogStatus& log_status)
     -> boost::asio::awaitable<void>;
 
 // run incremental sync on the given period
 auto sync_period(const DoutPrefixProvider* dpp, uint32_t shards,
                  std::string_view period,
-                 RemoteLog& peer_log, LocalLog& local_log,
                  RemoteMetadata& peer_meta, LocalMetadata& local_meta,
+                 LocalFullSyncIndex& local_index,
+                 RemoteLog& peer_log, LocalLog& local_log,
                  LogStatus& log_status)
     -> boost::asio::awaitable<void>;
 
 // run incremental sync on the given mdlog shard
 auto sync_shard(const DoutPrefixProvider* dpp,
                 std::string_view period, uint32_t shard,
-                RemoteLog& peer_log, LocalLog& local_log,
                 RemoteMetadata& peer_meta, LocalMetadata& local_meta,
+                LocalFullSyncIndex& local_index,
+                RemoteLog& peer_log, LocalLog& local_log,
                 LogStatus& log_status)
     -> boost::asio::awaitable<void>;
 
