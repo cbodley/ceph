@@ -4852,6 +4852,7 @@ int RGWRados::copy_obj(RGWObjectCtx& src_obj_ctx,
     append_rand_alpha(cct, tag, tag, 32);
   }
 
+  constexpr auto is_error = [] (int r) { return r < 0; };
   const req_context rctx{dpp, y, nullptr};
   std::unique_ptr<rgw::Aio> aio;
   rgw::AioResultList all_results;
@@ -4883,16 +4884,17 @@ int RGWRados::copy_obj(RGWObjectCtx& src_obj_ctx,
       rgw::AioResultList completed =
 	aio->get(obj.obj, rgw::Aio::librados_op(obj.ioctx, std::move(op), y),
 		 cost, id);
-      ret = rgw::check_for_errors(completed);
+      ret = rgw::check_for_errors(completed, is_error, dpp,
+                                  "failed to ref object");
       all_results.splice(all_results.end(), completed);
       if (ret < 0) {
-        ldpp_dout(dpp, 0) << "ERROR: failed to copy obj=" << obj << ", the error code = " << ret << dendl;
         goto done_ret;
       }
     }
 
     rgw::AioResultList completed = aio->drain();
-    ret = rgw::check_for_errors(completed);
+    ret = rgw::check_for_errors(completed, is_error, dpp,
+                                "failed to ref object");
     all_results.splice(all_results.end(), completed);
     if (ret < 0) {
       ldpp_dout(dpp, 0) << "ERROR: failed to drain ios, the error code = " << ret <<dendl;
@@ -4964,16 +4966,12 @@ done_ret:
       rgw::AioResultList completed =
 	aio->get(obj.obj, rgw::Aio::librados_op(obj.ioctx, std::move(op), y),
 		 cost, id);
-      ret2 = rgw::check_for_errors(completed);
-      if (ret2 < 0) {
-        ldpp_dout(dpp, 0) << "ERROR: cleanup after error failed to drop reference on obj=" << r.obj << dendl;
-      }
+      std::ignore = rgw::check_for_errors(completed, is_error, dpp,
+                                          "failed to deref object");
     }
     completed = aio->drain();
-    ret2 = rgw::check_for_errors(completed);
-    if (ret2 < 0) {
-      ldpp_dout(dpp, 0) << "ERROR: failed to drain rollback ios, the error code = " << ret2 <<dendl;
-    }
+    std::ignore = rgw::check_for_errors(completed, is_error, dpp,
+                                        "failed to deref object");
   }
   return ret;
 }
@@ -5389,6 +5387,7 @@ void RGWRados::delete_objs_inline(const DoutPrefixProvider *dpp, cls_rgw_obj_cha
   auto aio = rgw::make_throttle(cct->_conf->rgw_multi_obj_del_max_aio, y);
   static constexpr uint64_t cost = 1; // 1 throttle unit per request
   static constexpr uint64_t id = 0; // ids unused
+  constexpr auto is_error = [] (int r) { return r < 0; };
 
   for (; obj != chain.objs.end(); ++obj) {
     ObjectWriteOperation op;
@@ -5401,11 +5400,13 @@ void RGWRados::delete_objs_inline(const DoutPrefixProvider *dpp, cls_rgw_obj_cha
 
     auto completed = aio->get(std::move(raw), rgw::Aio::librados_op(
             ioctx, std::move(op), y), cost, id);
-    std::ignore = rgw::check_for_errors(completed);
+    std::ignore = rgw::check_for_errors(completed, is_error, dpp,
+                                        "failed to deref object");
   }
 
   auto completed = aio->drain();
-  std::ignore = rgw::check_for_errors(completed);
+  std::ignore = rgw::check_for_errors(completed, is_error, dpp,
+                                      "failed to deref object");
 }
 
 static void accumulate_raw_stats(const rgw_bucket_dir_header& header,
@@ -7263,8 +7264,11 @@ int RGWRados::Object::Read::read(int64_t ofs, int64_t end,
   return bl.length();
 }
 
-int get_obj_data::flush(rgw::AioResultList&& results) {
-  int r = rgw::check_for_errors(results);
+int get_obj_data::flush(const DoutPrefixProvider* dpp,
+                        rgw::AioResultList&& results) {
+  constexpr auto is_error = [] (int r) { return r < 0; };
+  int r = rgw::check_for_errors(results, is_error, dpp,
+                                "failed to read object");
   if (r < 0) {
     return r;
   }
@@ -7359,7 +7363,7 @@ int RGWRados::get_obj_iterate_cb(const DoutPrefixProvider *dpp,
 
   auto completed = d->aio->get(obj.obj, rgw::Aio::librados_op(obj.ioctx, std::move(op), d->yield), cost, id);
 
-  return d->flush(std::move(completed));
+  return d->flush(dpp, std::move(completed));
 }
 
 int RGWRados::Object::Read::iterate(const DoutPrefixProvider *dpp, int64_t ofs, int64_t end, RGWGetDataCB *cb,
@@ -7381,7 +7385,7 @@ int RGWRados::Object::Read::iterate(const DoutPrefixProvider *dpp, int64_t ofs, 
     return r;
   }
 
-  return data.drain();
+  return data.drain(dpp);
 }
 
 int RGWRados::iterate_obj(const DoutPrefixProvider *dpp, RGWObjectCtx& obj_ctx,
