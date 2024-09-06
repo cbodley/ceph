@@ -70,6 +70,7 @@
 #include "cls/rgw/cls_rgw_client.h"
 
 #include "account.h"
+#include "bucket_index.h"
 #include "buckets.h"
 #include "group.h"
 #include "groups.h"
@@ -764,8 +765,10 @@ int RadosBucket::rebuild_index(const DoutPrefixProvider *dpp)
 int RadosBucket::set_tag_timeout(const DoutPrefixProvider *dpp,
                                  optional_yield y, uint64_t timeout)
 {
-  return store->getRados()->svc.bi_rados->set_tag_timeout(
-      dpp, y, info, info.layout.current_index, timeout);
+  librados::Rados& rados = *store->getRados()->get_rados_handle();
+  const rgw::SiteConfig& site = *store->svc()->site;
+  return rgwrados::bucket_index::set_tag_timeout(
+      dpp, y, rados, site, info, info.layout.current_index, timeout);
 }
 
 int RadosBucket::purge_instance(const DoutPrefixProvider* dpp, optional_yield y)
