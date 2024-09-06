@@ -65,4 +65,13 @@ int clean(const DoutPrefixProvider *dpp,
           const RGWBucketInfo& info,
           const rgw::bucket_index_layout_generation& index);
 
+/// Set the tag timeout on all of the index shards for the given layout.
+int set_tag_timeout(const DoutPrefixProvider *dpp,
+                    optional_yield y,
+                    librados::Rados& rados,
+                    const rgw::SiteConfig& site,
+                    const RGWBucketInfo& info,
+                    const rgw::bucket_index_layout_generation& index,
+                    uint64_t timeout);
+
 } // namespace rgwrados::bucket_index
