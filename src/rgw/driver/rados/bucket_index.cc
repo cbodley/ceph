@@ -291,4 +291,118 @@ int set_tag_timeout(const DoutPrefixProvider *dpp,
   return ret;
 }
 
+int read_header(const DoutPrefixProvider *dpp,
+                optional_yield y,
+                librados::Rados& rados,
+                const rgw::SiteConfig& site,
+                const RGWBucketInfo& info,
+                const rgw::bucket_index_layout_generation& index,
+                int shard,
+                rgw_bucket_dir_header& header)
+{
+  if (index.layout.type != rgw::BucketIndexType::Normal) {
+    return 0;
+  }
+  if (std::cmp_greater_equal(shard, num_shards(index.layout.normal))) {
+    return -EDOM; // shard index out of range
+  }
+
+  librados::IoCtx ioctx;
+  int ret = open_index_pool(dpp, rados, site, info, ioctx);
+  if (ret < 0) {
+    return ret;
+  }
+
+  bufferlist bl;
+  librados::ObjectReadOperation op;
+  cls_rgw_get_dir_header(op, bl);
+
+  const auto oid = shard_oid(info.bucket.bucket_id, index.gen,
+                             index.layout.normal, shard);
+  ret = rgw_rados_operate(dpp, ioctx, oid, &op, nullptr, y);
+  if (ret < 0) {
+    ldpp_dout(dpp, 4) << "failed to read index shard object " << oid << dendl;
+    return ret;
+  }
+
+  ret = cls_rgw_get_dir_header_decode(bl, header);
+  if (ret < 0) {
+    ldpp_dout(dpp, 4) << "failed to decode index shard header" << dendl;
+    return ret;
+  }
+
+  return 0;
+}
+
+int read_headers(const DoutPrefixProvider *dpp,
+                 optional_yield y,
+                 librados::Rados& rados,
+                 const rgw::SiteConfig& site,
+                 const RGWBucketInfo& info,
+                 const rgw::bucket_index_layout_generation& index,
+                 std::vector<rgw_bucket_dir_header>& headers)
+{
+  if (index.layout.type != rgw::BucketIndexType::Normal) {
+    return 0;
+  }
+
+  librados::IoCtx ioctx;
+  int ret = open_index_pool(dpp, rados, site, info, ioctx);
+  if (ret < 0) {
+    return ret;
+  }
+
+  // read the encoded headers into a temporary array of buffers
+  std::vector<bufferlist> buffers;
+  buffers.resize(num_shards(index.layout.normal));
+
+  // issue up to max_aio requests in parallel
+  const auto max_aio = dpp->get_cct()->_conf->rgw_bucket_index_max_aio;
+  auto aio = rgw::make_throttle(max_aio, y);
+  constexpr uint64_t cost = 1; // 1 throttle unit per request
+  constexpr uint64_t id = 0; // ids unused
+
+  constexpr auto is_error = [] (int r) { return r < 0; };
+
+  for (uint32_t shard = 0; shard < num_shards(index.layout.normal); shard++) {
+    librados::ObjectReadOperation op;
+    cls_rgw_get_dir_header(op, buffers[shard]);
+
+    rgw_raw_obj obj; // obj.pool is empty and unused
+    obj.oid = shard_oid(info.bucket.bucket_id, index.gen,
+                        index.layout.normal, shard);
+
+    auto completed = aio->get(obj, rgw::Aio::librados_op(
+            ioctx, std::move(op), y), cost, id);
+    ret = rgw::check_for_errors(completed, is_error, dpp,
+                                "failed to read header for index object");
+    if (ret < 0) {
+      break;
+    }
+  }
+
+  auto completed = aio->drain();
+  ret = rgw::check_for_errors(completed, is_error, dpp,
+                              "failed to read header for index object");
+  if (ret < 0) {
+    return ret;
+  }
+
+  // decode the buffers into the output header array
+  headers.resize(buffers.size());
+
+  auto bl = buffers.begin();
+  for (auto header = headers.begin();
+       header != headers.end() && bl != buffers.end();
+       ++header, ++bl) {
+    ret = cls_rgw_get_dir_header_decode(*bl, *header);
+    if (ret < 0) {
+      ldpp_dout(dpp, 4) << "failed to decode index shard header" << dendl;
+      return ret;
+    }
+  }
+
+  return 0;
+}
+
 } // namespace rgwrados::bucket_index
