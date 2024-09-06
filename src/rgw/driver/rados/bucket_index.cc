@@ -187,4 +187,56 @@ int init(const DoutPrefixProvider* dpp,
   return ret;
 }
 
+int clean(const DoutPrefixProvider *dpp,
+          optional_yield y,
+          librados::Rados& rados,
+          const rgw::SiteConfig& site,
+          const RGWBucketInfo& info,
+          const rgw::bucket_index_layout_generation& index)
+{
+  if (index.layout.type != rgw::BucketIndexType::Normal) {
+    return 0;
+  }
+
+  librados::IoCtx ioctx;
+  int ret = open_index_pool(dpp, rados, site, info, ioctx);
+  if (ret < 0) {
+    return ret;
+  }
+
+  // issue up to max_aio requests in parallel
+  const auto max_aio = dpp->get_cct()->_conf->rgw_bucket_index_max_aio;
+  auto aio = rgw::make_throttle(max_aio, y);
+  constexpr uint64_t cost = 1; // 1 throttle unit per request
+  constexpr uint64_t id = 0; // ids unused
+
+  // ignore ENOENT errors
+  constexpr auto is_error = [] (int r) { return r < 0 && r != -ENOENT; };
+
+  for (uint32_t shard = 0; shard < num_shards(index.layout.normal); shard++) {
+    librados::ObjectWriteOperation op;
+    op.remove();
+
+    rgw_raw_obj obj; // obj.pool is empty and unused
+    obj.oid = shard_oid(info.bucket.bucket_id, index.gen,
+                        index.layout.normal, shard);
+
+    auto completed = aio->get(obj, rgw::Aio::librados_op(
+            ioctx, std::move(op), y), cost, id);
+    int r = rgw::check_for_errors(completed, is_error, dpp,
+                                  "failed to remove index object");
+    if (ret == 0) {
+      ret = r;
+    }
+  }
+
+  auto completed = aio->drain();
+  int r = rgw::check_for_errors(completed, is_error, dpp,
+                                "failed to remove index object");
+  if (r < 0) {
+    return r;
+  }
+  return ret;
+}
+
 } // namespace rgwrados::bucket_index

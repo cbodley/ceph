@@ -2388,7 +2388,9 @@ int RGWRados::create_bucket(const DoutPrefixProvider* dpp,
       /* only remove it if it's a different bucket instance */
       if (orig_info.bucket.bucket_id != bucket.bucket_id) {
         if (zone_placement) {
-          r = svc.bi->clean_index(dpp, y, info, info.layout.current_index);
+          r = rgwrados::bucket_index::clean(
+              dpp, y, *get_rados_handle(), *svc.site,
+              orig_info, orig_info.layout.current_index);
           if (r < 0) {
             ldpp_dout(dpp, 0) << "WARNING: could not remove bucket index (r=" << r << ")" << dendl;
           }
@@ -5226,8 +5228,10 @@ int RGWRados::delete_bucket(RGWBucketInfo& bucket_info, RGWObjVersionTracker& ob
       return r;
     }
 
-   /* remove bucket index objects asynchronously by best effort */
-    (void) svc.bi_rados->clean_index(dpp, y, bucket_info, bucket_info.layout.current_index);
+    /* remove bucket index objects asynchronously by best effort */
+    std::ignore = rgwrados::bucket_index::clean(
+        dpp, y, *get_rados_handle(), *svc.site,
+        bucket_info, bucket_info.layout.current_index);
   }
 
   return 0;

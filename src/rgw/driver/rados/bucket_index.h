@@ -57,4 +57,12 @@ int init(const DoutPrefixProvider* dpp,
          const rgw::bucket_index_layout_generation& index,
          bool judge_support_logrecord = false);
 
+/// Remove all of the index shard objects for the given layout.
+int clean(const DoutPrefixProvider *dpp,
+          optional_yield y,
+          librados::Rados& rados,
+          const rgw::SiteConfig& site,
+          const RGWBucketInfo& info,
+          const rgw::bucket_index_layout_generation& index);
+
 } // namespace rgwrados::bucket_index
