@@ -17,11 +17,13 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "include/rados/librados_fwd.hpp"
 
 class DoutPrefixProvider;
 class optional_yield;
+struct rgw_bucket_dir_header;
 class RGWBucketInfo;
 
 namespace rgw {
@@ -73,5 +75,24 @@ int set_tag_timeout(const DoutPrefixProvider *dpp,
                     const RGWBucketInfo& info,
                     const rgw::bucket_index_layout_generation& index,
                     uint64_t timeout);
+
+/// Read the dir header for a given index shard object.
+int read_header(const DoutPrefixProvider *dpp,
+                optional_yield y,
+                librados::Rados& rados,
+                const rgw::SiteConfig& site,
+                const RGWBucketInfo& info,
+                const rgw::bucket_index_layout_generation& index,
+                int shard,
+                rgw_bucket_dir_header& header);
+
+/// Read the dir headers from all of the index shards for the given layout.
+int read_headers(const DoutPrefixProvider *dpp,
+                 optional_yield y,
+                 librados::Rados& rados,
+                 const rgw::SiteConfig& site,
+                 const RGWBucketInfo& info,
+                 const rgw::bucket_index_layout_generation& index,
+                 std::vector<rgw_bucket_dir_header>& headers);
 
 } // namespace rgwrados::bucket_index
