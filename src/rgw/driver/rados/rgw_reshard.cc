@@ -397,8 +397,12 @@ static int remove_old_reshard_instance(rgw::sal::RadosStore* store,
     return r;
   }
 
+  librados::Rados& rados = *store->getRados()->get_rados_handle();
+  const rgw::SiteConfig& site = *store->svc()->site;
+
   // delete its shard objects (ignore errors)
-  store->svc()->bi->clean_index(dpp, y, info, info.layout.current_index);
+  std::ignore = rgwrados::bucket_index::clean(
+      dpp, y, rados, site, info, info.layout.current_index);
   // delete the bucket instance metadata
   return store->ctl()->bucket->remove_bucket_instance_info(bucket, info, y, dpp);
 }
@@ -440,7 +444,8 @@ static int init_target_index(rgw::sal::RadosStore* store,
       ldpp_dout(dpp, 0) << "ERROR: " << __func__ << " failed to disable "
           "bucket sync on the target index shard objects: "
           << cpp_strerror(ret) << dendl;
-      store->svc()->bi->clean_index(dpp, y, bucket_info, index);
+      std::ignore = rgwrados::bucket_index::clean(
+          dpp, y, rados, site, bucket_info, index);
       return ret;
     }
   }
@@ -458,6 +463,9 @@ static int init_target_layout(rgw::sal::RadosStore* store,
                               bool& support_logrecord,
                               const DoutPrefixProvider* dpp, optional_yield y)
 {
+  librados::Rados& rados = *store->getRados()->get_rados_handle();
+  const rgw::SiteConfig& site = *store->svc()->site;
+
   auto prev = bucket_info.layout; // make a copy for cleanup
   const auto current = prev.current_index;
 
@@ -486,7 +494,8 @@ static int init_target_layout(rgw::sal::RadosStore* store,
     ldpp_dout(dpp, 10) << __func__ << " removing existing target index "
         "objects from a previous reshard attempt" << dendl;
     // delete its existing shard objects (ignore errors)
-    store->svc()->bi->clean_index(dpp, y, bucket_info, *bucket_info.layout.target_index);
+    std::ignore = rgwrados::bucket_index::clean(
+        dpp, y, rados, site, bucket_info, *bucket_info.layout.target_index);
     // don't reuse this same generation in the new target layout, in case
     // something is still trying to operate on its shard objects
     target.gen = bucket_info.layout.target_index->gen + 1;
@@ -555,7 +564,8 @@ static int init_target_layout(rgw::sal::RadosStore* store,
     bucket_info.layout = std::move(prev);  // restore in-memory layout
 
     // delete the target shard objects (ignore errors)
-    store->svc()->bi->clean_index(dpp, y, bucket_info, target);
+    std::ignore = rgwrados::bucket_index::clean(
+        dpp, y, rados, site, bucket_info, target);
     return ret;
   }
 
@@ -572,8 +582,12 @@ static int revert_target_layout(rgw::sal::RadosStore* store,
 {
   auto prev = bucket_info.layout; // make a copy for cleanup
 
+  librados::Rados& rados = *store->getRados()->get_rados_handle();
+  const rgw::SiteConfig& site = *store->svc()->site;
+
   // remove target index shard objects
-  int ret = store->svc()->bi->clean_index(dpp, y, bucket_info, *prev.target_index);
+  int ret = rgwrados::bucket_index::clean(
+      dpp, y, rados, site, bucket_info, *prev.target_index);
   if (ret < 0) {
     ldpp_dout(dpp, 1) << "WARNING: " << __func__ << " failed to remove "
         "target index with: " << cpp_strerror(ret) << dendl;
@@ -927,8 +941,12 @@ static int commit_reshard(rgw::sal::RadosStore* store,
             && log.layout.in_index.gen == prev.current_index.gen;
       });
   if (log == logs.end()) {
+    librados::Rados& rados = *store->getRados()->get_rados_handle();
+    const rgw::SiteConfig& site = *store->svc()->site;
+
     // delete the index objects (ignore errors)
-    store->svc()->bi->clean_index(dpp, y, bucket_info, prev.current_index);
+    std::ignore = rgwrados::bucket_index::clean(
+        dpp, y, rados, site, bucket_info, prev.current_index);
   }
   return 0;
 } // commit_reshard
