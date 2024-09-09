@@ -1,4 +1,4 @@
 overrides:
   s3tests:
-    force-branch: ceph-master
+    force-branch: fix_cherry_pick_tracker_65651
     # git_remote: https://github.com/ceph/
