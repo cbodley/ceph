@@ -1297,11 +1297,6 @@ int RGWBucketReshard::do_reshard(const rgw::bucket_index_layout_generation& curr
   return 0;
 } // RGWBucketReshard::do_reshard
 
-int RGWBucketReshard::get_status(const DoutPrefixProvider *dpp, list<cls_rgw_bucket_instance_entry> *status)
-{
-  return store->svc()->bi_rados->get_reshard_status(dpp, bucket_info, status);
-}
-
 int RGWBucketReshard::execute(int num_shards,
                               ReshardFaultInjector& fault,
                               int max_op_entries,  // max num to process per op
