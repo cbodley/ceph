@@ -514,37 +514,6 @@ int RGWSI_BucketIndex_RADOS::read_stats(const DoutPrefixProvider *dpp,
   return 0;
 }
 
-int RGWSI_BucketIndex_RADOS::get_reshard_status(const DoutPrefixProvider *dpp, const RGWBucketInfo& bucket_info, list<cls_rgw_bucket_instance_entry> *status)
-{
-  map<int, string> bucket_objs;
-
-  librados::IoCtx index_pool;
-
-  int r = open_bucket_index(dpp, bucket_info,
-                            std::nullopt,
-                            bucket_info.layout.current_index,
-                            &index_pool,
-                            &bucket_objs,
-                            nullptr);
-  if (r < 0) {
-    return r;
-  }
-
-  for (auto i : bucket_objs) {
-    cls_rgw_bucket_instance_entry entry;
-
-    int ret = cls_rgw_get_bucket_resharding(index_pool, i.second, &entry);
-    if (ret < 0 && ret != -ENOENT) {
-      ldpp_dout(dpp, -1) << "ERROR: " << __func__ << ": cls_rgw_get_bucket_resharding() returned ret=" << ret << dendl;
-      return ret;
-    }
-
-    status->push_back(entry);
-  }
-
-  return 0;
-}
-
 int RGWSI_BucketIndex_RADOS::handle_overwrite(const DoutPrefixProvider *dpp,
                                               const RGWBucketInfo& info,
                                               const RGWBucketInfo& orig_info,

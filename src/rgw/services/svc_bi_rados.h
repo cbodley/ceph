@@ -137,9 +137,6 @@ public:
                  RGWBucketEnt *stats,
                  optional_yield y) override;
 
-  int get_reshard_status(const DoutPrefixProvider *dpp, const RGWBucketInfo& bucket_info,
-                         std::list<cls_rgw_bucket_instance_entry> *status);
-
   int handle_overwrite(const DoutPrefixProvider *dpp, const RGWBucketInfo& info,
                        const RGWBucketInfo& orig_info,
 		       optional_yield y) override;
