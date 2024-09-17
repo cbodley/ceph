@@ -76,6 +76,7 @@ extern "C" {
 #include "services/svc_user.h"
 #include "services/svc_zone.h"
 
+#include "driver/rados/bucket_index_log.h"
 #include "driver/rados/rgw_bucket.h"
 #include "driver/rados/rgw_sal_rados.h"
 
@@ -10453,7 +10454,7 @@ next:
     }
     map<int, string> markers;
     const auto& logs = bucket->get_info().layout.logs;
-    auto log_layout = std::reference_wrapper{logs.back()};
+    auto log_layout = std::ref(logs.back());
     if (gen) {
       auto i = std::find_if(logs.begin(), logs.end(), rgw::matches_gen(*gen));
       if (i == logs.end()) {
@@ -10463,12 +10464,40 @@ next:
       log_layout = *i;
     }
 
-    ret = static_cast<rgw::sal::RadosStore*>(driver)->svc()->bilog_rados->get_log_status(dpp(), bucket->get_info(), log_layout, shard_id,
-						    &markers, null_yield);
-    if (ret < 0) {
-      cerr << "ERROR: get_bi_log_status(): " << cpp_strerror(-ret) << std::endl;
-      return -ret;
+    auto rados_driver = dynamic_cast<rgw::sal::RadosStore*>(driver);
+    if (!rados_driver) {
+      cerr << "ERROR: this command can only work when the cluster "
+          "has a RADOS backing store." << std::endl;
+      return EPERM;
     }
+    auto& rados = *rados_driver->getRados()->get_rados_handle();
+
+    if (specified_shard_id) {
+      std::string max_marker;
+      int ret = rgwrados::bucket_index_log::max_marker(
+          dpp(), null_yield, rados, *site, bucket->get_info(),
+          log_layout, shard_id, max_marker);
+      if (ret < 0) {
+        cerr << "ERROR: failed to read marker: "
+            << cpp_strerror(-ret) << std::endl;
+        return -ret;
+      }
+      markers[shard_id] = std::move(max_marker);
+    } else {
+      std::vector<std::string> max_markers;
+      int ret = rgwrados::bucket_index_log::max_markers(
+          dpp(), null_yield, rados, *site, bucket->get_info(),
+          log_layout, max_markers);
+      if (ret < 0) {
+        cerr << "ERROR: failed to read markers: "
+            << cpp_strerror(-ret) << std::endl;
+        return -ret;
+      }
+      for (size_t i = 0; i < max_markers.size(); i++) {
+        markers[i] = std::move(max_markers[i]);
+      }
+    }
+
     formatter->open_object_section("entries");
     encode_json("markers", markers, formatter.get());
     formatter->dump_string("current_time",
