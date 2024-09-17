@@ -76,6 +76,7 @@ extern "C" {
 #include "services/svc_user.h"
 #include "services/svc_zone.h"
 
+#include "driver/rados/bucket_index.h"
 #include "driver/rados/bucket_index_log.h"
 #include "driver/rados/rgw_bucket.h"
 #include "driver/rados/rgw_sal_rados.h"
@@ -1210,12 +1211,12 @@ static void show_policy_arns(const boost::container::flat_set<std::string>& arns
 }
 
 static void show_reshard_status(
-  const list<cls_rgw_bucket_instance_entry>& status, Formatter *formatter)
+  const std::vector<rgw_bucket_dir_header>& headers, Formatter *formatter)
 {
   formatter->open_array_section("status");
-  for (const auto& entry : status) {
+  for (const auto& h : headers) {
     formatter->open_object_section("entry");
-    formatter->dump_string("reshard_status", to_string(entry.reshard_status));
+    formatter->dump_string("reshard_status", to_string(h.new_instance.reshard_status));
     formatter->close_section();
   }
   formatter->close_section();
@@ -8468,18 +8469,27 @@ next:
       return -ret;
     }
 
-    RGWBucketReshard br(static_cast<rgw::sal::RadosStore*>(driver),
-			bucket->get_info(), bucket->get_attrs(),
-			nullptr /* no callback */);
-    list<cls_rgw_bucket_instance_entry> status;
-    int r = br.get_status(dpp(), &status);
+    auto rados_driver = dynamic_cast<rgw::sal::RadosStore*>(driver);
+    if (!rados_driver) {
+      cerr << "ERROR: this command can only work when the cluster "
+          "has a RADOS backing store." << std::endl;
+      return EPERM;
+    }
+
+    auto& rados = *rados_driver->getRados()->get_rados_handle();
+    const RGWBucketInfo& info = bucket->get_info();
+    const auto& index = info.layout.current_index;
+
+    std::vector<rgw_bucket_dir_header> headers;
+    int r = rgwrados::bucket_index::read_headers(
+        dpp(), null_yield, rados, *site, info, index, headers);
     if (r < 0) {
       cerr << "ERROR: could not get resharding status for bucket " <<
 	bucket_name << std::endl;
       return -r;
     }
 
-    show_reshard_status(status, formatter.get());
+    show_reshard_status(headers, formatter.get());
   }
 
   if (opt_cmd == OPT::RESHARD_PROCESS) {
