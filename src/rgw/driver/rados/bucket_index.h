@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,8 @@
 class DoutPrefixProvider;
 class optional_yield;
 struct rgw_bucket_dir_header;
+struct rgw_cls_list_ret;
+struct rgw_obj_index_key;
 class RGWBucketInfo;
 
 namespace rgw {
@@ -66,6 +69,18 @@ int clean(const DoutPrefixProvider *dpp,
           const rgw::SiteConfig& site,
           const RGWBucketInfo& info,
           const rgw::bucket_index_layout_generation& index);
+
+/// Fetch the next entries from each index shard object.
+int list_objects(const DoutPrefixProvider* dpp,
+                 optional_yield y,
+                 librados::IoCtx& ioctx,
+                 std::span<const std::string> shard_oids,
+                 const rgw_obj_index_key& start_obj,
+                 const std::string& filter_prefix,
+                 const std::string& delimiter,
+                 uint32_t num_entries,
+                 bool list_versions,
+                 std::span<rgw_cls_list_ret> results);
 
 /// Set the tag timeout on all of the index shards for the given layout.
 int set_tag_timeout(const DoutPrefixProvider *dpp,
