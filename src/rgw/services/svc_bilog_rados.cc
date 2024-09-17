@@ -192,34 +192,3 @@ int RGWSI_BILog_RADOS::log_list(const DoutPrefixProvider *dpp,
 
   return 0;
 }
-
-int RGWSI_BILog_RADOS::get_log_status(const DoutPrefixProvider *dpp,
-                                      const RGWBucketInfo& bucket_info,
-				      const rgw::bucket_log_layout_generation& log_layout, 
-                                      int shard_id,
-                                      map<int, string> *markers,
-				      optional_yield y)
-{
-  vector<rgw_bucket_dir_header> headers;
-  map<int, string> bucket_instance_ids;
-  const auto& current_index = rgw::log_to_index_layout(log_layout);
-  int r = svc.bi->cls_bucket_head(dpp, bucket_info, current_index, shard_id, &headers, &bucket_instance_ids, y);
-  if (r < 0)
-    return r;
-
-  ceph_assert(headers.size() == bucket_instance_ids.size());
-
-  auto iter = headers.begin();
-  map<int, string>::iterator viter = bucket_instance_ids.begin();
-
-  for(; iter != headers.end(); ++iter, ++viter) {
-    if (shard_id >= 0) {
-      (*markers)[shard_id] = iter->max_marker;
-    } else {
-      (*markers)[viter->first] = iter->max_marker;
-    }
-  }
-
-  return 0;
-}
-

@@ -44,11 +44,4 @@ public:
                uint32_t max,
                std::list<rgw_bi_log_entry>& result,
                bool *truncated);
-
-  int get_log_status(const DoutPrefixProvider *dpp,
-                     const RGWBucketInfo& bucket_info,
-                     const rgw::bucket_log_layout_generation& log_layout,
-                     int shard_id,
-                     std::map<int, std::string> *markers,
-                     optional_yield y);
 };
