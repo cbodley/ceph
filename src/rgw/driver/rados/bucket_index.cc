@@ -239,6 +239,103 @@ int clean(const DoutPrefixProvider *dpp,
   return ret;
 }
 
+int list_objects(const DoutPrefixProvider* dpp,
+                 optional_yield y,
+                 librados::IoCtx& ioctx,
+                 std::span<const std::string> shard_oids,
+                 const rgw_obj_index_key& start_obj,
+                 const std::string& filter_prefix,
+                 const std::string& delimiter,
+                 uint32_t num_entries,
+                 bool list_versions,
+                 std::span<rgw_cls_list_ret> results)
+{
+  int ret = 0;
+
+  // issue up to max_aio requests in parallel
+  const auto max_aio = dpp->get_cct()->_conf->rgw_bucket_index_max_aio;
+  auto aio = rgw::make_throttle(max_aio, y);
+  constexpr uint64_t cost = 1; // 1 throttle unit per request
+
+  constexpr auto is_retry = [] (int r) { return r == RGWBIAdvanceAndRetryError; };
+  constexpr auto is_error = [is_retry] (int r) { return r < 0 && !is_retry(r); };
+
+  // track requests that fail with RGWBIAdvanceAndRetryError for retry
+  rgw::AioResultList retries;
+
+  // issue one round of requests to each shard object before any retries
+  for (size_t shard = 0; shard < shard_oids.size(); shard++) {
+    const std::string& oid = shard_oids[shard];
+    auto& result = results[shard];
+    // if we have results from a previous call, resume from its marker
+    const cls_rgw_obj_key& marker =
+        !result.marker.empty() ? result.marker : start_obj;
+
+    librados::ObjectReadOperation op;
+    cls_rgw_bucket_list_op(op, marker, filter_prefix, delimiter,
+                           num_entries, list_versions, &result);
+
+    rgw_raw_obj obj; // obj.pool is empty and unused
+    obj.oid = oid;
+
+    const uint64_t id = shard; // associate each completion with its shard
+    auto completions = aio->get(obj, rgw::Aio::librados_op(ioctx, std::move(op), y), cost, id);
+    ret = rgw::check_for_errors(completions, is_error, dpp,
+                                "failed to list index object");
+    if (ret < 0) {
+      break;
+    }
+    transfer_if(completions, retries, is_retry);
+  }
+
+  // issue retries and poll for completions until done or error
+  while (ret == 0) {
+    // loop over retries, erasing as we go. more may be appended in the meantime
+    using deleter = std::default_delete<rgw::AioResultEntry>;
+    for (auto i = retries.begin(); i != retries.end();
+         i = retries.erase_and_dispose(i, deleter{})) {
+      // resume listing from the last marker received
+      auto& result = results[i->id];
+      const cls_rgw_obj_key& marker = result.marker;
+
+      librados::ObjectReadOperation op;
+      cls_rgw_bucket_list_op(op, marker, filter_prefix, delimiter,
+                             num_entries, list_versions, &result);
+
+      auto completions = aio->get(i->obj, rgw::Aio::librados_op(ioctx, std::move(op), y), cost, i->id);
+      ret = rgw::check_for_errors(completions, is_error, dpp,
+                                  "failed to list index object");
+      if (ret < 0) {
+        break; // break twice
+      }
+      transfer_if(completions, retries, is_retry);
+    }
+    if (ret < 0) {
+      break;
+    }
+
+    // wait for the next completion
+    auto completions = aio->wait();
+    if (completions.empty()) {
+      break; // done!
+    }
+    ret = rgw::check_for_errors(completions, is_error, dpp,
+                                "failed to list index object");
+    if (ret < 0) {
+      break;
+    }
+    transfer_if(completions, retries, is_retry);
+  }
+
+  auto completions = aio->drain();
+  int r = rgw::check_for_errors(completions, is_error, dpp,
+                                "failed to list index object");
+  if (r < 0) {
+    return r;
+  }
+  return ret;
+}
+
 int set_tag_timeout(const DoutPrefixProvider *dpp,
                     optional_yield y,
                     librados::Rados& rados,
