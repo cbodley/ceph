@@ -9603,26 +9603,33 @@ int RGWRados::cls_bucket_list_ordered(const DoutPrefixProvider *dpp,
 
   m.clear();
 
-  librados::IoCtx index_pool;
-  // key   - oid (for different shards if there is any)
-  // value - list result for the corresponding oid (shard), it is filled by
-  //         the AIO callback
-  std::map<int, std::string> shard_oids;
-  int r = svc.bi_rados->open_bucket_index(dpp, bucket_info, shard_id, idx_layout,
-					  &index_pool, &shard_oids,
-					  nullptr);
+  if (idx_layout.layout.type != rgw::BucketIndexType::Normal) {
+    return 0;
+  }
+
+  librados::IoCtx ioctx;
+  int r = rgwrados::bucket_index::open_index_pool(
+      dpp, *get_rados_handle(), *svc.site, bucket_info, ioctx);
   if (r < 0) {
     ldpp_dout(dpp, 0) << __func__ <<
       ": open_bucket_index for " << bucket_info.bucket << " failed" << dendl;
     return r;
   }
 
-  const uint32_t shard_count = shard_oids.size();
+  const uint32_t shard_count = num_shards(idx_layout.layout.normal);
   if (shard_count == 0) {
     ldpp_dout(dpp, 0) << "ERROR: " << __func__ <<
       ": the bucket index shard count appears to be 0, "
       "which is an illegal value" << dendl;
     return -ERR_INVALID_BUCKET_STATE;
+  }
+
+  std::vector<std::string> shard_oids;
+  shard_oids.reserve(shard_count);
+  for (uint32_t i = 0; i < shard_count; ++i) {
+    shard_oids.push_back(rgwrados::bucket_index::shard_oid(
+            bucket_info.bucket.bucket_id, idx_layout.gen,
+            idx_layout.layout.normal, i));
   }
 
   uint32_t num_entries_per_shard;
@@ -9651,13 +9658,13 @@ int RGWRados::cls_bucket_list_ordered(const DoutPrefixProvider *dpp,
     " shard(s) for " << num_entries_per_shard << " entries to get " <<
     num_entries << " total entries" << dendl;
 
-  auto& ioctx = index_pool;
-  std::map<int, rgw_cls_list_ret> shard_list_results;
+  std::vector<rgw_cls_list_ret> shard_list_results(shard_count);
   cls_rgw_obj_key start_after_key(start_after.name, start_after.instance);
-  r = svc.bi_rados->list_objects(dpp, y, ioctx, shard_oids,
-                                 start_after_key, prefix, delimiter,
-                                 num_entries_per_shard, list_versions,
-                                 shard_list_results);
+  r = rgwrados::bucket_index::list_objects(
+      dpp, y, ioctx, shard_oids,
+      start_after_key, prefix, delimiter,
+      num_entries_per_shard, list_versions,
+      shard_list_results);
   if (r < 0) {
     ldpp_dout(dpp, 0) << __func__ <<
       ": list_objects for " << bucket_info.bucket <<
@@ -9717,17 +9724,19 @@ int RGWRados::cls_bucket_list_ordered(const DoutPrefixProvider *dpp,
 
   // one tracker per shard requested (may not be all shards)
   std::vector<ShardTracker> results_trackers;
-  results_trackers.reserve(shard_list_results.size());
-  for (auto& r : shard_list_results) {
-    results_trackers.emplace_back(r.first, r.second, shard_oids[r.first]);
+  results_trackers.reserve(shard_count);
+
+  for (uint32_t i = 0; i < shard_count; i++) {
+    auto& r = shard_list_results[i];
+    results_trackers.emplace_back(i, r, shard_oids[i]);
 
     // if any *one* shard's result is truncated, the entire result is
     // truncated
-    *is_truncated = *is_truncated || r.second.is_truncated;
+    *is_truncated = *is_truncated || r.is_truncated;
 
     // unless *all* are shards are cls_filtered, the entire result is
     // not filtered
-    *cls_filtered = *cls_filtered && r.second.cls_filtered;
+    *cls_filtered = *cls_filtered && r.cls_filtered;
   }
 
   // create a map to track the next candidate entry from ShardTracker
@@ -9737,7 +9746,7 @@ int RGWRados::cls_bucket_list_ordered(const DoutPrefixProvider *dpp,
   std::multimap<std::string, size_t> candidates;
   size_t tracker_idx = 0;
   std::vector<size_t> vidx;
-  vidx.reserve(shard_list_results.size());
+  vidx.reserve(shard_count);
   for (auto& t : results_trackers) {
     // it's important that the values in the map refer to the index
     // into the results_trackers vector, which may not be the same
