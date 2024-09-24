@@ -31,6 +31,7 @@
 #include "rgw_zone.h"
 #include "rgw_sync.h"
 #include "rgw_bucket.h"
+#include "bucket_index_log.h"
 
 #include "services/svc_zone.h"
 #include "services/svc_bilog_rados.h"
@@ -1423,8 +1424,11 @@ std::ostream& BucketTrimManager::gen_prefix(std::ostream& out) const
 
 int bilog_trim(const DoutPrefixProvider* p, rgw::sal::RadosStore* store,
 	       RGWBucketInfo& bucket_info, uint64_t gen, int shard_id,
-	       std::string_view start_marker, std::string_view end_marker)
+	       const std::string& start_marker, const std::string& end_marker)
 {
+  librados::Rados& rados = *store->getRados()->get_rados_handle();
+  const rgw::SiteConfig& site = *store->svc()->site;
+
   auto& logs = bucket_info.layout.logs;
   auto log = std::find_if(logs.begin(), logs.end(), rgw::matches_gen(gen));
   if (log == logs.end()) {
@@ -1435,10 +1439,12 @@ int bilog_trim(const DoutPrefixProvider* p, rgw::sal::RadosStore* store,
 
   auto log_layout = *log;
 
-  auto r = store->svc()->bilog_rados->log_trim(p, bucket_info, log_layout, shard_id, start_marker, end_marker);
+  int r = rgwrados::bucket_index_log::trim(p, null_yield, rados, site,
+                                           bucket_info, log_layout, shard_id,
+                                           start_marker, end_marker);
   if (r < 0) {
     ldpp_dout(p, 5) << __PRETTY_FUNCTION__ << ":" << __LINE__
-		    << "ERROR: bilog_rados->log_trim returned r=" << r << dendl;
+		    << "ERROR: bucket_index_log::trim() returned r=" << r << dendl;
   }
   return r;
 }
