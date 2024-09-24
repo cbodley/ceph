@@ -483,6 +483,8 @@ public:
   virtual ~CLSRGWIssueSetBucketResharding() override {}
 };
 
+void cls_rgw_bi_log_resync(librados::ObjectWriteOperation& op);
+
 class CLSRGWIssueResyncBucketBILog : public CLSRGWConcurrentIO {
 protected:
   int issue_op(int shard_id, const std::string& oid);
