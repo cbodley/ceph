@@ -15,6 +15,7 @@
 
 #include "common/ceph_json.h"
 #include "common/strtol.h"
+#include "rgw_process_env.h"
 #include "rgw_rest.h"
 #include "rgw_op.h"
 #include "rgw_rest_s3.h"
@@ -27,6 +28,7 @@
 #include "rgw_mdlog.h"
 #include "rgw_datalog_notify.h"
 #include "rgw_trim_bilog.h"
+#include "bucket_index_log.h"
 
 #include "services/svc_zone.h"
 #include "services/svc_mdlog.h"
@@ -409,6 +411,11 @@ void RGWOp_BILog_List::execute(optional_yield y) {
   if (op_ret < 0) {
     return;
   }
+  if (shard_id < 0) {
+    ldpp_dout(s, 5) << "Failed to parse shard id from bucket-instance" << dendl;
+    op_ret = -EINVAL;
+    return;
+  }
 
   if (!bucket_instance.empty()) {
     b.name = bn;
@@ -443,6 +450,14 @@ void RGWOp_BILog_List::execute(optional_yield y) {
 
   unsigned count = 0;
 
+  auto rados_driver = dynamic_cast<rgw::sal::RadosStore*>(driver);
+  if (!rados_driver) {
+    ldpp_dout(this, 5) << "ERROR: this op can only work when the cluster "
+        "has a RADOS backing store." << dendl;
+    op_ret = -EPERM;
+    return;
+  }
+  auto& rados = *rados_driver->getRados()->get_rados_handle();
 
   max_entries = (unsigned)strict_strtol(max_entries_str.c_str(), 10, &err);
   if (!err.empty())
@@ -451,18 +466,19 @@ void RGWOp_BILog_List::execute(optional_yield y) {
   send_response();
   do {
     list<rgw_bi_log_entry> entries;
-    int ret = static_cast<rgw::sal::RadosStore*>(driver)->svc()->bilog_rados->log_list(s, bucket->get_info(), log_layout, shard_id,
-                                               marker, max_entries - count,
-                                               entries, &truncated);
-    if (ret < 0) {
-      ldpp_dout(this, 5) << "ERROR: list_bi_log_entries()" << dendl;
+    op_ret = rgwrados::bucket_index_log::list(
+        this, y, rados, *s->penv.site,
+        bucket->get_info(), log_layout, shard_id,
+        marker, max_entries - count, entries, marker);
+    if (op_ret < 0) {
+      ldpp_dout(this, 5) << "ERROR: bucket_index_log::list()" << dendl;
       return;
     }
 
     count += entries.size();
 
     send_response(entries, marker);
-  } while (truncated && count < max_entries);
+  } while (!marker.empty() && count < max_entries);
 
   send_response_end();
 }
