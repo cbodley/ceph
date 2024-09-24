@@ -9926,13 +9926,16 @@ next:
       cerr << "ERROR: bucket not specified" << std::endl;
       return EINVAL;
     }
+    if (!specified_shard_id) {
+      cerr << "ERROR: requires a --shard-id" << std::endl;
+      return EINVAL;
+    }
     int ret = init_bucket(tenant, bucket_name, bucket_id, &bucket);
     if (ret < 0) {
       cerr << "ERROR: could not init bucket: " << cpp_strerror(-ret) << std::endl;
       return -ret;
     }
     formatter->open_array_section("entries");
-    bool truncated;
     int count = 0;
     if (max_entries < 0)
       max_entries = 1000;
@@ -9948,11 +9951,22 @@ next:
       log_layout = *i;
     }
 
+    auto rados_driver = dynamic_cast<rgw::sal::RadosStore*>(driver);
+    if (!rados_driver) {
+      cerr << "ERROR: this command can only work when the cluster "
+          "has a RADOS backing store." << std::endl;
+      return EPERM;
+    }
+    auto& rados = *rados_driver->getRados()->get_rados_handle();
+
     do {
       list<rgw_bi_log_entry> entries;
-      ret = static_cast<rgw::sal::RadosStore*>(driver)->svc()->bilog_rados->log_list(dpp(), bucket->get_info(), log_layout, shard_id, marker, max_entries - count, entries, &truncated);
+      ret = rgwrados::bucket_index_log::list(
+          dpp(), null_yield, rados, *site,
+          bucket->get_info(), log_layout, shard_id,
+          marker, max_entries - count, entries, marker);
       if (ret < 0) {
-        cerr << "ERROR: list_bi_log_entries(): " << cpp_strerror(-ret) << std::endl;
+        cerr << "ERROR: bucket_index_log::list(): " << cpp_strerror(-ret) << std::endl;
         return -ret;
       }
 
@@ -9965,7 +9979,7 @@ next:
         marker = entry.id;
       }
       formatter->flush(cout);
-    } while (truncated && count < max_entries);
+    } while (!marker.empty() && count < max_entries);
 
     formatter->close_section();
     formatter->flush(cout);
