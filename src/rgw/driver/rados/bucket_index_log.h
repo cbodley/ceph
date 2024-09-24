@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <list> // TODO: use vector
 #include <string>
 #include <vector>
 
@@ -62,5 +63,18 @@ int trim(const DoutPrefixProvider* dpp,
          int shard,
          const std::string& start_marker,
          const std::string& end_marker);
+
+/// List entries from the given bucket index log shard.
+int list(const DoutPrefixProvider* dpp,
+         optional_yield y,
+         librados::Rados& rados,
+         const rgw::SiteConfig& site,
+         const RGWBucketInfo& info,
+         const rgw::bucket_log_layout_generation& log,
+         int shard,
+         const std::string& marker,
+         uint32_t max,
+         std::list<rgw_bi_log_entry>& entries,
+         std::string& next_marker);
 
 } // namespace rgwrados::bucket_index_log
