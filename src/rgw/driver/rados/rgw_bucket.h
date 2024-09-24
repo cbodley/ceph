@@ -177,6 +177,8 @@ auto create_bucket_metadata_handler(librados::Rados& rados,
 
 // bucket instance metadata handler factory
 auto create_bucket_instance_metadata_handler(rgw::sal::Driver* driver,
+                                             librados::Rados& rados,
+                                             const rgw::SiteConfig& site,
                                              RGWSI_Zone* svc_zone,
                                              RGWSI_Bucket* svc_bucket,
                                              RGWSI_BucketIndex* svc_bi)
@@ -190,6 +192,8 @@ auto create_archive_bucket_metadata_handler(librados::Rados& rados,
 
 // archive bucket instance metadata handler factory
 auto create_archive_bucket_instance_metadata_handler(rgw::sal::Driver* driver,
+                                                     librados::Rados& rados,
+                                                     const rgw::SiteConfig& site,
                                                      RGWSI_Zone* svc_zone,
                                                      RGWSI_Bucket* svc_bucket,
                                                      RGWSI_BucketIndex* svc_bi)

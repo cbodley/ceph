@@ -14,6 +14,7 @@
 #include "services/svc_user.h"
 
 #include "account.h"
+#include "bucket_index.h"
 #include "buckets.h"
 #include "rgw_metadata_lister.h"
 #include "rgw_reshard.h"
@@ -2660,6 +2661,8 @@ class RGWArchiveBucketMetadataHandler : public RGWBucketMetadataHandler {
 
 class RGWBucketInstanceMetadataHandler : public RGWMetadataHandler {
   rgw::sal::Driver* driver;
+  librados::Rados& rados;
+  const rgw::SiteConfig& site;
   RGWSI_Zone* svc_zone{nullptr};
   RGWSI_Bucket* svc_bucket{nullptr};
   RGWSI_BucketIndex* svc_bi{nullptr};
@@ -2675,11 +2678,13 @@ class RGWBucketInstanceMetadataHandler : public RGWMetadataHandler {
                RGWObjVersionTracker& objv_tracker);
  public:
   RGWBucketInstanceMetadataHandler(rgw::sal::Driver* driver,
+                                   librados::Rados& rados,
+                                   const rgw::SiteConfig& site,
                                    RGWSI_Zone* svc_zone,
                                    RGWSI_Bucket* svc_bucket,
                                    RGWSI_BucketIndex* svc_bi)
-    : driver(driver), svc_zone(svc_zone),
-      svc_bucket(svc_bucket), svc_bi(svc_bi) {}
+    : driver(driver), rados(rados), site(site),
+      svc_zone(svc_zone), svc_bucket(svc_bucket), svc_bi(svc_bi) {}
 
   string get_type() override { return "bucket.instance"; }
 
@@ -2857,7 +2862,8 @@ int RGWBucketInstanceMetadataHandler::put_post(
     RGWObjVersionTracker& objv_tracker)
 {
   // XXX: skip this if bucket isn't owned by the local zonegroup
-  int ret = svc_bi->init_index(dpp, y, bci.info, bci.info.layout.current_index);
+  int ret = rgwrados::bucket_index::init(
+      dpp, y, rados, site, bci.info, bci.info.layout.current_index);
   if (ret < 0) {
     return ret;
   }
@@ -3489,13 +3495,15 @@ auto create_bucket_metadata_handler(librados::Rados& rados,
 }
 
 auto create_bucket_instance_metadata_handler(rgw::sal::Driver* driver,
+                                             librados::Rados& rados,
+                                             const rgw::SiteConfig& site,
                                              RGWSI_Zone* svc_zone,
                                              RGWSI_Bucket* svc_bucket,
                                              RGWSI_BucketIndex* svc_bi)
     -> std::unique_ptr<RGWMetadataHandler>
 {
-  return std::make_unique<RGWBucketInstanceMetadataHandler>(driver, svc_zone,
-                                                            svc_bucket, svc_bi);
+  return std::make_unique<RGWBucketInstanceMetadataHandler>(
+      driver, rados, site, svc_zone, svc_bucket, svc_bi);
 }
 
 auto create_archive_bucket_metadata_handler(librados::Rados& rados,
@@ -3508,13 +3516,15 @@ auto create_archive_bucket_metadata_handler(librados::Rados& rados,
 }
 
 auto create_archive_bucket_instance_metadata_handler(rgw::sal::Driver* driver,
+                                                     librados::Rados& rados,
+                                                     const rgw::SiteConfig& site,
                                                      RGWSI_Zone* svc_zone,
                                                      RGWSI_Bucket* svc_bucket,
                                                      RGWSI_BucketIndex* svc_bi)
     -> std::unique_ptr<RGWMetadataHandler>
 {
-  return std::make_unique<RGWArchiveBucketInstanceMetadataHandler>(driver, svc_zone,
-                                                                   svc_bucket, svc_bi);
+  return std::make_unique<RGWArchiveBucketInstanceMetadataHandler>
+      (driver, rados, site, svc_zone, svc_bucket, svc_bi);
 }
 
 void RGWBucketEntryPoint::generate_test_instances(list<RGWBucketEntryPoint*>& o)

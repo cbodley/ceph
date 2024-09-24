@@ -15,6 +15,7 @@ struct rgw_bucket_entry_owner;
 struct rgw_obj_key;
 struct rgw_bucket_sync_pipe;
 
+namespace rgw { class SiteConfig; }
 
 class RGWDataSyncModule {
 public:
@@ -65,6 +66,8 @@ public:
                                          RGWBucketCtl* ctl_bucket)
       -> std::unique_ptr<RGWMetadataHandler>;
   virtual auto alloc_bucket_instance_meta_handler(rgw::sal::Driver* driver,
+                                                  librados::Rados& rados,
+                                                  const rgw::SiteConfig& site,
                                                   RGWSI_Zone* svc_zone,
                                                   RGWSI_Bucket* svc_bucket,
                                                   RGWSI_BucketIndex* svc_bi)
