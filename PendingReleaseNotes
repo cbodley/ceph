@@ -25,6 +25,7 @@
    - osd_op_num_shards_hdd = 1 (was 5)
    - osd_op_num_threads_per_shard_hdd = 5 (was 1)
   For more details see https://tracker.ceph.com/issues/66289.
+* RGW: `radosgw-admin bilog list` now requires the `--shard-id` option.
 
 >=19.0.0
 
