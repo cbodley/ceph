@@ -77,4 +77,20 @@ int list(const DoutPrefixProvider* dpp,
          std::list<rgw_bi_log_entry>& entries,
          std::string& next_marker);
 
+/// Write a CLS_RGW_OP_RESYNC entry to each bucket index log shard.
+int start(const DoutPrefixProvider* dpp,
+          optional_yield y,
+          librados::Rados& rados,
+          const rgw::SiteConfig& site,
+          const RGWBucketInfo& info,
+          const rgw::bucket_log_layout_generation& log);
+
+/// Write a CLS_RGW_OP_SYNCSTOP entry to each bucket index log shard.
+int stop(const DoutPrefixProvider* dpp,
+         optional_yield y,
+         librados::Rados& rados,
+         const rgw::SiteConfig& site,
+         const RGWBucketInfo& info,
+         const rgw::bucket_log_layout_generation& log);
+
 } // namespace rgwrados::bucket_index_log
