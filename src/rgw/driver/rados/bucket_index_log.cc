@@ -19,11 +19,12 @@
 
 #include "include/rados/librados.hpp"
 #include "common/async/yield_context.h"
-#include "cls/rgw/cls_rgw_types.h"
+#include "cls/rgw/cls_rgw_client.h"
 
 #include "rgw_bucket_layout.h"
 
 #include "bucket_index.h"
+#include "rgw_tools.h"
 #include "rgw_zone.h"
 
 namespace rgwrados::bucket_index_log {
@@ -76,6 +77,39 @@ int max_markers(const DoutPrefixProvider* dpp,
   std::transform(headers.begin(), headers.end(), std::back_inserter(markers),
       [] (rgw_bucket_dir_header& h) { return std::move(h.max_marker); });
   return 0;
+}
+
+int trim(const DoutPrefixProvider* dpp,
+         optional_yield y,
+         librados::Rados& rados,
+         const rgw::SiteConfig& site,
+         const RGWBucketInfo& info,
+         const rgw::bucket_log_layout_generation& log,
+         int shard,
+         const std::string& start_marker,
+         const std::string& end_marker)
+{
+  if (log.layout.type != rgw::BucketLogType::InIndex) {
+    return -ENOTSUP;
+  }
+  const rgw::bucket_index_layout_generation& index = log.layout.in_index;
+  if (std::cmp_greater_equal(shard, num_shards(index.layout.normal))) {
+    return -EDOM; // shard index out of range
+  }
+
+  librados::IoCtx ioctx;
+  int ret = bucket_index::open_index_pool(dpp, rados, site, info, ioctx);
+  if (ret < 0) {
+    return ret;
+  }
+
+  const auto oid = bucket_index::shard_oid(info.bucket.bucket_id, index.gen,
+                                           index.layout.normal, shard);
+
+  librados::ObjectWriteOperation op;
+  cls_rgw_bilog_trim(op, start_marker, end_marker);
+
+  return rgw_rados_operate(dpp, ioctx, oid, &op, y);
 }
 
 } // namespace rgwrados::bucket_index_log

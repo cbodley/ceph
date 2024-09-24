@@ -52,4 +52,15 @@ int max_markers(const DoutPrefixProvider* dpp,
                 const rgw::bucket_log_layout_generation& log,
                 std::vector<std::string>& markers);
 
+/// Trim a range of entries from the given bucket index log shard.
+int trim(const DoutPrefixProvider* dpp,
+         optional_yield y,
+         librados::Rados& rados,
+         const rgw::SiteConfig& site,
+         const RGWBucketInfo& info,
+         const rgw::bucket_log_layout_generation& log,
+         int shard,
+         const std::string& start_marker,
+         const std::string& end_marker);
+
 } // namespace rgwrados::bucket_index_log
