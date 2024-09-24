@@ -494,6 +494,8 @@ public:
   virtual ~CLSRGWIssueResyncBucketBILog() override {}
 };
 
+void cls_rgw_bi_log_stop(librados::ObjectWriteOperation& op);
+
 class CLSRGWIssueBucketBILogStop : public CLSRGWConcurrentIO {
 protected:
   int issue_op(int shard_id, const std::string& oid);

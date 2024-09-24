@@ -671,17 +671,17 @@ int CLSRGWIssueResyncBucketBILog::issue_op(const int shard_id, const string& oid
   return manager.aio_operate(io_ctx, shard_id, oid, &op);
 }
 
-static bool issue_bi_log_stop(librados::IoCtx& io_ctx, const int shard_id, const string& oid, BucketIndexAioManager *manager)
+void cls_rgw_bi_log_stop(librados::ObjectWriteOperation& op)
 {
   bufferlist in;
-  librados::ObjectWriteOperation op;
   op.exec(RGW_CLASS, RGW_BI_LOG_STOP, in);
-  return manager->aio_operate(io_ctx, shard_id, oid, &op);
 }
 
 int CLSRGWIssueBucketBILogStop::issue_op(const int shard_id, const string& oid)
 {
-  return issue_bi_log_stop(io_ctx, shard_id, oid, &manager);
+  librados::ObjectWriteOperation op;
+  cls_rgw_bi_log_stop(op);
+  return manager.aio_operate(io_ctx, shard_id, oid, &op);
 }
 
 void cls_rgw_get_dir_header(librados::ObjectReadOperation& op,
