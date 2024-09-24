@@ -112,4 +112,49 @@ int trim(const DoutPrefixProvider* dpp,
   return rgw_rados_operate(dpp, ioctx, oid, &op, y);
 }
 
+int list(const DoutPrefixProvider* dpp,
+         optional_yield y,
+         librados::Rados& rados,
+         const rgw::SiteConfig& site,
+         const RGWBucketInfo& info,
+         const rgw::bucket_log_layout_generation& log,
+         int shard,
+         const std::string& marker,
+         uint32_t max,
+         std::list<rgw_bi_log_entry>& entries,
+         std::string& next_marker)
+{
+  if (log.layout.type != rgw::BucketLogType::InIndex) {
+    return -ENOTSUP;
+  }
+  const rgw::bucket_index_layout_generation& index = log.layout.in_index;
+  if (std::cmp_greater_equal(shard, num_shards(index.layout.normal))) {
+    return -EDOM; // shard index out of range
+  }
+
+  librados::IoCtx ioctx;
+  int ret = bucket_index::open_index_pool(dpp, rados, site, info, ioctx);
+  if (ret < 0) {
+    return ret;
+  }
+
+  const auto oid = bucket_index::shard_oid(info.bucket.bucket_id, index.gen,
+                                           index.layout.normal, shard);
+
+  cls_rgw_bi_log_list_ret reply;
+  librados::ObjectReadOperation op;
+  cls_rgw_bilog_list(op, marker, max, &reply);
+
+  ret = rgw_rados_operate(dpp, ioctx, oid, &op, nullptr, y);
+  if (ret < 0) {
+    return ret;
+  }
+
+  entries = std::move(reply.entries);
+  if (reply.truncated && !entries.empty()) {
+    next_marker = entries.back().id;
+  }
+  return 0;
+}
+
 } // namespace rgwrados::bucket_index_log
