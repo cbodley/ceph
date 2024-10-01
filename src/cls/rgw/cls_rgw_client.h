@@ -425,6 +425,9 @@ public:
   virtual ~CLSRGWIssueBILogTrim() override {}
 };
 
+/// Remove as many reshard log entries as possible. Returns -ENODATA when empty.
+void cls_rgw_reshard_log_trim(librados::ObjectWriteOperation& op);
+
 class CLSRGWIssueReshardLogTrim : public CLSRGWConcurrentIO {
 protected:
   int issue_op(int shard_id, const std::string& oid) override;
