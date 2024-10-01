@@ -502,4 +502,84 @@ int read_headers(const DoutPrefixProvider *dpp,
   return 0;
 }
 
+int reshardlog_trim(const DoutPrefixProvider *dpp,
+                    optional_yield y,
+                    librados::Rados& rados,
+                    const rgw::SiteConfig& site,
+                    const RGWBucketInfo& info,
+                    const rgw::bucket_index_layout_generation& index)
+{
+  if (index.layout.type != rgw::BucketIndexType::Normal) {
+    return 0;
+  }
+
+  librados::IoCtx ioctx;
+  int ret = open_index_pool(dpp, rados, site, info, ioctx);
+  if (ret < 0) {
+    return ret;
+  }
+
+  // issue up to max_aio requests in parallel
+  const auto max_aio = dpp->get_cct()->_conf->rgw_bucket_index_max_aio;
+  auto aio = rgw::make_throttle(max_aio, y);
+  constexpr uint64_t cost = 1; // 1 throttle unit per request
+  constexpr uint64_t id = 0; // ids unused
+
+  constexpr auto is_error = [] (int r) { return r < 0 && r != -ENODATA; };
+  constexpr auto is_ok = [] (int r) { return r == 0; };
+
+  // resend the call to each shard until it returns -ENODATA
+  rgw::AioResultList retries;
+
+  for (uint32_t shard = 0; shard < num_shards(index.layout.normal); shard++) {
+    librados::ObjectWriteOperation op;
+    cls_rgw_reshard_log_trim(op);
+
+    rgw_raw_obj obj; // obj.pool is empty and unused
+    obj.oid = shard_oid(info.bucket.bucket_id, index.gen,
+                        index.layout.normal, shard);
+
+    auto completed = aio->get(obj, rgw::Aio::librados_op(
+            ioctx, std::move(op), y), cost, id);
+
+    transfer_if(completed, retries, is_ok);
+
+    int r = rgw::check_for_errors(completed, is_error, dpp,
+                                  "failed to trim reshard log for index object");
+    if (ret == 0) {
+      ret = r;
+    }
+  }
+
+  // issue retries and poll for completions until done or error
+  while (ret == 0) {
+    // loop over retries, erasing as we go. more may be appended in the meantime
+    using deleter = std::default_delete<rgw::AioResultEntry>;
+    for (auto i = retries.begin(); i != retries.end();
+         i = retries.erase_and_dispose(i, deleter{})) {
+
+      librados::ObjectWriteOperation op;
+      cls_rgw_reshard_log_trim(op);
+
+      auto completions = aio->get(i->obj, rgw::Aio::librados_op(ioctx, std::move(op), y), cost, i->id);
+      ret = rgw::check_for_errors(completions, is_error, dpp,
+                                  "failed to trim reshard log for index object");
+      if (ret < 0) {
+        break; // break twice
+      }
+      transfer_if(completions, retries, is_retry);
+    }
+    if (ret < 0) {
+      break;
+    }
+
+  auto completed = aio->drain();
+  int r = rgw::check_for_errors(completed, is_error, dpp,
+                                "failed to trim reshard log for index object");
+  if (r < 0) {
+    return r;
+  }
+  return ret;
+}
+
 } // namespace rgwrados::bucket_index

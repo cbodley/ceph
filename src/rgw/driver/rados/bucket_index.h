@@ -110,4 +110,12 @@ int read_headers(const DoutPrefixProvider* dpp,
                  const rgw::bucket_index_layout_generation& index,
                  std::vector<rgw_bucket_dir_header>& headers);
 
+/// Trim reshardlog entries from all of the index shards for the given layout.
+int reshardlog_trim(const DoutPrefixProvider* dpp,
+                    optional_yield y,
+                    librados::Rados& rados,
+                    const rgw::SiteConfig& site,
+                    const RGWBucketInfo& info,
+                    const rgw::bucket_index_layout_generation& index);
+
 } // namespace rgwrados::bucket_index
