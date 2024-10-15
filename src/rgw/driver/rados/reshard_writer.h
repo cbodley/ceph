@@ -19,17 +19,16 @@
 #include <vector>
 
 #include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/awaitable.hpp>
 #include <boost/asio/executor_work_guard.hpp>
-#include <boost/container/flat_map.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/spawn.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/system.hpp>
 
-#include <neorados/RADOS.hpp>
-
+#include "include/rados/librados.hpp"
 #include "cls/rgw/cls_rgw_types.h"
-#include "common/async/co_waiter.h"
 #include "common/async/service.h"
+#include "common/async/yield_waiter.h"
 
 namespace rgwrados::reshard {
 
@@ -41,8 +40,7 @@ class BaseWriter : public ceph::async::service_list_base_hook {
   executor_type get_executor() const noexcept { return ex; }
 
   // wait for all outstanding flush completions
-  auto drain()
-    -> boost::asio::awaitable<void>;
+  void drain(boost::asio::yield_context yield);
 
   void service_shutdown();
 
@@ -59,7 +57,7 @@ class BaseWriter : public ceph::async::service_list_base_hook {
   boost::system::error_code error;
 
   struct Waiter : boost::intrusive::list_base_hook<>,
-                  ceph::async::co_waiter<void, executor_type> {};
+                  ceph::async::yield_waiter<void> {};
   boost::intrusive::list<Waiter> write_waiters;
   boost::intrusive::list<Waiter> drain_waiters;
 
@@ -77,7 +75,7 @@ struct Completion {
 
   executor_type get_executor() const { return work.get_executor(); }
 
-  void operator()(boost::system::error_code ec)
+  void operator()(boost::system::error_code ec, version_t=0)
   {
     work.reset();
     writer.on_complete(ec);
@@ -108,10 +106,10 @@ class Writer : public BaseWriter {
   // suspends once we reach the limit of outstanding write requests to
   // avoid buffering additional entries. this is important to bound
   // the overall memory usage of index entries
-  auto write(rgw_cls_bi_entry entry,
+  void write(rgw_cls_bi_entry entry,
              std::optional<RGWObjCategory> category,
-             rgw_bucket_category_stats stats)
-    -> boost::asio::awaitable<void>
+             rgw_bucket_category_stats stats,
+             boost::asio::yield_context yield)
   {
     if (error) {
       // fail new writes once we're in the error state
@@ -121,7 +119,7 @@ class Writer : public BaseWriter {
     while (outstanding >= max_aio) {
       Waiter waiter;
       write_waiters.push_back(waiter);
-      co_await waiter.get(); // may rethrow error from previous completion
+      waiter.async_wait(yield); // may rethrow error from previous completion
     }
 
     const bool full = batch.add(entry, category, std::move(stats));
@@ -150,9 +148,9 @@ class Writer : public BaseWriter {
 // a target shard batch that must be flushed with several bi_put() calls
 class PutBatch {
  public:
-  PutBatch(neorados::RADOS& rados,
-           neorados::IOContext ioctx,
-           neorados::Object object,
+  PutBatch(boost::asio::io_context& ctx,
+           librados::IoCtx ioctx,
+           std::string object,
            size_t batch_size);
 
   [[nodiscard]] bool empty() const;
@@ -162,22 +160,20 @@ class PutBatch {
   void flush(Completion completion);
 
  private:
-  neorados::RADOS& rados;
-  neorados::IOContext ioctx;
-  neorados::Object object;
+  boost::asio::io_context& ctx;
+  librados::IoCtx ioctx;
+  std::string object;
   const size_t batch_size;
   std::vector<rgw_cls_bi_entry> entries;
-  using category_stats_map = boost::container::flat_map<
-      RGWObjCategory, rgw_bucket_category_stats>;
-  category_stats_map stats;
+  std::map<RGWObjCategory, rgw_bucket_category_stats> stats;
 };
 
 // a target shard batch that can be flushed with one bi_put_entries() call
 class PutEntriesBatch {
  public:
-  PutEntriesBatch(neorados::RADOS& rados,
-                  neorados::IOContext ioctx,
-                  neorados::Object object,
+  PutEntriesBatch(boost::asio::io_context& ctx,
+                  librados::IoCtx ioctx,
+                  std::string object,
                   size_t batch_size,
                   bool check_existing);
 
@@ -188,9 +184,9 @@ class PutEntriesBatch {
   void flush(Completion completion);
 
  private:
-  neorados::RADOS& rados;
-  neorados::IOContext ioctx;
-  neorados::Object object;
+  boost::asio::io_context& ctx;
+  librados::IoCtx ioctx;
+  std::string object;
   const size_t batch_size;
   const bool check_existing;
   std::vector<rgw_cls_bi_entry> entries;

@@ -14,10 +14,10 @@
  */
 
 #include "reshard_writer.h"
-#include <boost/asio/bind_executor.hpp>
 #include <boost/asio/execution.hpp>
 #include <boost/asio/query.hpp>
-#include "neorados/cls/rgw.h"
+#include "librados/librados_asio.h"
+#include "cls/rgw/cls_rgw_client.h"
 
 namespace rgwrados::reshard {
 
@@ -35,13 +35,12 @@ BaseWriter::~BaseWriter()
   svc.remove(*this);
 }
 
-auto BaseWriter::drain()
-  -> boost::asio::awaitable<void>
+void BaseWriter::drain(boost::asio::yield_context yield)
 {
   if (outstanding > 0) {
     Waiter waiter;
     drain_waiters.push_back(waiter);
-    co_await waiter.get(); // may rethrow error from previous completion
+    waiter.async_wait(yield); // may rethrow error from previous completion
   } else if (error) {
     // make sure errors get reported to the caller
     throw boost::system::system_error(error);
@@ -53,19 +52,19 @@ void BaseWriter::on_complete(boost::system::error_code ec)
   --outstanding;
 
   constexpr auto complete_all = [] (boost::intrusive::list<Waiter>& waiters,
-                                    std::exception_ptr eptr) {
+                                    boost::system::error_code ec) {
       while (!waiters.empty()) {
         Waiter& waiter = waiters.front();
         waiters.pop_front();
-        waiter.complete(eptr);
+        waiter.complete(ec);
       }
     };
   constexpr auto complete_one = [] (boost::intrusive::list<Waiter>& waiters,
-                                    std::exception_ptr eptr) {
+                                    boost::system::error_code ec) {
       if (!waiters.empty()) {
         Waiter& waiter = waiters.front();
         waiters.pop_front();
-        waiter.complete(eptr);
+        waiter.complete(ec);
       }
     };
 
@@ -74,27 +73,22 @@ void BaseWriter::on_complete(boost::system::error_code ec)
       error = ec;
     }
     // fail all waiting calls to write()
-    auto eptr = std::make_exception_ptr(boost::system::system_error{ec});
-    complete_all(write_waiters, eptr);
+    complete_all(write_waiters, ec);
   } else {
     // wake one waiting call to write()
-    complete_one(write_waiters, nullptr);
+    complete_one(write_waiters, {});
   }
 
   if (outstanding == 0) {
     // wake all waiting calls to drain()
-    std::exception_ptr eptr;
-    if (error) {
-      eptr = std::make_exception_ptr(boost::system::system_error{error});
-    }
-    complete_all(drain_waiters, eptr);
+    complete_all(drain_waiters, error);
   }
 }
 
 void BaseWriter::service_shutdown()
 {
   // release any outstanding completion handlers
-  constexpr auto shutdown = [] (auto& waiters) {
+  constexpr auto shutdown = [] (boost::intrusive::list<Waiter>& waiters) {
       while (!waiters.empty()) {
         Waiter& waiter = waiters.front();
         waiters.pop_front();
@@ -106,11 +100,11 @@ void BaseWriter::service_shutdown()
 }
 
 
-PutBatch::PutBatch(neorados::RADOS& rados,
-                   neorados::IOContext ioctx,
-                   neorados::Object object,
+PutBatch::PutBatch(boost::asio::io_context& ctx,
+                   librados::IoCtx ioctx,
+                   std::string object,
                    size_t batch_size)
-  : rados(rados),
+  : ctx(ctx),
     ioctx(std::move(ioctx)),
     object(std::move(object)),
     batch_size(batch_size)
@@ -138,28 +132,30 @@ PutBatch::PutBatch(neorados::RADOS& rados,
 
 void PutBatch::flush(Completion completion)
 {
-  neorados::WriteOp op;
+  librados::ObjectWriteOperation op;
 
   // issue a separate bi_put() call for each entry
   for (auto& entry : entries) {
-    op.exec(neorados::cls::rgw::bi_put(std::move(entry)));
+    cls_rgw_bi_put(op, entry);
   }
   entries.clear();
 
-  op.exec(neorados::cls::rgw::bi_add_stats(
-          std::make_move_iterator(stats.begin()),
-          std::make_move_iterator(stats.end())));
+  constexpr bool absolute = false; // add to existing stats
+  cls_rgw_bucket_update_stats(op, absolute, stats);
   stats.clear();
 
-  rados.execute(object, ioctx, std::move(op), std::move(completion));
+  constexpr int flags = 0;
+  constexpr jspan_context* trace = nullptr;
+  librados::async_operate(ctx, ioctx, object, &op, flags,
+                          trace, std::move(completion));
 }
 
-PutEntriesBatch::PutEntriesBatch(neorados::RADOS& rados,
-                                 neorados::IOContext ioctx,
-                                 neorados::Object object,
+PutEntriesBatch::PutEntriesBatch(boost::asio::io_context& ctx,
+                                 librados::IoCtx ioctx,
+                                 std::string object,
                                  size_t batch_size,
                                  bool check_existing)
-  : rados(rados),
+  : ctx(ctx),
     ioctx(std::move(ioctx)),
     object(std::move(object)),
     batch_size(batch_size),
@@ -187,15 +183,15 @@ PutEntriesBatch::PutEntriesBatch(neorados::RADOS& rados,
 
 void PutEntriesBatch::flush(Completion completion)
 {
-  neorados::WriteOp op;
+  librados::ObjectWriteOperation op;
 
-  op.exec(neorados::cls::rgw::bi_put_entries(
-          std::make_move_iterator(entries.begin()),
-          std::make_move_iterator(entries.end()),
-          check_existing));
+  cls_rgw_bi_put_entries(op, std::move(entries), check_existing);
   entries.clear();
 
-  rados.execute(object, ioctx, std::move(op), std::move(completion));
+  constexpr int flags = 0;
+  constexpr jspan_context* trace = nullptr;
+  librados::async_operate(ctx, ioctx, object, &op, flags,
+                          trace, std::move(completion));
 }
 
 } // namespace rgwrados::reshard

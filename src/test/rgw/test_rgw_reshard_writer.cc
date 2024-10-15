@@ -19,8 +19,8 @@
 #include <optional>
 #include <vector>
 #include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/spawn.hpp>
 #include <gtest/gtest.h>
 
 namespace rgwrados::reshard {
@@ -29,6 +29,22 @@ template <typename T>
 auto capture(std::optional<T>& val)
 {
   return [&val] (T value) { val = std::move(value); };
+}
+
+template <typename Batch>
+auto call_write(Writer<Batch>& writer)
+{
+  return [&writer] (boost::asio::yield_context yield) {
+    writer.write({}, {}, {}, yield);
+  };
+}
+
+template <typename Batch>
+auto call_drain(Writer<Batch>& writer)
+{
+  return [&writer] (boost::asio::yield_context yield) {
+    writer.drain(yield);
+  };
 }
 
 // mock Batch captures flush() completions for test cases to invoke manually
@@ -88,7 +104,7 @@ TEST(Writer, empty_drain)
   auto writer = Writer{ex, 1, batch};
 
   std::optional<std::exception_ptr> result;
-  boost::asio::co_spawn(ex, writer.drain(), capture(result));
+  boost::asio::spawn(ex, call_drain(writer), capture(result));
   EXPECT_FALSE(result);
 
   ctx.poll();
@@ -109,7 +125,7 @@ TEST(Writer, write_no_flush)
   auto writer = Writer{ex, 1, batch};
 
   std::optional<std::exception_ptr> result;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result));
+  boost::asio::spawn(ex, call_write(writer), capture(result));
   EXPECT_FALSE(result);
 
   ctx.poll();
@@ -131,7 +147,7 @@ TEST(Writer, write_no_flush_drain)
 
   {
     std::optional<std::exception_ptr> result;
-    boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result));
+    boost::asio::spawn(ex, call_write(writer), capture(result));
     EXPECT_FALSE(result);
 
     ctx.poll();
@@ -144,7 +160,7 @@ TEST(Writer, write_no_flush_drain)
   }
   {
     std::optional<std::exception_ptr> result;
-    boost::asio::co_spawn(ex, writer.drain(), capture(result));
+    boost::asio::spawn(ex, call_drain(writer), capture(result));
     EXPECT_FALSE(result);
 
     ctx.poll();
@@ -165,7 +181,7 @@ TEST(Writer, write_flush)
   auto writer = Writer{ex, 1, batch};
 
   std::optional<std::exception_ptr> result;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result));
+  boost::asio::spawn(ex, call_write(writer), capture(result));
   EXPECT_FALSE(result);
 
   ctx.poll();
@@ -194,7 +210,7 @@ TEST(Writer, write_flush_drain)
 
   {
     std::optional<std::exception_ptr> result;
-    boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result));
+    boost::asio::spawn(ex, call_write(writer), capture(result));
     EXPECT_FALSE(result);
 
     ctx.poll();
@@ -213,7 +229,7 @@ TEST(Writer, write_flush_drain)
 
   {
     std::optional<std::exception_ptr> result;
-    boost::asio::co_spawn(ex, writer.drain(), capture(result));
+    boost::asio::spawn(ex, call_drain(writer), capture(result));
     EXPECT_FALSE(result);
 
     ctx.poll();
@@ -239,7 +255,7 @@ TEST(Writer, write_batch)
   auto writer = Writer{ex, 1, batch};
 
   std::optional<std::exception_ptr> result;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result));
+  boost::asio::spawn(ex, call_write(writer), capture(result));
   EXPECT_FALSE(result);
 
   ctx.poll();
@@ -261,7 +277,7 @@ TEST(Writer, write_batch_drain)
 
   {
     std::optional<std::exception_ptr> result;
-    boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result));
+    boost::asio::spawn(ex, call_write(writer), capture(result));
     EXPECT_FALSE(result);
 
     ctx.poll();
@@ -273,7 +289,7 @@ TEST(Writer, write_batch_drain)
   }
   {
     std::optional<std::exception_ptr> result;
-    boost::asio::co_spawn(ex, writer.drain(), capture(result));
+    boost::asio::spawn(ex, call_drain(writer), capture(result));
     EXPECT_FALSE(result);
 
     ctx.poll();
@@ -300,7 +316,7 @@ TEST(Writer, write_batch_multi_drain)
 
   {
     std::optional<std::exception_ptr> result;
-    boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result));
+    boost::asio::spawn(ex, call_write(writer), capture(result));
     EXPECT_FALSE(result);
 
     ctx.poll();
@@ -312,11 +328,11 @@ TEST(Writer, write_batch_multi_drain)
   }
   {
     std::optional<std::exception_ptr> result1;
-    boost::asio::co_spawn(ex, writer.drain(), capture(result1));
+    boost::asio::spawn(ex, call_drain(writer), capture(result1));
     EXPECT_FALSE(result1);
 
     std::optional<std::exception_ptr> result2;
-    boost::asio::co_spawn(ex, writer.drain(), capture(result2));
+    boost::asio::spawn(ex, call_drain(writer), capture(result2));
     EXPECT_FALSE(result2);
 
     ctx.poll();
@@ -344,7 +360,7 @@ TEST(Writer, multi_write_batch)
   auto writer = Writer{ex, 1, batch};
 
   std::optional<std::exception_ptr> result1;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result1));
+  boost::asio::spawn(ex, call_write(writer), capture(result1));
   EXPECT_FALSE(result1);
 
   ctx.poll();
@@ -354,14 +370,14 @@ TEST(Writer, multi_write_batch)
   EXPECT_FALSE(*result1);
 
   std::optional<std::exception_ptr> result2;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result2));
+  boost::asio::spawn(ex, call_write(writer), capture(result2));
   EXPECT_FALSE(result2);
 
   ctx.poll();
   EXPECT_FALSE(ctx.stopped());
 
   std::optional<std::exception_ptr> result3;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result3));
+  boost::asio::spawn(ex, call_write(writer), capture(result3));
   EXPECT_FALSE(result3);
 
   ctx.poll();
@@ -402,7 +418,7 @@ TEST(Writer, concurrent_multi_write_batch)
   auto writer = Writer{ex, 2, batch};
 
   std::optional<std::exception_ptr> result1;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result1));
+  boost::asio::spawn(ex, call_write(writer), capture(result1));
   EXPECT_FALSE(result1);
 
   ctx.poll();
@@ -413,7 +429,7 @@ TEST(Writer, concurrent_multi_write_batch)
   EXPECT_EQ(1, completions.size());
 
   std::optional<std::exception_ptr> result2;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result2));
+  boost::asio::spawn(ex, call_write(writer), capture(result2));
   EXPECT_FALSE(result2);
 
   ctx.poll();
@@ -424,14 +440,14 @@ TEST(Writer, concurrent_multi_write_batch)
   EXPECT_EQ(2, completions.size());
 
   std::optional<std::exception_ptr> result3;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result3));
+  boost::asio::spawn(ex, call_write(writer), capture(result3));
   EXPECT_FALSE(result3);
 
   ctx.poll();
   EXPECT_FALSE(ctx.stopped());
 
   std::optional<std::exception_ptr> result4;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result4));
+  boost::asio::spawn(ex, call_write(writer), capture(result4));
   EXPECT_FALSE(result4);
 
   ctx.poll();
@@ -478,7 +494,7 @@ TEST(Writer, write_batch_write_error)
   auto writer = Writer{ex, 1, batch};
 
   std::optional<std::exception_ptr> result1;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result1));
+  boost::asio::spawn(ex, call_write(writer), capture(result1));
   EXPECT_FALSE(result1);
 
   ctx.poll();
@@ -489,7 +505,7 @@ TEST(Writer, write_batch_write_error)
   EXPECT_EQ(1, completions.size());
 
   std::optional<std::exception_ptr> result2;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result2));
+  boost::asio::spawn(ex, call_write(writer), capture(result2));
   EXPECT_FALSE(result2);
 
   ctx.poll();
@@ -515,7 +531,7 @@ TEST(Writer, write_batch_write_error)
   }
 
   std::optional<std::exception_ptr> result3;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result3));
+  boost::asio::spawn(ex, call_write(writer), capture(result3));
   EXPECT_FALSE(result3);
 
   ctx.poll();
@@ -542,7 +558,7 @@ TEST(Writer, write_batch_error_write)
   auto writer = Writer{ex, 1, batch};
 
   std::optional<std::exception_ptr> result1;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result1));
+  boost::asio::spawn(ex, call_write(writer), capture(result1));
   EXPECT_FALSE(result1);
 
   ctx.poll();
@@ -562,7 +578,7 @@ TEST(Writer, write_batch_error_write)
   ctx.restart();
 
   std::optional<std::exception_ptr> result2;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result2));
+  boost::asio::spawn(ex, call_write(writer), capture(result2));
   EXPECT_FALSE(result2);
 
   ctx.poll();
@@ -589,7 +605,7 @@ TEST(Writer, write_batch_drain_error)
   auto writer = Writer{ex, 1, batch};
 
   std::optional<std::exception_ptr> result1;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result1));
+  boost::asio::spawn(ex, call_write(writer), capture(result1));
   EXPECT_FALSE(result1);
 
   ctx.poll();
@@ -600,7 +616,7 @@ TEST(Writer, write_batch_drain_error)
   EXPECT_EQ(1, completions.size());
 
   std::optional<std::exception_ptr> result2;
-  boost::asio::co_spawn(ex, writer.drain(), capture(result2));
+  boost::asio::spawn(ex, call_drain(writer), capture(result2));
   EXPECT_FALSE(result2);
 
   ctx.poll();
@@ -626,7 +642,7 @@ TEST(Writer, write_batch_drain_error)
   }
 
   std::optional<std::exception_ptr> result3;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result3));
+  boost::asio::spawn(ex, call_write(writer), capture(result3));
   EXPECT_FALSE(result3);
 
   ctx.poll();
@@ -653,7 +669,7 @@ TEST(Writer, write_batch_error_drain)
   auto writer = Writer{ex, 1, batch};
 
   std::optional<std::exception_ptr> result1;
-  boost::asio::co_spawn(ex, writer.write({}, {}, {}), capture(result1));
+  boost::asio::spawn(ex, call_write(writer), capture(result1));
   EXPECT_FALSE(result1);
 
   ctx.poll();
@@ -673,7 +689,7 @@ TEST(Writer, write_batch_error_drain)
   ctx.restart();
 
   std::optional<std::exception_ptr> result2;
-  boost::asio::co_spawn(ex, writer.drain(), capture(result2));
+  boost::asio::spawn(ex, call_drain(writer), capture(result2));
   EXPECT_FALSE(result2);
 
   ctx.poll();
