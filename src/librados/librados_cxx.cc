@@ -1033,6 +1033,22 @@ int librados::AioCompletion::AioCompletion::set_safe_callback(void *cb_arg, rado
   return c->set_safe_callback(cb_arg, cb);
 }
 
+void librados::AioCompletion::cancel_safe()
+{
+  AioCompletionImpl *c = (AioCompletionImpl *)pc;
+  if (c->io && c->io->objecter) {
+    c->io->objecter->op_cancel(c->tid, -ECANCELED, OpCancellation::Safe);
+  }
+}
+
+void librados::AioCompletion::cancel_unsafe()
+{
+  AioCompletionImpl *c = (AioCompletionImpl *)pc;
+  if (c->io && c->io->objecter) {
+    c->io->objecter->op_cancel(c->tid, -ECANCELED, OpCancellation::Unsafe);
+  }
+}
+
 int librados::AioCompletion::AioCompletion::wait_for_complete()
 {
   AioCompletionImpl *c = (AioCompletionImpl *)pc;

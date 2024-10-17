@@ -202,6 +202,13 @@ inline namespace v14_2_0 {
     int set_complete_callback(void *cb_arg, callback_t cb);
     int set_safe_callback(void *cb_arg, callback_t cb)
       __attribute__ ((deprecated));
+    /// Request cancellation of an operation if/when it's possible to guarantee
+    /// that no side effects will result. In-flight write operations must
+    /// complete first. Read operations can always be cancelled safely.
+    void cancel_safe();
+    /// Request immediate cancellation of an operation even if there is an
+    /// in-flight write request that may succeed.
+    void cancel_unsafe();
     int wait_for_complete();
     int wait_for_safe() __attribute__ ((deprecated));
     int wait_for_complete_and_cb();
