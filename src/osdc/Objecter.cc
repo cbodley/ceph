@@ -220,6 +220,7 @@ const char** Objecter::get_tracked_conf_keys() const
     "crush_location",
     "rados_mon_op_timeout",
     "rados_osd_op_timeout",
+    "rados_osd_op_timeout_safe",
     NULL
   };
   return config_keys;
@@ -237,6 +238,10 @@ void Objecter::handle_conf_change(const ConfigProxy& conf,
   }
   if (changed.count("rados_osd_op_timeout")) {
     osd_timeout = conf.get_val<std::chrono::seconds>("rados_osd_op_timeout");
+  }
+  if (changed.count("rados_osd_op_timeout_safe")) {
+    osd_timeout_type = conf.get_val<bool>("rados_osd_op_timeout_safe")
+        ? OpCancellation::Safe : OpCancellation::Unsafe;
   }
 }
 
@@ -2309,9 +2314,9 @@ void Objecter::_op_submit_with_budget(Op *op,
     if (op->tid == 0)
       op->tid = ++last_tid;
     auto tid = op->tid;
-    op->ontimeout = timer.add_event(osd_timeout,
-				    [this, tid]() {
-				      op_cancel(tid, -ETIMEDOUT); });
+    op->ontimeout = timer.add_event(osd_timeout, [this, tid]() {
+          op_cancel(tid, -ETIMEDOUT, osd_timeout_type);
+        });
   }
 
   _op_submit(op, sul, ptid);
@@ -5124,6 +5129,8 @@ Objecter::Objecter(CephContext *cct,
 {
   mon_timeout = cct->_conf.get_val<std::chrono::seconds>("rados_mon_op_timeout");
   osd_timeout = cct->_conf.get_val<std::chrono::seconds>("rados_osd_op_timeout");
+  osd_timeout_type = cct->_conf.get_val<bool>("rados_osd_op_timeout_safe")
+      ? OpCancellation::Safe : OpCancellation::Unsafe;
 }
 
 Objecter::~Objecter()

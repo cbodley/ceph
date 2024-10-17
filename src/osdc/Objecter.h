@@ -2545,6 +2545,7 @@ public:
 
   ceph::timespan mon_timeout;
   ceph::timespan osd_timeout;
+  OpCancellation osd_timeout_type;
 
   MOSDOp *_prepare_osd_op(Op *op);
   void _send_op(Op *op);

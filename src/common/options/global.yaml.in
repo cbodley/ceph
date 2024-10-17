@@ -6371,6 +6371,16 @@ options:
   min: 0
   flags:
   - runtime
+- name: rados_osd_op_timeout_safe
+  type: bool
+  level: advanced
+  desc: When true, timeouts from rados_osd_op_timeout only trigger cancellation
+    when it can be guaranteed that no side effects were applied by the operation.
+  default: false
+  flags:
+  - runtime
+  see_also:
+  - rados_osd_op_timeout
 # true if LTTng-UST tracepoints should be enabled
 - name: rados_tracing
   type: bool
