@@ -2491,11 +2491,18 @@ void Objecter::_op_submit(Op *op, shunique_lock<ceph::shared_mutex>& sul, ceph_t
   ldout(cct, 5) << num_in_flight << " in flight" << dendl;
 }
 
-int Objecter::op_cancel(OSDSession *s, ceph_tid_t tid, int r)
+int Objecter::op_cancel(OSDSession *s, ceph_tid_t tid, int r,
+                        OpCancellation type)
+{
+  unique_lock sl(s->lock); // call under the session lock
+  return op_cancel(sl, s, tid, r, type);
+}
+
+int Objecter::op_cancel(std::unique_lock<std::shared_mutex>& sl,
+                        OSDSession *s, ceph_tid_t tid, int r,
+                        OpCancellation type)
 {
   ceph_assert(initialized);
-
-  unique_lock sl(s->lock);
 
   auto p = s->ops.find(tid);
   if (p == s->ops.end()) {
@@ -2512,41 +2519,55 @@ int Objecter::op_cancel(OSDSession *s, ceph_tid_t tid, int r)
   }
 #endif
 
+  Op *op = p->second;
+
+  if (type == OpCancellation::Safe) {
+    // an operation can be safely cancelled unless there's an in-flight write
+    // request that may still complete
+    op->cancel_if_safe = true;
+    if (op->target.flags & CEPH_OSD_FLAG_WRITE &&
+        op->replies < op->attempts) {
+      ldout(cct, 10) << __func__ << " awaiting safe cancellation of tid "
+          << tid << " in session " << s->osd << ", attempts " << op->attempts
+          << " replies " << op->replies << dendl;
+      return 0;
+    }
+  }
+
   ldout(cct, 10) << __func__ << " tid " << tid << " in session " << s->osd
 		 << dendl;
-  Op *op = p->second;
   if (op->has_completion()) {
     num_in_flight--;
     op->complete(osdcode(r), r, service.get_executor());
   }
   _op_cancel_map_check(op);
   _finish_op(op, r);
-  sl.unlock();
 
   return 0;
 }
 
-int Objecter::op_cancel(ceph_tid_t tid, int r)
+int Objecter::op_cancel(ceph_tid_t tid, int r, OpCancellation type)
 {
   int ret = 0;
 
   unique_lock wl(rwlock);
-  ret = _op_cancel(tid, r);
+  ret = _op_cancel(tid, r, type);
 
   return ret;
 }
 
-int Objecter::op_cancel(const vector<ceph_tid_t>& tids, int r)
+int Objecter::op_cancel(const vector<ceph_tid_t>& tids, int r,
+                        OpCancellation type)
 {
   unique_lock wl(rwlock);
   ldout(cct,10) << __func__ << " " << tids << dendl;
   for (auto tid : tids) {
-    _op_cancel(tid, r);
+    _op_cancel(tid, r, type);
   }
   return 0;
 }
 
-int Objecter::_op_cancel(ceph_tid_t tid, int r)
+int Objecter::_op_cancel(ceph_tid_t tid, int r, OpCancellation type)
 {
   int ret = 0;
 
@@ -2561,7 +2582,7 @@ start:
     shared_lock sl(s->lock);
     if (s->ops.find(tid) != s->ops.end()) {
       sl.unlock();
-      ret = op_cancel(s, tid, r);
+      ret = op_cancel(s, tid, r, type);
       if (ret == -ENOENT) {
 	/* oh no! raced, maybe tid moved to another session, restarting */
 	goto start;
@@ -2577,7 +2598,7 @@ start:
   shared_lock sl(homeless_session->lock);
   if (homeless_session->ops.find(tid) != homeless_session->ops.end()) {
     sl.unlock();
-    ret = op_cancel(homeless_session, tid, r);
+    ret = op_cancel(homeless_session, tid, r, type);
     if (ret == -ENOENT) {
       /* oh no! raced, maybe tid moved to another session, restarting */
       goto start;
@@ -3420,6 +3441,7 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
 		<< " attempt " << m->get_retry_attempt()
 		<< dendl;
   Op *op = iter->second;
+  op->replies++;
   op->trace.event("osd op reply");
 
   if (retry_writes_after_first_reply && op->attempts == 1 &&
@@ -3444,7 +3466,10 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
 		    << "; last attempt " << (op->attempts - 1) << " sent to "
 		    << op->session->con->get_peer_addr() << dendl;
       m->put();
-      sl.unlock();
+      if (op->cancel_if_safe) {
+        ldout(cct, 5) << " got redirect reply but cancellation was requested" << dendl;
+        op_cancel(sl, s, tid, -ECANCELED, OpCancellation::Safe);
+      }
       return;
     }
   } else {
@@ -3458,6 +3483,12 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
   int rc = m->get_result();
 
   if (m->is_redirect_reply()) {
+    if (op->cancel_if_safe) {
+      ldout(cct, 5) << " got redirect reply but cancellation was requested" << dendl;
+      op_cancel(sl, s, tid, -ECANCELED, OpCancellation::Safe);
+      m->put();
+      return;
+    }
     ldout(cct, 5) << " got redirect reply; redirecting" << dendl;
     if (op->has_completion())
       num_in_flight--;
@@ -3478,6 +3509,12 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
   }
 
   if (rc == -EAGAIN) {
+    if (op->cancel_if_safe) {
+      ldout(cct, 5) << " got -EAGAIN but cancellation was requested" << dendl;
+      op_cancel(sl, s, tid, -ECANCELED, OpCancellation::Safe);
+      m->put();
+      return;
+    }
     ldout(cct, 7) << " got -EAGAIN, resubmitting" << dendl;
     if (op->has_completion())
       num_in_flight--;

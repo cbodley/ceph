@@ -1682,6 +1682,15 @@ inline std::ostream& operator <<(std::ostream& m, const ObjectOperation& oo) {
   return m;
 }
 
+enum class OpCancellation {
+  /// Request cancellation of an operation if/when it's possible to guarantee
+  /// that no side effects will result. In-flight write operations must
+  /// complete first. Read operations can always be cancelled safely.
+  Safe,
+  /// Request immediate cancellation of an operation even if there is an
+  /// in-flight write request that may succeed.
+  Unsafe
+};
 
 // ----------------
 
@@ -2010,6 +2019,7 @@ public:
 
     ceph_tid_t tid = 0;
     int attempts = 0;
+    int replies = 0;
 
     version_t *objver;
     epoch_t *reply_epoch = nullptr;
@@ -2028,6 +2038,9 @@ public:
     /// acquired before sending the very first OP of the series and
     /// released upon receiving the last OP reply.
     bool ctx_budgeted = false;
+
+    /// true if safe cancellation was requested but not yet possible
+    bool cancel_if_safe = false;
 
     int *data_offset;
 
@@ -2942,13 +2955,19 @@ public:
     global_op_flags.fetch_and(~flags);
   }
 
-  /// cancel an in-progress request with the given return code
+  /// cancel an in-progress request with the given return code and
+  /// cancellation type
 private:
-  int op_cancel(OSDSession *s, ceph_tid_t tid, int r);
-  int _op_cancel(ceph_tid_t tid, int r);
+  int op_cancel(OSDSession *s, ceph_tid_t tid, int r,
+                OpCancellation type = OpCancellation::Unsafe);
+  int op_cancel(std::unique_lock<std::shared_mutex>& sl,
+                OSDSession *s, ceph_tid_t tid, int r, OpCancellation type);
+  int _op_cancel(ceph_tid_t tid, int r, OpCancellation type);
 public:
-  int op_cancel(ceph_tid_t tid, int r);
-  int op_cancel(const std::vector<ceph_tid_t>& tidls, int r);
+  int op_cancel(ceph_tid_t tid, int r,
+                OpCancellation type = OpCancellation::Unsafe);
+  int op_cancel(const std::vector<ceph_tid_t>& tidls, int r,
+                OpCancellation type = OpCancellation::Unsafe);
 
   /**
    * Any write op which is in progress at the start of this call shall no
