@@ -14,6 +14,9 @@
 #ifndef LIBRADOS_ASIO_H
 #define LIBRADOS_ASIO_H
 
+#include <boost/asio/associated_cancellation_slot.hpp>
+#include <boost/asio/cancellation_type.hpp>
+
 #include "include/rados/librados.hpp"
 #include "common/async/completion.h"
 #include "librados/AioCompletionImpl.h"
@@ -94,11 +97,34 @@ struct AsyncOp : Invoker<Result> {
     op.dispatch(std::move(p), ec, ver);
   }
 
+  struct op_cancellation {
+    AioCompletion* completion = nullptr;
+    void operator()(boost::asio::cancellation_type type) {
+      if (completion == nullptr) {
+        return;
+      } else if (type == boost::asio::cancellation_type::total ||
+                 type == boost::asio::cancellation_type::partial) {
+        completion->cancel_safe();
+      } else if (type == boost::asio::cancellation_type::terminal) {
+        completion->cancel_unsafe();
+      }
+    }
+  };
+
   template <typename Executor1, typename CompletionHandler>
   static auto create(const Executor1& ex1, CompletionHandler&& handler) {
+    op_cancellation* cancel_handler = nullptr;
+    auto slot = boost::asio::get_associated_cancellation_slot(handler);
+    if (slot.is_connected()) {
+      cancel_handler = &slot.template emplace<op_cancellation>();
+    }
+
     auto p = Completion::create(ex1, std::move(handler));
     p->user_data.aio_completion.reset(
         Rados::aio_create_completion(p.get(), aio_dispatch));
+    if (cancel_handler) {
+      cancel_handler->completion = p->user_data.aio_completion.get();
+    }
     return p;
   }
 };
