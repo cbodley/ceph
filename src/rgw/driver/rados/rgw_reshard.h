@@ -122,7 +122,7 @@ public:
 		   RGWBucketReshardLock* _outer_reshard_lock);
   int execute(int num_shards, ReshardFaultInjector& f,
               int max_op_entries, const cls_rgw_reshard_initiator initiator,
-	      const DoutPrefixProvider *dpp, optional_yield y,
+	      const DoutPrefixProvider *dpp, boost::asio::yield_context yield,
               bool verbose = false, std::ostream *out = nullptr,
               ceph::Formatter *formatter = nullptr,
 	      RGWReshard *reshard_log = nullptr);

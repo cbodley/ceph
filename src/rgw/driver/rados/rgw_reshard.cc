@@ -20,6 +20,7 @@
 #include "cls/lock/cls_lock_client.h"
 #include "common/async/lease_rados.h"
 #include "common/errno.h"
+#include "common/error_code.h"
 #include "common/ceph_json.h"
 
 #include "common/dout.h"
@@ -1308,20 +1309,13 @@ int RGWBucketReshard::execute(int num_shards,
                               int max_op_entries,  // max num to process per op
 			      const cls_rgw_reshard_initiator initiator,
                               const DoutPrefixProvider *dpp,
-			      optional_yield y,
+			      boost::asio::yield_context y,
                               bool verbose,
 			      ostream *out,
                               Formatter *formatter,
                               RGWReshard* reshard_log)
 {
-  // take a reshard lock on the bucket
-  int ret = reshard_lock.lock(dpp);
-  if (ret < 0) {
-    return ret;
-  }
-  // TODO: release the lock when purging the old index shards or unsucessful new index shards
-  auto unlock = make_scope_guard([this] { reshard_lock.unlock(); });
-
+  int ret = 0;
   if (reshard_log) {
     ret = reshard_log->update(dpp, y, bucket_info.bucket, initiator);
     if (ret < 0) {
@@ -1751,11 +1745,27 @@ int RGWReshard::process_entry(const cls_rgw_reshard_entry& entry,
 
   // all checkes passed; we can reshard...
 
-  RGWBucketReshard br(store, bucket_info, bucket_attrs, nullptr);
+  constexpr bool ephemeral = true;
+  RGWBucketReshardLock lock(store, bucket_info, ephemeral);
+  auto client = lock.make_client(y);
 
-  ReshardFaultInjector f; // no fault injected
-  ret = br.execute(entry.new_num_shards, f, max_op_entries, entry.initiator,
-		   dpp, y, false, nullptr, nullptr, this);
+  try {
+    // call RGWBucketReshard::execute() under the protection of cls_lock
+    ret = ceph::async::with_lease(client, lock.get_duration(), y,
+        [&] (boost::asio::yield_context yield) {
+          RGWBucketReshard br(store, bucket_info, bucket_attrs, nullptr);
+
+          ReshardFaultInjector f; // no fault injected
+          return br.execute(entry.new_num_shards, f, max_op_entries, entry.initiator,
+                            dpp, yield, false, nullptr, nullptr, this);
+        });
+  } catch (const ceph::async::lease_aborted& e) {
+    ldpp_dout(dpp, 1) << "bucket reshard lease aborted with " << e.code() << dendl;
+    return ceph::from_error_code(e.code());
+  } catch (const std::exception& e) {
+    ldpp_dout(dpp, 1) << "bucket reshard failed with " << e.what() << dendl;
+    return -EIO;
+  }
   if (ret < 0) {
     ldpp_dout(dpp, 0) <<  __func__ <<
         ": Error during resharding bucket " << entry.bucket_name << ":" <<
