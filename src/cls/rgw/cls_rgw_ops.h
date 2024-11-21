@@ -1698,6 +1698,22 @@ struct cls_rgw_clear_bucket_resharding_op {
 };
 WRITE_CLASS_ENCODER(cls_rgw_clear_bucket_resharding_op)
 
+struct cls_rgw_assert_bucket_reshard_log_op {
+  void encode(ceph::buffer::list& bl) const {
+    ENCODE_START(1, 1, bl);
+    ENCODE_FINISH(bl);
+  }
+
+  void decode(ceph::buffer::list::const_iterator& bl) {
+    DECODE_START(1, bl);
+    DECODE_FINISH(bl);
+  }
+
+  static void generate_test_instances(std::list<cls_rgw_assert_bucket_reshard_log_op*>& o);
+  void dump(ceph::Formatter *f) const;
+};
+WRITE_CLASS_ENCODER(cls_rgw_assert_bucket_reshard_log_op)
+
 struct cls_rgw_guard_bucket_resharding_op  {
   int ret_err{0};
 

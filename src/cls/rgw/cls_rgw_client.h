@@ -264,7 +264,6 @@ public:
 
 /* bucket index */
 void cls_rgw_bucket_init_index(librados::ObjectWriteOperation& o);
-void cls_rgw_bucket_init_index2(librados::ObjectWriteOperation& o);
 
 void cls_rgw_bucket_set_tag_timeout(librados::ObjectWriteOperation& op,
                                     uint64_t timeout);
@@ -446,3 +445,6 @@ void cls_rgw_get_bucket_resharding_decode(const bufferlist& out,
 // Try to remove all reshard log entries from the bucket index. Return success
 // if any entries were removed, and -ENODATA once they're all gone.
 void cls_rgw_bucket_reshard_log_trim(librados::ObjectWriteOperation& op);
+
+/// Assert that the server supports reshard logging or fail with -EOPNOTSUPP
+void cls_rgw_assert_bucket_reshard_log(librados::ObjectOperation& op);

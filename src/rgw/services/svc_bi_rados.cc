@@ -425,10 +425,9 @@ struct IndexInitWriter : rgwrados::shard_io::RadosRevertibleWriter {
     op.create(true);
     if (judge_support_logrecord) {
       // fail with EOPNOTSUPP if the osd doesn't support the reshard log
-      cls_rgw_bucket_init_index2(op);
-    } else {
-      cls_rgw_bucket_init_index(op);
+      cls_rgw_assert_bucket_reshard_log(op);
     }
+    cls_rgw_bucket_init_index(op);
   }
   void prepare_revert(int shard, librados::ObjectWriteOperation& op) override {
     // on failure, remove any of the shards we successfully created

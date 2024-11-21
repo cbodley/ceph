@@ -586,3 +586,13 @@ void rgw_cls_bi_put_entries_op::dump(Formatter *f) const
   encode_json("entries", entries, f);
   encode_json("check_existing", check_existing, f);
 }
+
+void cls_rgw_assert_bucket_reshard_log_op::generate_test_instances(
+  list<cls_rgw_assert_bucket_reshard_log_op*>& ls)
+{
+  ls.push_back(new cls_rgw_assert_bucket_reshard_log_op);
+}
+
+void cls_rgw_assert_bucket_reshard_log_op::dump(Formatter *f) const
+{
+}

@@ -131,12 +131,6 @@ void cls_rgw_bucket_init_index(ObjectWriteOperation& o)
   o.exec(RGW_CLASS, RGW_BUCKET_INIT_INDEX, in);
 }
 
-void cls_rgw_bucket_init_index2(ObjectWriteOperation& o)
-{
-  bufferlist in;
-  o.exec(RGW_CLASS, RGW_BUCKET_INIT_INDEX2, in);
-}
-
 void cls_rgw_bucket_set_tag_timeout(librados::ObjectWriteOperation& op,
                                     uint64_t timeout)
 {
@@ -1012,4 +1006,12 @@ void cls_rgw_set_bucket_resharding(librados::ObjectWriteOperation& op,
 
   op.assert_exists(); // the shard must exist; if not fail rather than recreate
   op.exec(RGW_CLASS, RGW_SET_BUCKET_RESHARDING, in);
+}
+
+void cls_rgw_assert_bucket_reshard_log(librados::ObjectOperation& op)
+{
+  bufferlist in;
+  cls_rgw_assert_bucket_reshard_log_op call;
+  encode(call, in);
+  op.exec(RGW_CLASS, RGW_ASSERT_BUCKET_RESHARD_LOG, in);
 }

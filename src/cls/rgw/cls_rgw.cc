@@ -5050,6 +5050,23 @@ static int rgw_get_bucket_resharding(cls_method_context_t hctx,
   return 0;
 }
 
+static int rgw_assert_bucket_reshard_log(cls_method_context_t hctx,
+                                         bufferlist* in, bufferlist* out)
+{
+  CLS_LOG(10, "entered %s", __func__);
+
+  cls_rgw_assert_bucket_reshard_log_op op;
+  try {
+    auto p = in->cbegin();
+    decode(op, p);
+  } catch (const ceph::buffer::error&) {
+    CLS_LOG(1, "ERROR: %s: failed to decode entry", __func__);
+    return -EINVAL;
+  }
+
+  return 0;
+}
+
 CLS_INIT(rgw)
 {
   CLS_LOG(1, "Loaded rgw class!");
@@ -5106,12 +5123,12 @@ CLS_INIT(rgw)
   cls_method_handle_t h_rgw_clear_bucket_resharding;
   cls_method_handle_t h_rgw_guard_bucket_resharding;
   cls_method_handle_t h_rgw_get_bucket_resharding;
+  cls_method_handle_t h_rgw_assert_bucket_reshard_log;
 
   cls_register(RGW_CLASS, &h_class);
 
   /* bucket index */
   cls_register_cxx_method(h_class, RGW_BUCKET_INIT_INDEX, CLS_METHOD_RD | CLS_METHOD_WR, rgw_bucket_init_index, &h_rgw_bucket_init_index);
-  cls_register_cxx_method(h_class, RGW_BUCKET_INIT_INDEX2, CLS_METHOD_RD | CLS_METHOD_WR, rgw_bucket_init_index, &h_rgw_bucket_init_index);
   cls_register_cxx_method(h_class, RGW_BUCKET_SET_TAG_TIMEOUT, CLS_METHOD_RD | CLS_METHOD_WR, rgw_bucket_set_tag_timeout, &h_rgw_bucket_set_tag_timeout);
   cls_register_cxx_method(h_class, RGW_BUCKET_LIST, CLS_METHOD_RD, rgw_bucket_list, &h_rgw_bucket_list);
   cls_register_cxx_method(h_class, RGW_BUCKET_CHECK_INDEX, CLS_METHOD_RD, rgw_bucket_check_index, &h_rgw_bucket_check_index);
@@ -5182,6 +5199,8 @@ CLS_INIT(rgw)
 			  rgw_guard_bucket_resharding, &h_rgw_guard_bucket_resharding);
   cls_register_cxx_method(h_class, RGW_GET_BUCKET_RESHARDING, CLS_METHOD_RD ,
 			  rgw_get_bucket_resharding, &h_rgw_get_bucket_resharding);
+  cls_register_cxx_method(h_class, RGW_ASSERT_BUCKET_RESHARD_LOG, CLS_METHOD_RD,
+			  rgw_assert_bucket_reshard_log, &h_rgw_assert_bucket_reshard_log);
 
   return;
 }

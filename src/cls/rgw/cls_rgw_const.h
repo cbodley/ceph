@@ -12,7 +12,6 @@ constexpr int RGWBIAdvanceAndRetryError = -EFBIG;
 
 /* bucket index */
 #define RGW_BUCKET_INIT_INDEX "bucket_init_index"
-#define RGW_BUCKET_INIT_INDEX2 "bucket_init_index2"
 
 #define RGW_BUCKET_SET_TAG_TIMEOUT "bucket_set_tag_timeout"
 #define RGW_BUCKET_LIST "bucket_list"
@@ -82,3 +81,4 @@ constexpr int RGWBIAdvanceAndRetryError = -EFBIG;
 #define RGW_CLEAR_BUCKET_RESHARDING "clear_bucket_resharding"
 #define RGW_GUARD_BUCKET_RESHARDING "guard_bucket_resharding"
 #define RGW_GET_BUCKET_RESHARDING "get_bucket_resharding"
+#define RGW_ASSERT_BUCKET_RESHARD_LOG "assert_bucket_reshard_log"

@@ -109,6 +109,7 @@ TYPE(rgw_cls_usage_log_read_ret)
 TYPE(rgw_cls_usage_log_trim_op)
 TYPE(cls_rgw_guard_bucket_resharding_op)
 TYPE(cls_rgw_lc_set_entry_op)
+TYPE(cls_rgw_assert_bucket_reshard_log_op)
 
 #include "cls/rgw_gc/cls_rgw_gc_ops.h"
 TYPE(cls_rgw_gc_queue_init_op)
