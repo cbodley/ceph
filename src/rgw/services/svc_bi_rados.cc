@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <iterator>
 
+#include <boost/dynamic_bitset.hpp>
+
 #include "svc_bi_rados.h"
 #include "svc_bilog_rados.h"
 #include "svc_zone.h"
@@ -410,22 +412,33 @@ int RGWSI_BucketIndex_RADOS::cls_bucket_head(const DoutPrefixProvider *dpp,
 
 // init_index() is all-or-nothing so if we fail to initialize all shards,
 // we undo the creation of others. RevertibleWriter provides these semantics
+//
+// optionally, this can also detect whether all shards support reshard logging
+// through the use of cls_rgw_assert_bucket_reshard_log().
 struct IndexInitWriter : rgwrados::shard_io::RadosRevertibleWriter {
-  bool judge_support_logrecord;
+  bool* support_logrecord;
+  boost::dynamic_bitset<> retries;
 
   IndexInitWriter(const DoutPrefixProvider& dpp,
                   boost::asio::any_io_executor ex,
                   librados::IoCtx& ioctx,
-                  bool judge_support_logrecord)
+                  bool* support_logrecord,
+                  size_t highest_shard)
     : RadosRevertibleWriter(dpp, std::move(ex), ioctx),
-      judge_support_logrecord(judge_support_logrecord)
-  {}
+      support_logrecord(support_logrecord)
+  {
+    if (support_logrecord) {
+      retries.resize(highest_shard + 1);
+    }
+  }
   void prepare_write(int shard, librados::ObjectWriteOperation& op) override {
     // don't overwrite. fail with EEXIST if a shard already exists
     op.create(true);
-    if (judge_support_logrecord) {
+    if (support_logrecord && *support_logrecord) {
       // fail with EOPNOTSUPP if the osd doesn't support the reshard log
       cls_rgw_assert_bucket_reshard_log(op);
+      // enable retry on EOPNOTSUPP
+      retries.set(shard, true);
     }
     cls_rgw_bucket_init_index(op);
   }
@@ -433,7 +446,17 @@ struct IndexInitWriter : rgwrados::shard_io::RadosRevertibleWriter {
     // on failure, remove any of the shards we successfully created
     op.remove();
   }
-  Result on_complete(int, boost::system::error_code ec) override {
+  Result on_complete(int shard, boost::system::error_code ec) override {
+    if (support_logrecord && ec == boost::system::errc::operation_not_supported) {
+      // stop adding cls_rgw_assert_bucket_reshard_log() to writes/retries
+      *support_logrecord = false;
+      // retry a given shard only once. if cls_rgw isn't loaded on the osd,
+      // cls_rgw_bucket_init_index() itself could fail with EOPNOTSUPP
+      if (retries.test_set(shard, false)) {
+        return Result::Retry;
+      }
+      return Result::Error;
+    }
     // ignore EEXIST
     if (ec && ec != boost::system::errc::file_exists) {
       return Result::Error;
@@ -450,7 +473,7 @@ int RGWSI_BucketIndex_RADOS::init_index(const DoutPrefixProvider *dpp,
                                         optional_yield y,
                                         const RGWBucketInfo& bucket_info,
                                         const rgw::bucket_index_layout_generation& idx_layout,
-                                        bool judge_support_logrecord)
+                                        bool* support_logrecord)
 {
   librados::IoCtx index_pool;
 
@@ -465,19 +488,24 @@ int RGWSI_BucketIndex_RADOS::init_index(const DoutPrefixProvider *dpp,
   map<int, string> bucket_objs;
   get_bucket_index_objects(dir_oid, idx_layout.layout.normal.num_shards, idx_layout.gen, &bucket_objs);
 
+  ceph_assert(!bucket_objs.empty());
+  const size_t highest_shard = bucket_objs.rbegin()->first;
+
   const size_t max_aio = cct->_conf->rgw_bucket_index_max_aio;
   boost::system::error_code ec;
   if (y) {
     // run on the coroutine's executor and suspend until completion
     auto yield = y.get_yield_context();
     auto ex = yield.get_executor();
-    auto writer = IndexInitWriter{*dpp, ex, index_pool, judge_support_logrecord};
+    auto writer = IndexInitWriter{*dpp, ex, index_pool, support_logrecord,
+                                  highest_shard};
 
     rgwrados::shard_io::async_writes(writer, bucket_objs, max_aio, yield[ec]);
   } else {
     // run a strand on the system executor and block on a condition variable
     auto ex = boost::asio::make_strand(boost::asio::system_executor{});
-    auto writer = IndexInitWriter{*dpp, ex, index_pool, judge_support_logrecord};
+    auto writer = IndexInitWriter{*dpp, ex, index_pool, support_logrecord,
+                                  highest_shard};
 
     maybe_warn_about_blocking(dpp);
     rgwrados::shard_io::async_writes(writer, bucket_objs, max_aio,

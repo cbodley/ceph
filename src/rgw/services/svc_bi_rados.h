@@ -125,7 +125,7 @@ public:
   int init_index(const DoutPrefixProvider *dpp, optional_yield y,
                  const RGWBucketInfo& bucket_info,
                  const rgw::bucket_index_layout_generation& idx_layout,
-                 bool judge_support_logrecord = false) override;
+                 bool* support_logrecord = nullptr) override;
   int clean_index(const DoutPrefixProvider *dpp, optional_yield y,
                   const RGWBucketInfo& bucket_info,
                   const rgw::bucket_index_layout_generation& idx_layout) override;

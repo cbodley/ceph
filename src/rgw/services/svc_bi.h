@@ -32,7 +32,7 @@ public:
   virtual int init_index(const DoutPrefixProvider *dpp, optional_yield y,
                          const RGWBucketInfo& bucket_info,
                          const rgw::bucket_index_layout_generation& idx_layout,
-                         bool judge_support_logrecord = false) = 0;
+                         bool* support_logrecord = nullptr) = 0;
   virtual int clean_index(const DoutPrefixProvider *dpp, optional_yield y,
                           const RGWBucketInfo& bucket_info,
                           const rgw::bucket_index_layout_generation& idx_layout) = 0;
