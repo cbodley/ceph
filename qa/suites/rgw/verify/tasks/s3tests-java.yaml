@@ -4,3 +4,13 @@ tasks:
         force-branch: ceph-master
         force-repo: https://github.com/ceph/java_s3tests.git 
 
+overrides:
+  install:
+    ceph:
+      extra_system_packages:
+        rpm:
+        - java
+        - java-17-openjdk-headless
+        deb:
+        - default-jre
+        - openjdk-17-jdk-headless
