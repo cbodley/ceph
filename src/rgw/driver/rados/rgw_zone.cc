@@ -1,6 +1,7 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 
+#include "include/function2.hpp"
 #include "rgw_zone.h"
 #include "rgw_realm_watcher.h"
 #include "rgw_sal_config.h"
@@ -1114,6 +1115,41 @@ bool all_zonegroups_support(const SiteConfig& site, std::string_view feature)
   return std::all_of(zgs.begin(), zgs.end(), [feature] (const auto& pair) {
       return pair.second.supports(feature);
     });
+}
+
+// test whether the sync set contains the given id
+static bool in_sync_set(const SyncSet& sync_set, const std::string& id)
+{
+  return std::visit(fu2::overload(
+      [&id] (const SyncAllBut& s) { return !s.ids.contains(id); },
+      [&id] (const SyncOnly& s) { return s.ids.contains(id); }
+      ), sync_set);
+}
+
+bool should_sync_from(const SiteConfig& site,
+                      const RGWBucketInfo& dest,
+                      const RGWBucketInfo& source)
+{
+  const auto& period = site.get_period();
+  if (!period) {
+    return false; // no realm, no replication
+  }
+
+  const auto& zgs = period->period_map.zonegroups;
+  auto s = zgs.find(source.zonegroup);
+  if (s == zgs.end()) {
+    return false; // unknown source zonegroup
+  }
+  auto d = zgs.find(dest.zonegroup);
+  if (d == zgs.end()) {
+    return false; // unknown destination zonegroup
+  }
+
+  // must be enabled at both zonegroup and bucket level in both directions
+  return in_sync_set(d->second.sync_from_zonegroups, source.zonegroup)
+      && in_sync_set(dest.sync_from_zonegroups, source.zonegroup)
+      && in_sync_set(s->second.sync_to_zonegroups, dest.zonegroup)
+      && in_sync_set(source.sync_to_zonegroups, dest.zonegroup);
 }
 
 static int read_or_create_default_zone(const DoutPrefixProvider* dpp,

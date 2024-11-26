@@ -1076,6 +1076,11 @@ struct RGWBucketInfo {
 
   std::optional<rgw_sync_policy_info> sync_policy;
 
+  // Controls which zonegroups we'll consider for cross-zonegroup replication.
+  // These sync relationships must also be enabled at the zonegroup level.
+  SyncSet sync_from_zonegroups;
+  SyncSet sync_to_zonegroups;
+
   void encode(bufferlist& bl) const;
   void decode(bufferlist::const_iterator& bl);
   void dump(Formatter *f) const;

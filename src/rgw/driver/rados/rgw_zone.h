@@ -351,6 +351,9 @@ struct RGWZoneGroup : public RGWSystemMetaObj {
 
   rgw_sync_policy_info sync_policy;
   rgw::zone_features::set enabled_features;
+  // Controls which zonegroups we'll consider for cross-zonegroup replication.
+  SyncSet sync_from_zonegroups;
+  SyncSet sync_to_zonegroups;
 
   RGWZoneGroup(): is_master(false){}
   RGWZoneGroup(const std::string &id, const std::string &name):RGWSystemMetaObj(id, name) {}
@@ -1019,5 +1022,10 @@ class SiteConfig {
 
 /// Test whether all zonegroups in the realm support the given zone feature.
 bool all_zonegroups_support(const SiteConfig& site, std::string_view feature);
+
+/// Test whether a destination bucket should sync from the given source bucket.
+bool should_sync_from(const SiteConfig& site,
+                      const RGWBucketInfo& dest,
+                      const RGWBucketInfo& source);
 
 } // namespace rgw

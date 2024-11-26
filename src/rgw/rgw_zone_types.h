@@ -24,6 +24,7 @@
 #include <set>
 #include <map>
 #include <list>
+#include <variant>
 #include <boost/optional.hpp>
 
 #include <fmt/format.h>
@@ -61,6 +62,20 @@ extern std::string avail_pools;
 extern std::string default_storage_pool_suffix;
 
 } /* namespace rgw_zone_defaults */
+
+
+/// Enable replication from all peers except for the given ids (may be empty).
+struct SyncAllBut {
+  std::set<std::string> ids;
+};
+/// Enable replication from the given peer ids only (may be empty).
+struct SyncOnly {
+  std::set<std::string> ids;
+};
+/// Configuration for cross-zonegroup replication. All peers are enabled by
+/// default with empty SyncAllBut.
+using SyncSet = std::variant<SyncAllBut, SyncOnly>;
+
 
 struct RGWNameToId {
   std::string obj_id;
