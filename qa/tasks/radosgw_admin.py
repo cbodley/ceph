@@ -16,7 +16,7 @@ import logging
 import time
 import datetime
 import sys
-import os
+import errno
 
 from io import StringIO
 from queue import Queue
@@ -744,7 +744,7 @@ def task(ctx, config):
 
     # TESTCASE 'bucket link', 'bucket', 'account user', 'fails'
     (err, out) = rgwadmin(ctx, client, ['bucket', 'link', '--bucket', bucket_name, '--uid', 'testacctuser'])
-    assert err == os.EINVAL
+    assert err == errno.EINVAL
 
     rgwadmin(ctx, client, ['user', 'rm', '--uid', 'testacctuser'], check_status=True)
 
