@@ -6572,6 +6572,11 @@ int RGWRados::get_olh_target_state(const DoutPrefixProvider *dpp, RGWObjectCtx&
     return r;
   }
 
+  // if prefetch was requested, apply it to the target too
+  if (olh_state->prefetch_data) {
+    obj_ctx.set_prefetch_data(target);
+  }
+
   return get_obj_state(dpp, &obj_ctx, bucket_info, target, psm, false, y);
 }
 
