@@ -1223,7 +1223,9 @@ int RGWRados::update_service_map(const DoutPrefixProvider *dpp, std::map<std::st
  * Initialize the RADOS instance and prepare to do other ops
  * Returns 0 on success, -ERR# on failure.
  */
-int RGWRados::init_complete(const DoutPrefixProvider *dpp, optional_yield y, rgw::sal::ConfigStore* cfgstore)
+int RGWRados::init_complete(const DoutPrefixProvider *dpp, optional_yield y,
+                            rgw::sal::ConfigStore* cfgstore,
+                            boost::asio::io_context& context)
 {
   int ret;
 
@@ -1364,7 +1366,7 @@ int RGWRados::init_complete(const DoutPrefixProvider *dpp, optional_yield y, rgw
   lc = new RGWLC(cct, this->driver);
 
   if (use_lc_thread)
-    lc->start_processor();
+    lc->start_processor(context.get_executor());
 
   quota_handler = RGWQuotaHandler::generate_handler(dpp, this->driver, quota_threads);
 

@@ -12,6 +12,7 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/asio/use_future.hpp>
 #include <boost/variant.hpp>
 
 #include "include/scope_guard.h"
@@ -199,13 +200,14 @@ bool RGWLifecycleConfiguration::valid()
   return true;
 }
 
-void *RGWLC::LCWorker::entry() {
+void RGWLC::LCWorker::entry(boost::asio::yield_context yield)
+{
   do {
     std::unique_ptr<rgw::sal::Bucket> all_buckets; // empty restriction
     utime_t start = ceph_clock_now();
     if (should_work(start)) {
       ldpp_dout(dpp, 2) << "life cycle: start worker=" << ix << dendl;
-      int r = lc->process(this, all_buckets, null_yield, false /* once */);
+      int r = lc->process(this, all_buckets, yield, false /* once */);
       if (r < 0) {
         ldpp_dout(dpp, 0) << "ERROR: do life cycle process() returned error r="
 			  << r << " worker=" << ix << dendl;
@@ -227,8 +229,6 @@ void *RGWLC::LCWorker::entry() {
     std::unique_lock l{lock};
     cond.wait_for(l, std::chrono::seconds(secs));
   } while (!lc->going_down());
-
-  return NULL;
 }
 
 RGWLC::RGWLC(CephContext *_cct, rgw::sal::Driver* _driver)
@@ -2358,14 +2358,14 @@ exit:
   return 0;
 }
 
-void RGWLC::start_processor()
+void RGWLC::start_processor(boost::asio::any_io_executor ex)
 {
   auto maxw = cct->_conf->rgw_lc_max_worker;
   workers.reserve(maxw);
   for (int ix = 0; ix < maxw; ++ix) {
     auto worker  =
       std::make_unique<RGWLC::LCWorker>(this /* dpp */, cct, this, ix);
-    worker->create((string{"rgw_lc_"} + to_string(ix)).c_str());
+    worker->start(ex);
     workers.emplace_back(std::move(worker));
   }
 }
@@ -2375,6 +2375,8 @@ void RGWLC::stop_processor()
   down_flag = true;
   for (auto& worker : workers) {
     worker->stop();
+  }
+  for (auto& worker : workers) {
     worker->join();
   }
   workers.clear();
@@ -2390,10 +2392,29 @@ std::ostream& RGWLC::gen_prefix(std::ostream& out) const
   return out << "lifecycle: ";
 }
 
+void RGWLC::LCWorker::start(boost::asio::any_io_executor ex)
+{
+  // spawn a cancellable coroutine and get a future to await its completion
+  auto strand = boost::asio::make_strand(ex);
+  finished = boost::asio::spawn(
+      strand,
+      [this] (boost::asio::yield_context yield) { entry(yield); },
+      boost::asio::bind_cancellation_slot(
+          cancel.slot(),
+          boost::asio::bind_executor(
+              strand, boost::asio::use_future)));
+}
+
 void RGWLC::LCWorker::stop()
 {
-  std::lock_guard l{lock};
-  cond.notify_all();
+  ldpp_dout(dpp, 20) << "stopping worker=" << ix << dendl;
+  cancel.emit(boost::asio::cancellation_type::terminal);
+}
+
+void RGWLC::LCWorker::join()
+{
+  finished.wait();
+  ldpp_dout(dpp, 20) << "joined worker=" << ix << dendl;
 }
 
 bool RGWLC::going_down()

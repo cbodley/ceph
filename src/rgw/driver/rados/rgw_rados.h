@@ -599,7 +599,9 @@ public:
   /** Initialize the RADOS instance and prepare to do other ops */
   int init_svc(bool raw, const DoutPrefixProvider *dpp, bool background_tasks, const rgw::SiteConfig& site, rgw::sal::ConfigStore* cfgstore);
   virtual int init_rados();
-  int init_complete(const DoutPrefixProvider *dpp, optional_yield y, rgw::sal::ConfigStore* cfgstore);
+  int init_complete(const DoutPrefixProvider *dpp, optional_yield y,
+                    rgw::sal::ConfigStore* cfgstore,
+                    boost::asio::io_context& context);
   void finalize();
 
   int register_to_service_map(const DoutPrefixProvider *dpp, const std::string& daemon_type, const std::map<std::string, std::string>& meta);

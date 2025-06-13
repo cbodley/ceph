@@ -5,17 +5,18 @@
 
 #include <map>
 #include <array>
+#include <future>
 #include <string>
 #include <iostream>
+
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 
 #include "common/debug.h"
 
 #include "include/types.h"
 #include "include/rados/librados.hpp"
-#include "common/ceph_mutex.h"
-#include "common/Cond.h"
 #include "common/iso_8601.h"
-#include "common/Thread.h"
 #include "rgw_common.h"
 #include "cls/rgw/cls_rgw_types.h"
 #include "rgw_tag.h"
@@ -575,38 +576,40 @@ class RGWLC : public DoutPrefixProvider {
 
 public:
 
-  class LCWorker : public Thread
+  class LCWorker
   {
     const DoutPrefixProvider *dpp;
     CephContext *cct;
     RGWLC *lc;
     int ix;
-    std::mutex lock;
-    std::condition_variable cond;
     /* save the target bucket names created as part of object transition
      * to cloud. This list is maintained for the duration of each RGWLC::process()
      * post which it is discarded. */
     std::set<std::string> cloud_targets;
 
+    // coroutine entry function
+    void entry(boost::asio::yield_context yield);
+    // signal to cancel entry() coroutine
+    boost::asio::cancellation_signal cancel;
+    // future to wait on cancellation to complete
+    std::future<void> finished;
+
   public:
-
-    using lock_guard = std::lock_guard<std::mutex>;
-    using unique_lock = std::unique_lock<std::mutex>;
-
     LCWorker(const DoutPrefixProvider* dpp, CephContext *_cct, RGWLC *_lc,
 	     int ix);
+    ~LCWorker();
     RGWLC* get_lc() { return lc; }
 
     std::string thr_name() {
       return std::string{"lc_thrd: "} + std::to_string(ix);
     }
 
-    void *entry() override;
+    void start(boost::asio::any_io_executor ex);
     void stop();
+    void join();
     bool should_work(utime_t& now);
     int schedule_next_start_time(utime_t& start, utime_t& now);
     std::set<std::string>& get_cloud_targets() { return cloud_targets; }
-    virtual ~LCWorker() override;
 
     friend class RGWRados;
     friend class RGWLC;
@@ -652,7 +655,7 @@ public:
 		     rgw::sal::LCEntry& entry, int& result,
 		     LCWorker* worker, optional_yield y);
   bool going_down();
-  void start_processor();
+  void start_processor(boost::asio::any_io_executor ex);
   void stop_processor();
   int set_bucket_config(const DoutPrefixProvider* dpp, optional_yield y,
                         rgw::sal::Bucket* bucket,

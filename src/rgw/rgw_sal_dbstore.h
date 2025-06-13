@@ -747,6 +747,7 @@ public:
       }
 
       virtual int initialize(CephContext *cct, const DoutPrefixProvider *dpp) override;
+      int init_complete(boost::asio::io_context& context);
 
       virtual const std::string get_name() const override {
         return "dbstore";

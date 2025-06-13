@@ -2100,17 +2100,21 @@ namespace rgw::sal {
 
     lc = new RGWLC(cct, this);
 
-    if (use_lc_thread) {
-      ret = db->createLCTables(dpp);
-      lc->start_processor();
-    }
-
     ret = db->createGC(dpp);
     if (ret < 0) {
       ldpp_dout(dpp, 0) <<"GC thread creation failed: ret = " << ret << dendl;
     }
 
     return ret;
+  }
+
+  int DBStore::init_complete(boost::asio::io_context& context)
+  {
+    if (use_lc_thread) {
+      std::ignore = db->createLCTables(dpp);
+      lc->start_processor(context.get_executor());
+    }
+    return 0;
   }
 
   int DBLuaManager::get_script(const DoutPrefixProvider* dpp, optional_yield y, const std::string& key, std::string& script)
