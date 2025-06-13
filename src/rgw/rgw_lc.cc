@@ -2654,7 +2654,6 @@ int RGWLC::remove_bucket_config(const DoutPrefixProvider* dpp, optional_yield y,
 
 RGWLC::~RGWLC()
 {
-  stop_processor();
   finalize();
 } /* ~RGWLC() */
 

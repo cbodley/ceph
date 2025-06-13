@@ -2391,7 +2391,7 @@ int RadosStore::meta_remove(const DoutPrefixProvider* dpp, std::string& metadata
 
 void RadosStore::shutdown(void) {
   svc()->datalog_rados->blocking_shutdown();
-  return;
+  rados->get_lc()->stop_processor();
 }
 
 void RadosStore::finalize(void)
