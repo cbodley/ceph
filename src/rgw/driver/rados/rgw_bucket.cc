@@ -2098,7 +2098,7 @@ static int fix_single_bucket_lc(rgw::sal::Driver* driver,
     return ret;
   }
 
-  return rgw::lc::fix_lc_shard_entry(dpp, driver, driver->get_rgwlc()->get_lc(), bucket.get());
+  return rgw::lc::fix_lc_shard_entry(dpp, y, driver, driver->get_rgwlc()->get_lc(), bucket.get());
 }
 
 static void format_lc_status(Formatter* formatter,

@@ -10094,7 +10094,7 @@ int RGWRados::process_lc(const std::unique_ptr<rgw::sal::Bucket>& optional_bucke
 {
   RGWLC lc(cct, this->driver);
   RGWLC::LCWorker worker(&lc, cct, &lc, 0);
-  auto ret = lc.process(&worker, optional_bucket, true /* once */);
+  auto ret = lc.process(&worker, optional_bucket, null_yield, true /* once */);
   lc.stop_processor(); // sets down_flag, but returns immediately
   return ret;
 }
