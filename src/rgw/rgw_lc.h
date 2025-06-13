@@ -616,10 +616,9 @@ public:
 
   std::vector<std::unique_ptr<RGWLC::LCWorker>> workers;
 
-  RGWLC() : cct(nullptr), driver(nullptr) {}
+  RGWLC(CephContext *_cct, rgw::sal::Driver* _driver);
   virtual ~RGWLC() override;
 
-  void initialize(CephContext *_cct, rgw::sal::Driver* _driver);
   void finalize();
 
   int process(LCWorker* worker,

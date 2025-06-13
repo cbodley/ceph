@@ -2098,8 +2098,7 @@ namespace rgw::sal {
     cct = _cct;
     dpp = _dpp;
 
-    lc = new RGWLC();
-    lc->initialize(cct, this);
+    lc = new RGWLC(cct, this);
 
     if (use_lc_thread) {
       ret = db->createLCTables(dpp);

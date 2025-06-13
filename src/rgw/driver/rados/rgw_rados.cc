@@ -1361,8 +1361,7 @@ int RGWRados::init_complete(const DoutPrefixProvider *dpp, optional_yield y, rgw
   topic_cache = new RGWChainedCacheImpl<pubsub_bucket_topics_entry>;
   topic_cache->init(svc.cache);
 
-  lc = new RGWLC();
-  lc->initialize(cct, this->driver);
+  lc = new RGWLC(cct, this->driver);
 
   if (use_lc_thread)
     lc->start_processor();
@@ -10093,8 +10092,7 @@ int RGWRados::process_gc(bool expired_only, optional_yield y)
 
 int RGWRados::process_lc(const std::unique_ptr<rgw::sal::Bucket>& optional_bucket)
 {
-  RGWLC lc;
-  lc.initialize(cct, this->driver);
+  RGWLC lc(cct, this->driver);
   RGWLC::LCWorker worker(&lc, cct, &lc, 0);
   auto ret = lc.process(&worker, optional_bucket, true /* once */);
   lc.stop_processor(); // sets down_flag, but returns immediately

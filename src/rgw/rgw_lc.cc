@@ -231,9 +231,9 @@ void *RGWLC::LCWorker::entry() {
   return NULL;
 }
 
-void RGWLC::initialize(CephContext *_cct, rgw::sal::Driver* _driver) {
-  cct = _cct;
-  driver = _driver;
+RGWLC::RGWLC(CephContext *_cct, rgw::sal::Driver* _driver)
+  : cct(_cct), driver(_driver)
+{
   sal_lc = driver->get_lifecycle();
   max_objs = cct->_conf->rgw_lc_max_objs;
   if (max_objs > HASH_PRIME)
