@@ -2441,11 +2441,11 @@ void RGWLC::LCWorker::start(boost::asio::any_io_executor ex)
 {
   // spawn a cancellable coroutine and get a future to await its completion
   auto strand = boost::asio::make_strand(ex);
-  finished = boost::asio::spawn(
+  joiner = boost::asio::spawn(
       strand,
       [this] (boost::asio::yield_context yield) { entry(yield); },
       boost::asio::bind_cancellation_slot(
-          cancel.slot(),
+          stopper.slot(),
           boost::asio::bind_executor(
               strand, boost::asio::use_future)));
 }
@@ -2453,12 +2453,12 @@ void RGWLC::LCWorker::start(boost::asio::any_io_executor ex)
 void RGWLC::LCWorker::stop()
 {
   ldpp_dout(dpp, 20) << "stopping worker=" << ix << dendl;
-  cancel.emit(boost::asio::cancellation_type::terminal);
+  stopper.emit(boost::asio::cancellation_type::terminal);
 }
 
 void RGWLC::LCWorker::join()
 {
-  finished.wait();
+  joiner.wait();
   ldpp_dout(dpp, 20) << "joined worker=" << ix << dendl;
 }
 

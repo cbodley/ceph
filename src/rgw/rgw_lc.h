@@ -589,9 +589,9 @@ public:
     // coroutine entry function
     void entry(boost::asio::yield_context yield);
     // signal to cancel entry() coroutine
-    boost::asio::cancellation_signal cancel;
+    boost::asio::cancellation_signal stopper;
     // future to wait on cancellation to complete
-    std::future<void> finished;
+    std::future<void> joiner;
 
   public:
     LCWorker(const DoutPrefixProvider* dpp, CephContext *_cct, RGWLC *_lc,
