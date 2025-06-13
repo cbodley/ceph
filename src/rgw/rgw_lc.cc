@@ -12,12 +12,14 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/variant.hpp>
 
 #include "include/scope_guard.h"
 #include "include/function2.hpp"
 #include "common/async/spawn_throttle.h"
+#include "common/error_code.h"
 #include "common/Formatter.h"
 #include "common/containers.h"
 #include "common/split.h"
@@ -200,8 +202,33 @@ bool RGWLifecycleConfiguration::valid()
   return true;
 }
 
+static boost::asio::steady_timer make_timer(optional_yield y)
+{
+  boost::asio::any_io_executor ex;
+  if (y) {
+    ex = y.get_yield_context().get_executor();
+  } else {
+    ex = boost::asio::system_executor();
+  }
+  return boost::asio::steady_timer{ex};
+}
+static int timer_wait(boost::asio::steady_timer& timer,
+                      ceph::timespan duration, optional_yield y)
+{
+  timer.expires_after(duration);
+
+  boost::system::error_code ec;
+  if (y) {
+    timer.async_wait(y.get_yield_context()[ec]);
+  } else {
+    timer.wait(ec);
+  }
+  return ceph::from_error_code(ec);
+}
+
 void RGWLC::LCWorker::entry(boost::asio::yield_context yield)
 {
+  boost::asio::steady_timer timer = make_timer(yield);
   do {
     std::unique_ptr<rgw::sal::Bucket> all_buckets; // empty restriction
     utime_t start = ceph_clock_now();
@@ -226,8 +253,10 @@ void RGWLC::LCWorker::entry(boost::asio::yield_context yield)
     ldpp_dout(dpp, 5) << "schedule life cycle next start time="
 		      << rgw_to_asctime(next) << " worker=" << ix << dendl;
 
-    std::unique_lock l{lock};
-    cond.wait_for(l, std::chrono::seconds(secs));
+    int r = timer_wait(timer, std::chrono::seconds(secs), yield);
+    if (r < 0) {
+      break; // canceled
+    }
   } while (!lc->going_down());
 }
 
@@ -388,17 +417,12 @@ public:
     return 0;
   }
 
-  void delay() {
-    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-  }
-
   bool get_obj(const DoutPrefixProvider *dpp, optional_yield y,
                rgw_bucket_dir_entry **obj,
 	       std::function<void(void)> fetch_barrier
 	       = []() { /* nada */}) {
     if (obj_iter == list_results.objs.end()) {
       if (!list_results.is_truncated) {
-        delay();
         return false;
       } else {
 	fetch_barrier();
@@ -410,7 +434,6 @@ public:
           return false;
         }
       }
-      delay();
     }
 
     if (obj_iter->key.name == pre_obj.key.name) {
@@ -762,6 +785,8 @@ int RGWLC::handle_multipart_expiration(rgw::sal::Bucket* target,
   params.ns = RGW_OBJ_NS_MULTIPART;
   params.access_list_filter = MultipartMetaFilter;
 
+  boost::asio::steady_timer timer = make_timer(y);
+
   auto pf = [this, target] (optional_yield y, const lc_op& rule,
                             const rgw_bucket_dir_entry& obj) {
     int ret{0};
@@ -847,7 +872,10 @@ int RGWLC::handle_multipart_expiration(rgw::sal::Bucket* target,
 	}
       }
 
-      std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+      ret = timer_wait(timer, std::chrono::milliseconds(delay_ms), y);
+      if (ret < 0) {
+        return ret; // canceled
+      }
     } while(results.is_truncated);
   } /* for prefix_map */
 
@@ -1702,10 +1730,12 @@ class SimpleBackoff
   const int max_retries;
   std::chrono::milliseconds sleep_ms;
   int retries{0};
+  optional_yield y;
+  boost::asio::steady_timer timer = make_timer(y);
 public:
-  SimpleBackoff(int max_retries, std::chrono::milliseconds initial_sleep_ms)
-    : max_retries(max_retries), sleep_ms(initial_sleep_ms)
-    {}
+  SimpleBackoff(int max_retries, std::chrono::milliseconds initial_sleep_ms,
+                optional_yield y)
+    : max_retries(max_retries), sleep_ms(initial_sleep_ms), y(y) {}
   SimpleBackoff(const SimpleBackoff&) = delete;
   SimpleBackoff& operator=(const SimpleBackoff&) = delete;
 
@@ -1724,7 +1754,9 @@ public:
       if (r) {
 	return r;
       }
-      std::this_thread::sleep_for(sleep_ms * 2 * retries++);
+      if (timer_wait(timer, sleep_ms * 2 * retries++, y) < 0) {
+        return false; // canceled
+      }
     }
     return false;
   }
@@ -1749,7 +1781,12 @@ int RGWLC::bucket_lc_post(int index, int max_lock_sec,
       /* already locked by another lc processor */
       ldpp_dout(this, 0) << "RGWLC::bucket_lc_post() failed to acquire lock on "
 			 << obj_names[index] << ", sleep 5, try again " << dendl;
-      sleep(5);
+
+      boost::asio::steady_timer timer = make_timer(y);
+      ret = timer_wait(timer, std::chrono::seconds(5), y);
+      if (ret < 0) {
+        return ret; // canceled
+      }
       continue;
     }
 
@@ -2170,7 +2207,7 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
     return false;
   };
 
-  SimpleBackoff shard_lock(5 /* max retries */, 50ms);
+  SimpleBackoff shard_lock(5 /* max retries */, 50ms, y);
   if (! shard_lock.wait_backoff(lock_lambda)) {
     ldpp_dout(this, 0) << "RGWLC::process(): failed to acquire lock on "
 		       << lc_shard << " after " << shard_lock.get_retries()
@@ -2517,6 +2554,8 @@ static int guard_lc_modify(const DoutPrefixProvider *dpp,
     sal_lc->get_serializer(lc_index_lock_name, oid, cookie);
   utime_t time(max_lock_secs, 0);
 
+  boost::asio::steady_timer timer = make_timer(y);
+
   int ret;
   uint16_t retries{0};
 
@@ -2526,7 +2565,10 @@ static int guard_lc_modify(const DoutPrefixProvider *dpp,
     if (ret == -EBUSY || ret == -EEXIST) {
       ldpp_dout(dpp, 0) << "RGWLC::RGWPutLC() failed to acquire lock on "
 			<< oid << ", retry in 100ms, ret=" << ret << dendl;
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      ret = timer_wait(timer, std::chrono::milliseconds(100), y);
+      if (ret < 0) {
+        break; // canceled
+      }
       // the typical S3 client will time out in 60s
       if(retries++ < 500) {
 	continue;
