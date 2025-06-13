@@ -226,6 +226,15 @@ static int timer_wait(boost::asio::steady_timer& timer,
   return ceph::from_error_code(ec);
 }
 
+static bool going_down(boost::asio::yield_context yield)
+{
+  return yield.cancelled() != boost::asio::cancellation_type::none;
+}
+static bool going_down(optional_yield y)
+{
+  return y ? going_down(y.get_yield_context()) : false;
+}
+
 void RGWLC::LCWorker::entry(boost::asio::yield_context yield)
 {
   boost::asio::steady_timer timer = make_timer(yield);
@@ -242,7 +251,7 @@ void RGWLC::LCWorker::entry(boost::asio::yield_context yield)
       ldpp_dout(dpp, 2) << "life cycle: stop worker=" << ix << dendl;
       cloud_targets.clear(); // clear cloud targets
     }
-    if (lc->going_down())
+    if (going_down(yield))
       break;
 
     utime_t end = ceph_clock_now();
@@ -257,7 +266,7 @@ void RGWLC::LCWorker::entry(boost::asio::yield_context yield)
     if (r < 0) {
       break; // canceled
     }
-  } while (!lc->going_down());
+  } while (!going_down(yield));
 }
 
 RGWLC::RGWLC(CephContext *_cct, rgw::sal::Driver* _driver)
@@ -858,7 +867,7 @@ int RGWLC::handle_multipart_expiration(rgw::sal::Bucket* target,
                        (boost::asio::yield_context yield) mutable {
             pf(yield, op, obj);
           });
-	if (going_down()) {
+	if (going_down(y)) {
 	  return 0;
 	}
       } /* for objs */
@@ -2388,7 +2397,7 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
     if (check_if_shard_done(lc_shard, head, worker->ix, y) != 0) {
       goto exit;
     }
-  } while(1 && !once && !going_down());
+  } while(1 && !once && !going_down(y));
 
 exit:
   lock->unlock(this, y);
@@ -2409,7 +2418,6 @@ void RGWLC::start_processor(boost::asio::any_io_executor ex)
 
 void RGWLC::stop_processor()
 {
-  down_flag = true;
   for (auto& worker : workers) {
     worker->stop();
   }
@@ -2452,11 +2460,6 @@ void RGWLC::LCWorker::join()
 {
   finished.wait();
   ldpp_dout(dpp, 20) << "joined worker=" << ix << dendl;
-}
-
-bool RGWLC::going_down()
-{
-  return down_flag;
 }
 
 bool RGWLC::LCWorker::should_work(utime_t& now)

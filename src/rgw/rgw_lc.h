@@ -571,7 +571,6 @@ class RGWLC : public DoutPrefixProvider {
   std::unique_ptr<rgw::sal::Lifecycle> sal_lc;
   int max_objs{0};
   std::string *obj_names{nullptr};
-  std::atomic<bool> down_flag = { false };
   std::string cookie;
 
 public:
@@ -654,7 +653,6 @@ public:
   int bucket_lc_post(int index, int max_lock_sec,
 		     rgw::sal::LCEntry& entry, int& result,
 		     LCWorker* worker, optional_yield y);
-  bool going_down();
   void start_processor(boost::asio::any_io_executor ex);
   void stop_processor();
   int set_bucket_config(const DoutPrefixProvider* dpp, optional_yield y,
