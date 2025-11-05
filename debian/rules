@@ -22,6 +22,8 @@ ifneq ($(filter pkg.ceph.arrow,$(DEB_BUILD_PROFILES)),)
 endif
 
 extraopts += -DWITH_JAEGER=ON
+extraopts += -DWITH_SYSTEM_QATLIB=ON
+extraopts += -DWITH_SYSTEM_QATZIP=ON
 extraopts += -DWITH_SYSTEM_UTF8PROC=ON
 extraopts += -DWITH_OCF=ON -DWITH_LTTNG=ON
 extraopts += -DWITH_MGR_DASHBOARD_FRONTEND=OFF
