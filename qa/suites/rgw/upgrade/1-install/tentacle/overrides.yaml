@@ -1,3 +1,4 @@
 overrides:
   ragweed:
-    default-branch: ceph-tentacle
+    ragweed_repo: https://github.com/mkogan1/ragweed.git
+    force-branch: wip-ragweed-to-boto3
