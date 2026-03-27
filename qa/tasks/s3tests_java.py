@@ -281,6 +281,10 @@ class S3tests_java(Task):
                       ],
                 stdout=BytesIO()
             )
+            self.ctx.cluster.only(client).run(
+                args=[run.Raw('alternatives --list | grep jre_')],
+                stdout=BytesIO()
+            )
             args = ['cd',
                     '{tdir}/s3-tests-java'.format(tdir=testdir),
                     run.Raw('&&'),
