@@ -1,4 +1,4 @@
 overrides:
   s3tests:
-     force-branch: ceph-master
-     # git_remote: https://github.com/ceph/
+     force-branch: wip-75943
+     git_remote: https://github.com/cbodley/
