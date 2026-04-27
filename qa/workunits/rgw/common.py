@@ -40,6 +40,7 @@ def read_local_endpoint():
 
 def boto_connect(access_key, secret_key, config=None):
     def try_connect(endpoint):
+        print('trying', endpoint)
         conn = boto3.resource('s3',
                               aws_access_key_id=access_key,
                               aws_secret_access_key=secret_key,
