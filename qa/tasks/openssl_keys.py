@@ -150,6 +150,7 @@ class OpenSSLKeys(Task):
                         data='subjectAltName = DNS:{},DNS:*.{},IP:{}'.format(
                         cn, cn,
                         config.get('ip', cert.remote.ip_address)))
+                ca_cert.remote.run(args=['cat', ext])
 
             # create the signed certificate
             ca_cert.remote.run(args=['openssl', 'x509', '-req', '-in', csr,
