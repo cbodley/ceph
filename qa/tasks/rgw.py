@@ -70,7 +70,7 @@ def start_rgw(ctx, config, clients):
             url = url[:-1]
         url_file = '{tdir}/url_file'.format(tdir=testdir)
         ctx.cluster.only(client).run(args=['sudo', 'echo', '-n', '{url}'.format(url=url), run.Raw('|'), 'sudo', 'tee', url_file])
-        ctx.cluster.only(client).run(args=['sudo', 'chown', 'ceph', url_file])
+        ctx.cluster.only(client).run(args=['sudo', 'chmod', 'go=r', url_file])
 
         frontends = ctx.rgw.frontend
         frontend_prefix = client_config.get('frontend_prefix', None)
