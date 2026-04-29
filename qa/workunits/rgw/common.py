@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import errno
+import os
 import subprocess
 import logging as log
 import boto3
@@ -36,7 +37,8 @@ def read_local_endpoint():
     """
     in teuthology, the rgw task writes the local rgw's endpoint url to this file
     """
-    return exec_cmd('cat ${TESTDIR:-/home/ubuntu/cephtest}/url_file')
+    testdir = os.environ.get('TESTDIR', '/home/ubuntu/cephtest')
+    return exec_cmd(f'cat {testdir}/url_file')
 
 def boto_connect(access_key, secret_key, config=None):
     def try_connect(endpoint):
