@@ -61,6 +61,7 @@ def boto_connect(access_key, secret_key, config=None):
 
     try:
         endpoint = read_local_endpoint()
+        exec_cmd(f'echo endpoint={endpoint}')
         return try_connect(endpoint)
     except:
         # fall back to localhost
