@@ -59,20 +59,9 @@ def boto_connect(access_key, secret_key, config=None):
         print('connected to', endpoint)
         return conn
 
-    try:
-        endpoint = read_local_endpoint()
-        exec_cmd(f'echo endpoint={endpoint}')
-        return try_connect(endpoint)
-    except:
-        # fall back to localhost
-        try:
-            return try_connect('http://localhost:80')
-        except botocore.exceptions.ConnectionError:
-            try: # retry on non-privileged http port
-                return try_connect('http://localhost:8000')
-            except botocore.exceptions.ConnectionError:
-                # retry with ssl
-                return try_connect('https://localhost:443')
+    endpoint = read_local_endpoint()
+    exec_cmd(f'echo endpoint={endpoint}')
+    return try_connect(endpoint)
 
 def put_objects(bucket, key_list):
     objs = []
