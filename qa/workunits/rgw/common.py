@@ -38,7 +38,7 @@ def read_local_endpoint():
     in teuthology, the rgw task writes the local rgw's endpoint url to this file
     """
     testdir = os.environ.get('TESTDIR', '/home/ubuntu/cephtest')
-    return exec_cmd(f'cat {testdir}/url_file')
+    return exec_cmd(f'cat {testdir}/url_file', text=True)
 
 def boto_connect(access_key, secret_key, config=None):
     def try_connect(endpoint):
