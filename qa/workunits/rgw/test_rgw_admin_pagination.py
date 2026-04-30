@@ -129,26 +129,25 @@ class TestRGWAdminHelper:
     def get_boto3_client(self, session: boto3.session.Session):
         """Get a boto3 s3 client from a session."""
         def _try_client(endpoint):
+            print('trying', endpoint)
             ssl = endpoint.startswith('https')
             client = session.client(
                 's3', use_ssl=ssl, endpoint_url=endpoint, verify=False)
             list(client.list_buckets(MaxBuckets=1))
+            print('connected to', endpoint)
             return endpoint, client
 
         try:
             endpoint = read_local_endpoint()
             return _try_client(endpoint)
         except:
-            # fall back to localhost
-            pass
-
-        try:
-            return _try_client('http://localhost:80')
-        except Exception:
             try:
-                return _try_client('http://localhost:8000')
-            except Exception:
-                return _try_client('https://localhost:443')
+                return _try_client('http://localhost:80')
+            except:
+                try:
+                    return _try_client('http://localhost:8000')
+                except:
+                    return _try_client('https://localhost:443')
 
 
 class TestRGWAdminBucket(unittest.TestCase):
