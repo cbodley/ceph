@@ -3,6 +3,7 @@ import botocore.exceptions
 import sys
 import os
 import subprocess
+from common import boto3_client
 
 #boto3.set_stream_logger(name='botocore')
 
@@ -24,35 +25,11 @@ versioned_bucket = False
 if len(sys.argv) >= 4:
     versioned_bucket = int(sys.argv[3]) > 0
 
-rgw_host = os.environ['RGW_HOST']
 access_key = os.environ['RGW_ACCESS_KEY']
 secret_key = os.environ['RGW_SECRET_KEY']
 
-try:
-    endpoint='http://%s:%d' % (rgw_host, 80)
-    client = boto3.client('s3',
-                          endpoint_url=endpoint,
-                          aws_access_key_id=access_key,
-                          aws_secret_access_key=secret_key)
-    res = client.create_bucket(Bucket=bucket_name)
-except botocore.exceptions.EndpointConnectionError:
-    try:
-        endpoint='https://%s:%d' % (rgw_host, 443)
-        client = boto3.client('s3',
-                              endpoint_url=endpoint,
-                              verify=False,
-                              aws_access_key_id=access_key,
-                              aws_secret_access_key=secret_key)
-        res = client.create_bucket(Bucket=bucket_name)
-    except botocore.exceptions.EndpointConnectionError:
-        endpoint='http://%s:%d' % (rgw_host, 8000)
-        client = boto3.client('s3',
-                              endpoint_url=endpoint,
-                              aws_access_key_id=access_key,
-                              aws_secret_access_key=secret_key)
-        res = client.create_bucket(Bucket=bucket_name)
-
-print("endpoint is %s" % endpoint)
+client = boto3_client(access_key, secret_key)
+client.create_bucket(Bucket=bucket_name)
 
 if versioned_bucket:
     res = client.put_bucket_versioning(
