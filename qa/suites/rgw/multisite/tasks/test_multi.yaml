@@ -4,11 +4,11 @@ tasks:
 - ceph: {cluster: c2}
 - rgw:
     c1.client.0:
-      port: 8000
+      port: 80
     c1.client.1:
       port: 8001
     c2.client.0:
-      port: 8000
+      port: 80
     c2.client.1:
       port: 8001
 - rgw-multisite:
